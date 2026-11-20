@@ -46,6 +46,9 @@ class RoomsViewModel(
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
+    private val _isSendingMessage = MutableStateFlow(false)
+    val isSendingMessage: StateFlow<Boolean> = _isSendingMessage.asStateFlow()
+
     private val knownRoomTimestamps = mutableMapOf<String, Timestamp>()
     private var initialRoomsLoaded = false
 
@@ -220,14 +223,19 @@ class RoomsViewModel(
     }
 
     fun sendMessage(room: ChatRoom, text: String, onSent: () -> Unit = {}) {
-        if (text.isBlank()) return
+        if (text.isBlank() || _isSendingMessage.value) return
         viewModelScope.launch {
             _actionError.value = null
-            val result = repository.sendRoomMessage(room, text)
-            result.onSuccess {
-                onSent()
-            }.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Failed to send message."
+            _isSendingMessage.value = true
+            try {
+                val result = repository.sendRoomMessage(room, text)
+                result.onSuccess {
+                    onSent()
+                }.onFailure { err ->
+                    _actionError.value = err.localizedMessage ?: "Failed to send message."
+                }
+            } finally {
+                _isSendingMessage.value = false
             }
         }
     }

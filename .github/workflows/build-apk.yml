@@ -24,18 +24,31 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK 36.1 & accept licenses
+      - name: Configure Android SDK 36.1 & licenses
         run: |
-          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+
+          SDKMANAGER=""
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            SDKMANAGER="$(find "$SDK_ROOT" -maxdepth 4 -name sdkmanager -type f 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under $SDK_ROOT"
+            exit 1
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
             "platform-tools" \
-            "platforms;android-36" \
             "platforms;android-36.1" \
             "build-tools;36.0.0"
+          "$SDKMANAGER" --install "platforms;android-36" || true
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4

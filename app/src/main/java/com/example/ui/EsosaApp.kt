@@ -44,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,8 +63,6 @@ import com.example.BuildConfig
 import com.example.R
 import com.example.core.EsosaFirestore
 import com.example.core.ThreadSelectionPreferences
-import com.example.core.authStateFlow
-import com.example.core.signOut
 import com.example.data.audio.VoiceAudioStreamer
 import com.example.data.model.AppUpdateInfo
 import com.example.data.repository.AiChatRepository
@@ -74,6 +71,7 @@ import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.LiveVoiceRepository
 import com.example.notifications.EsosaNotificationManager
+import com.example.ui.components.AuthSessionLoadingView
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
@@ -82,11 +80,11 @@ import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.viewmodel.AiChatViewModel
 import com.example.ui.viewmodel.AppUpdateViewModel
+import com.example.ui.viewmodel.AuthState
+import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.LiveVoiceViewModel
 import com.example.ui.viewmodel.RoomsViewModel
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.auth
 
 enum class EsosaTab(
     val label: String,
@@ -107,8 +105,15 @@ fun EsosaApp(
     initialShowUpdatePrompt: Boolean = false
 ) {
     val context = LocalContext.current
-    val authFlow = remember { Firebase.auth.authStateFlow() }
-    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+
+    val authViewModel: AuthViewModel = viewModel(key = "esosa_auth")
+    val authState by authViewModel.authState.collectAsStateWithLifecycle()
+    val isSigningIn by authViewModel.isSigningIn.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        authViewModel.initializeSessionCheck(context, credentialManager)
+    }
 
     val appUpdateViewModel: AppUpdateViewModel = viewModel(
         key = "app_update_checker",
@@ -128,8 +133,9 @@ fun EsosaApp(
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val showUpdateDialog by appUpdateViewModel.showUpdateDialog.collectAsStateWithLifecycle()
 
-    LaunchedEffect(currentUser?.uid) {
-        appUpdateViewModel.checkForUpdatesOnOpen(isSignedIn = currentUser != null)
+    val authenticatedUser = (authState as? AuthState.Authenticated)?.user
+    LaunchedEffect(authenticatedUser?.uid) {
+        appUpdateViewModel.checkForUpdatesOnOpen(isSignedIn = authenticatedUser != null)
     }
 
     LaunchedEffect(initialShowUpdatePrompt, availableUpdate) {
@@ -138,19 +144,34 @@ fun EsosaApp(
         }
     }
 
-    val user = currentUser
-    if (user == null) {
-        AuthScreen(
-            onAuthSuccess = { /* authStateFlow updates currentUser automatically */ }
-        )
-    } else {
-        key(user.uid) {
-            AuthenticatedEsosaShell(
-                currentUser = user,
-                initialRoomId = initialRoomId,
-                initialTab = initialTab,
-                appUpdateViewModel = appUpdateViewModel
+    when (val currentAuth = authState) {
+        AuthState.Loading -> {
+            AuthSessionLoadingView()
+        }
+
+        is AuthState.Unauthenticated -> {
+            AuthScreen(
+                isSigningIn = isSigningIn,
+                errorMessage = currentAuth.errorMessage,
+                onGoogleSignIn = {
+                    authViewModel.startGoogleSignIn(context, credentialManager)
+                },
+                onGoogleBrowserSignIn = {
+                    authViewModel.startGoogleBrowserSignIn(context)
+                }
             )
+        }
+
+        is AuthState.Authenticated -> {
+            key(currentAuth.user.uid) {
+                AuthenticatedEsosaShell(
+                    currentUser = currentAuth.user,
+                    initialRoomId = initialRoomId,
+                    initialTab = initialTab,
+                    appUpdateViewModel = appUpdateViewModel,
+                    onSignOut = { authViewModel.signOutUser(credentialManager) }
+                )
+            }
         }
     }
 
@@ -175,12 +196,11 @@ private fun AuthenticatedEsosaShell(
     currentUser: FirebaseUser,
     initialRoomId: String?,
     initialTab: String?,
-    appUpdateViewModel: AppUpdateViewModel
+    appUpdateViewModel: AppUpdateViewModel,
+    onSignOut: () -> Unit
 ) {
     val currentUserId = currentUser.uid
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val credentialManager = remember(context) { CredentialManager.create(context) }
     val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
     val roomsViewModel: RoomsViewModel = viewModel(
@@ -256,6 +276,7 @@ private fun AuthenticatedEsosaShell(
     val activeMessagesState by roomsViewModel.activeMessagesState.collectAsStateWithLifecycle()
     val roomActionError by roomsViewModel.actionError.collectAsStateWithLifecycle()
     val isRoomBusy by roomsViewModel.isBusy.collectAsStateWithLifecycle()
+    val isSendingMessage by roomsViewModel.isSendingMessage.collectAsStateWithLifecycle()
 
     val aiThreadsState by aiChatViewModel.threadsState.collectAsStateWithLifecycle()
     val selectedAiThreadId by aiChatViewModel.selectedThreadId.collectAsStateWithLifecycle()
@@ -301,9 +322,7 @@ private fun AuthenticatedEsosaShell(
         )
     }
 
-    val handleSignOut: () -> Unit = {
-        signOut(credentialManager = credentialManager, scope = scope)
-    }
+    val handleSignOut: () -> Unit = onSignOut
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useRail = maxWidth >= 700.dp
@@ -415,6 +434,7 @@ private fun AuthenticatedEsosaShell(
                             activeMessagesState = activeMessagesState,
                             actionError = roomActionError,
                             isBusy = isRoomBusy,
+                            isSendingMessage = isSendingMessage,
                             onOpenRoom = { roomsViewModel.openRoom(it) },
                             onCreateRoom = { title, topic -> roomsViewModel.createRoom(title, topic) },
                             onJoinRoom = { code -> roomsViewModel.joinRoomByCode(code) },

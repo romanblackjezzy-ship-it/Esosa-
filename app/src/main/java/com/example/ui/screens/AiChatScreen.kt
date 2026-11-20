@@ -68,6 +68,8 @@ import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
+import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.TypingPulseDots
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
 
@@ -255,10 +257,10 @@ fun AiChatScreen(
 
             // Scrollable Conversation Thread
             Box(modifier = Modifier.weight(1f)) {
-                if (messagesState is UiState.Loading && activeThread != null) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                val isLoadingThread = messagesState is UiState.Loading ||
+                    (threadsState is UiState.Loading && activeThread == null)
+                if (isLoadingThread) {
+                    ChatMessagesLoadingSkeleton(label = "Restoring Gemini thread…")
                 } else if (messages.isEmpty() && streamingReply == null) {
                     AiEmptyConversation(
                         persona = activePersona,
@@ -285,7 +287,7 @@ fun AiChatScreen(
                             item(key = "streaming_turn") {
                                 AiMessageBubble(
                                     role = "model",
-                                    text = streamingReply.ifBlank { "Thinking…" },
+                                    text = streamingReply,
                                     modelName = activePersona.modelName,
                                     isStreaming = true
                                 )
@@ -582,11 +584,18 @@ private fun AiMessageBubble(
                     bottomEnd = if (isUser) 4.dp else 18.dp
                 )
             ) {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
-                )
+                if (!isUser && isStreaming && text.isBlank()) {
+                    TypingPulseDots(
+                        label = "Esosa is thinking",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                    )
+                } else {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                    )
+                }
             }
         }
     }

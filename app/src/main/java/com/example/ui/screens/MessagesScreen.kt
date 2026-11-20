@@ -73,6 +73,8 @@ import coil.compose.AsyncImage
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
+import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.RoomsLoadingSkeleton
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
 import com.google.firebase.Timestamp
@@ -89,6 +91,7 @@ fun MessagesScreen(
     activeMessagesState: UiState<List<RoomMessage>>,
     actionError: String?,
     isBusy: Boolean,
+    isSendingMessage: Boolean = false,
     onOpenRoom: (String?) -> Unit,
     onCreateRoom: (String, String) -> Unit,
     onJoinRoom: (String) -> Unit,
@@ -108,6 +111,7 @@ fun MessagesScreen(
             room = activeRoom,
             messagesState = activeMessagesState,
             actionError = actionError,
+            isSendingMessage = isSendingMessage,
             onBack = { onOpenRoom(null) },
             onSendMessage = { text ->
                 activeRoom?.let { onSendMessage(it, text) }
@@ -247,9 +251,7 @@ private fun RoomsListView(
 
             when (roomsState) {
                 is UiState.Loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    RoomsLoadingSkeleton()
                 }
 
                 is UiState.Error -> {
@@ -498,6 +500,7 @@ private fun RoomDetailView(
     room: ChatRoom?,
     messagesState: UiState<List<RoomMessage>>,
     actionError: String?,
+    isSendingMessage: Boolean,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onDeleteMessage: (String) -> Unit,
@@ -656,9 +659,7 @@ private fun RoomDetailView(
             Box(modifier = Modifier.weight(1f)) {
                 when (messagesState) {
                     is UiState.Loading -> {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
+                        ChatMessagesLoadingSkeleton(label = "Loading room history…")
                     }
 
                     is UiState.Error -> {
@@ -683,11 +684,26 @@ private fun RoomDetailView(
                                     .padding(24.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "No messages yet. Say hello to start the real-time thread!",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = "No messages yet. Say hello to start the real-time thread!",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf("Hey everyone!", "Ready to chat").forEach { starter ->
+                                            OutlinedButton(
+                                                onClick = { onSendMessage(starter) },
+                                                enabled = room != null && !isSendingMessage
+                                            ) {
+                                                Text(starter)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             LazyColumn(
@@ -735,27 +751,34 @@ private fun RoomDetailView(
                     IconButton(
                         onClick = {
                             val text = draft.trim()
-                            if (text.isNotEmpty() && room != null) {
+                            if (text.isNotEmpty() && room != null && !isSendingMessage) {
                                 onSendMessage(text)
                                 draft = ""
                             }
                         },
-                        enabled = draft.isNotBlank() && room != null,
+                        enabled = draft.isNotBlank() && room != null && !isSendingMessage,
                         modifier = Modifier
                             .size(50.dp)
                             .clip(CircleShape)
                             .background(
-                                if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
+                                if (draft.isNotBlank() && !isSendingMessage) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.surfaceContainerHigh
                             )
                             .testTag("room_send_button")
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send message",
-                            tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (isSendingMessage) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send message",
+                                tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

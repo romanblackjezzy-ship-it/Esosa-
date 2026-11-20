@@ -35,12 +35,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,53 +42,19 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
 import com.example.R
-import com.example.core.attemptAutoSignIn
-import com.example.core.checkPendingGoogleProviderSignIn
-import com.example.core.onGoogleSignInClicked
-import com.example.core.signInWithGoogleProvider
 
 @Composable
-fun AuthScreen(onAuthSuccess: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val credentialManager = remember { CredentialManager.create(context) }
-
-    var isCheckingAutoSignIn by remember { mutableStateOf(true) }
-    var isSigningIn by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        checkPendingGoogleProviderSignIn(
-            onAuthSuccess = {
-                isCheckingAutoSignIn = false
-                onAuthSuccess()
-            },
-            onAuthError = { msg ->
-                isCheckingAutoSignIn = false
-                errorMessage = msg
-            },
-            scope = scope
-        )
-        attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = {
-                isCheckingAutoSignIn = false
-                onAuthSuccess()
-            },
-            onUnauthenticated = {
-                isCheckingAutoSignIn = false
-            },
-            scope = scope
-        )
-    }
+fun AuthScreen(
+    isSigningIn: Boolean,
+    errorMessage: String?,
+    onGoogleSignIn: () -> Unit,
+    onGoogleBrowserSignIn: () -> Unit
+) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background
@@ -221,27 +181,8 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                 }
 
                 Button(
-                    onClick = {
-                        errorMessage = null
-                        isSigningIn = true
-                        onGoogleSignInClicked(
-                            context = context,
-                            credentialManager = credentialManager,
-                            onAuthSuccess = {
-                                isSigningIn = false
-                                onAuthSuccess()
-                            },
-                            onAuthError = { msg ->
-                                isSigningIn = false
-                                errorMessage = msg
-                            },
-                            scope = scope,
-                            onAuthCancelled = {
-                                isSigningIn = false
-                            }
-                        )
-                    },
-                    enabled = !isSigningIn && !isCheckingAutoSignIn,
+                    onClick = onGoogleSignIn,
+                    enabled = !isSigningIn,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
@@ -252,7 +193,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    if (isSigningIn || isCheckingAutoSignIn) {
+                    if (isSigningIn) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             color = MaterialTheme.colorScheme.onPrimary,
@@ -260,7 +201,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = if (isCheckingAutoSignIn) "Checking session…" else "Signing in…",
+                            text = "Signing in…",
                             style = MaterialTheme.typography.labelLarge
                         )
                     } else {
@@ -272,26 +213,8 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                 }
 
                 OutlinedButton(
-                    onClick = {
-                        errorMessage = null
-                        isSigningIn = true
-                        signInWithGoogleProvider(
-                            context = context,
-                            onAuthSuccess = {
-                                isSigningIn = false
-                                onAuthSuccess()
-                            },
-                            onAuthError = { msg ->
-                                isSigningIn = false
-                                errorMessage = msg
-                            },
-                            scope = scope,
-                            onAuthCancelled = {
-                                isSigningIn = false
-                            }
-                        )
-                    },
-                    enabled = !isSigningIn && !isCheckingAutoSignIn,
+                    onClick = onGoogleBrowserSignIn,
+                    enabled = !isSigningIn,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
