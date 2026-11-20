@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Esosa</string>
+    <string name="welcome_headline">Real-time conversations, elevated by Gemini.</string>
+    <string name="welcome_subtitle">Instant rooms, multi-turn AI specialists, live voice dialogue, and smart message alerts.</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="tab_messages">Messages</string>
+    <string name="tab_ai_chat">Gemini AI</string>
+    <string name="tab_live_voice">Live Voice</string>
+    <string name="tab_profile">Settings</string>
+    <string name="notification_channel_id">esosa_messages</string>
+    <string name="notification_channel_name">Esosa Messages</string>
+    <string name="notification_channel_description">Real-time incoming chat messages and AI responses</string>
+</resources>

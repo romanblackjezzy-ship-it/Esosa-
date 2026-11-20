@@ -1,0 +1,6 @@
+{
+  "name": "Esosa",
+  "description": "Real-time messaging, Google authentication, push notifications, multi-turn Gemini AI assistant, and live voice conversations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
