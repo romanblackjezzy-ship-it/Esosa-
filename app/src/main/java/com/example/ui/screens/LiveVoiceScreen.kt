@@ -78,7 +78,16 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.R
+import com.example.core.UiState
+import com.example.data.model.LiveVoiceThread
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
 import com.example.ui.viewmodel.LiveTranscriptItem
@@ -96,6 +105,8 @@ fun LiveVoiceScreen(
     status: LiveVoiceStatus,
     statusMessage: String,
     transcripts: List<LiveTranscriptItem>,
+    liveThreadsState: UiState<List<LiveVoiceThread>> = UiState.Success(emptyList()),
+    selectedThreadId: String? = null,
     isModelSpeaking: Boolean,
     isMuted: Boolean,
     isSpeakerOn: Boolean,
@@ -107,6 +118,9 @@ fun LiveVoiceScreen(
     onToggleSpeaker: () -> Unit,
     onSendTextDuringLive: (String) -> Unit,
     onClearTranscripts: () -> Unit,
+    onSelectThread: (String) -> Unit = {},
+    onStartNewThread: () -> Unit = {},
+    onDeleteThread: (String) -> Unit = {},
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier
@@ -115,7 +129,9 @@ fun LiveVoiceScreen(
     var permissionRequestedOnce by remember { mutableStateOf(false) }
     var startAfterGrant by remember { mutableStateOf(false) }
     var textNudge by remember { mutableStateOf("") }
+    var showHistorySheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val savedThreads = (liveThreadsState as? UiState.Success)?.data.orEmpty()
 
     val micPermissionState = rememberPermissionState(
         permission = Manifest.permission.RECORD_AUDIO
@@ -158,6 +174,25 @@ fun LiveVoiceScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showHistorySheet = true },
+                        modifier = Modifier.testTag("live_history_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.History,
+                            contentDescription = "Voice session history"
+                        )
+                    }
+                    IconButton(
+                        onClick = onStartNewThread,
+                        enabled = status == LiveVoiceStatus.IDLE || status == LiveVoiceStatus.ERROR,
+                        modifier = Modifier.testTag("new_live_thread_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "New voice session"
+                        )
+                    }
                     if (transcripts.isNotEmpty()) {
                         IconButton(
                             onClick = onClearTranscripts,
@@ -173,7 +208,7 @@ fun LiveVoiceScreen(
                         userInfo = userProfileInfo,
                         onOpenSettings = onOpenSettings,
                         onSignOut = onSignOut,
-                        showNameChip = transcripts.isEmpty()
+                        showNameChip = transcripts.isEmpty() && savedThreads.isEmpty()
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -590,6 +625,89 @@ fun LiveVoiceScreen(
                         )
                     }
                 }
+            }
+        }
+    }
+
+    if (showHistorySheet) {
+        ModalBottomSheet(onDismissRequest = { showHistorySheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Live Voice Sessions", style = MaterialTheme.typography.titleLarge)
+                    TextButton(
+                        onClick = {
+                            onStartNewThread()
+                            showHistorySheet = false
+                        },
+                        enabled = status == LiveVoiceStatus.IDLE || status == LiveVoiceStatus.ERROR
+                    ) {
+                        Text("+ New Session")
+                    }
+                }
+
+                if (savedThreads.isEmpty()) {
+                    Text(
+                        text = "No saved Live Voice sessions yet. Start speaking to record a thread.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 20.dp)
+                    )
+                } else {
+                    savedThreads.forEach { thread ->
+                        val isSelected = thread.id == selectedThreadId
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSelectThread(thread.id)
+                                    showHistorySheet = false
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = thread.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = thread.lastTranscriptPreview,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(onClick = { onDeleteThread(thread.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.DeleteOutline,
+                                        contentDescription = "Delete voice session"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
             }
         }
     }

@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.util.Log
 import com.example.R
+import com.example.core.EsosaFirestore
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.AiMessage
@@ -37,11 +38,7 @@ class AiChatRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
 ) {
-    constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        )
-    )
+    constructor(context: Context) : this(EsosaFirestore.getInstance(context))
 
     private val modelCache = mutableMapOf<String, GenerativeModel>()
 
@@ -70,7 +67,11 @@ class AiChatRepository(
                     snapshot.toObjects(
                         AiThread::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedByDescending { it.updatedAt ?: it.createdAt ?: Timestamp(0, 0) }
+                    ).sortedWith(
+                        compareByDescending<AiThread> {
+                            it.updatedAt ?: it.createdAt ?: Timestamp(0, 0)
+                        }.thenBy { it.id }
+                    )
                 }
                 .catch { error ->
                     val firestoreError = generateSequence(error) { it.cause }
@@ -98,7 +99,11 @@ class AiChatRepository(
                     snapshot.toObjects(
                         AiMessage::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedBy { it.createdAt ?: Timestamp(Long.MAX_VALUE, 0) }
+                    ).sortedWith(
+                        compareBy<AiMessage> {
+                            it.createdAt ?: Timestamp(Long.MAX_VALUE, 0)
+                        }.thenBy { it.id }
+                    )
                 }
                 .catch { error ->
                     val firestoreError = generateSequence(error) { it.cause }
@@ -182,6 +187,12 @@ class AiChatRepository(
             val threadRef = db.collection("users").document(uid)
                 .collection("ai_threads").document(threadId)
             currentPath = threadRef.path
+            val messagesSnap = threadRef.collection("messages").get().await()
+            messagesSnap.documents.chunked(450).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { doc -> batch.delete(doc.reference) }
+                batch.commit().await()
+            }
             threadRef.delete().await()
             Result.success(Unit)
         } catch (e: CancellationException) {

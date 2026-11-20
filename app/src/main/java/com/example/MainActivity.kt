@@ -17,6 +17,7 @@ class MainActivity : ComponentActivity() {
 
     private var deepLinkRoomId by mutableStateOf<String?>(null)
     private var deepLinkTab by mutableStateOf<String?>(null)
+    private var deepLinkShowUpdatePrompt by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,7 +32,8 @@ class MainActivity : ComponentActivity() {
             EsosaTheme {
                 EsosaApp(
                     initialRoomId = deepLinkRoomId,
-                    initialTab = deepLinkTab
+                    initialTab = deepLinkTab,
+                    initialShowUpdatePrompt = deepLinkShowUpdatePrompt
                 )
             }
         }
@@ -45,5 +47,7 @@ class MainActivity : ComponentActivity() {
     private fun extractDeepLinks(intent: Intent?) {
         deepLinkRoomId = intent?.getStringExtra(EsosaNotificationManager.EXTRA_ROOM_ID)
         deepLinkTab = intent?.getStringExtra(EsosaNotificationManager.EXTRA_TARGET_TAB)
+        deepLinkShowUpdatePrompt =
+            intent?.getBooleanExtra(EsosaNotificationManager.EXTRA_SHOW_UPDATE_DIALOG, false) ?: false
     }
 }

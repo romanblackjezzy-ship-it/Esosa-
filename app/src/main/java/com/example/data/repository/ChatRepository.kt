@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.R
+import com.example.core.EsosaFirestore
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.ChatRoom
@@ -29,11 +30,7 @@ class ChatRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
 ) {
-    constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        )
-    )
+    constructor(context: Context) : this(EsosaFirestore.getInstance(context))
 
     private fun requireUserId(): String {
         return auth.currentUser?.uid
@@ -138,7 +135,11 @@ class ChatRepository(
                     snapshot.toObjects(
                         ChatRoom::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedByDescending { it.lastMessageAt ?: it.createdAt ?: Timestamp(0, 0) }
+                    ).sortedWith(
+                        compareByDescending<ChatRoom> {
+                            it.lastMessageAt ?: it.createdAt ?: Timestamp(0, 0)
+                        }.thenBy { it.id }
+                    )
                 }
                 .catch { error ->
                     val firestoreError = generateSequence(error) { it.cause }
@@ -189,7 +190,11 @@ class ChatRepository(
                     snapshot.toObjects(
                         RoomMessage::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedBy { it.createdAt ?: Timestamp(Long.MAX_VALUE, 0) }
+                    ).sortedWith(
+                        compareBy<RoomMessage> {
+                            it.createdAt ?: Timestamp(Long.MAX_VALUE, 0)
+                        }.thenBy { it.id }
+                    )
                 }
                 .catch { error ->
                     val firestoreError = generateSequence(error) { it.cause }
@@ -377,6 +382,22 @@ class ChatRepository(
                         db.collection("invites").document(room.roomCode).delete().await()
                     } catch (_: Exception) {
                     }
+                }
+                try {
+                    val messagesSnap = roomRef.collection("messages")
+                        .whereArrayContains("memberUids", uid)
+                        .get()
+                        .await()
+                    messagesSnap.documents.chunked(450).forEach { chunk ->
+                        val batch = db.batch()
+                        chunk.forEach { doc ->
+                            if (doc.getString("senderId") == uid) {
+                                batch.delete(doc.reference)
+                            }
+                        }
+                        batch.commit().await()
+                    }
+                } catch (_: Exception) {
                 }
                 roomRef.delete().await()
             } else {

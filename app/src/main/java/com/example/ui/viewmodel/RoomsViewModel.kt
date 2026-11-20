@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
@@ -31,10 +32,11 @@ import kotlinx.coroutines.launch
 class RoomsViewModel(
     private val repository: ChatRepository,
     private val notificationManager: EsosaNotificationManager,
-    private val currentUserId: String
+    private val currentUserId: String,
+    private val selectionPreferences: ThreadSelectionPreferences? = null
 ) : ViewModel() {
 
-    private val _selectedRoomId = MutableStateFlow<String?>(null)
+    private val _selectedRoomId = MutableStateFlow(selectionPreferences?.getLastRoomId(currentUserId))
     val selectedRoomId: StateFlow<String?> = _selectedRoomId.asStateFlow()
 
     private val _isOnMessagesScreen = MutableStateFlow(true)
@@ -58,12 +60,16 @@ class RoomsViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = null
         )
 
     val roomsState: StateFlow<UiState<List<ChatRoom>>> = repository.observeRooms(currentUserId)
         .onEach { rooms ->
+            val currentSelected = _selectedRoomId.value
+            if (currentSelected != null && rooms.none { it.id == currentSelected }) {
+                setSelectedRoom(null)
+            }
             handleIncomingRoomUpdates(rooms)
         }
         .map<List<ChatRoom>, UiState<List<ChatRoom>>> { UiState.Success(it) }
@@ -78,7 +84,7 @@ class RoomsViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = UiState.Loading
         )
 
@@ -97,7 +103,7 @@ class RoomsViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = null
         )
 
@@ -121,7 +127,7 @@ class RoomsViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = UiState.Loading
         )
 
@@ -129,6 +135,11 @@ class RoomsViewModel(
         viewModelScope.launch {
             repository.ensureUserProfile()
         }
+    }
+
+    private fun setSelectedRoom(roomId: String?) {
+        _selectedRoomId.value = roomId
+        selectionPreferences?.setLastRoomId(currentUserId, roomId)
     }
 
     private fun handleIncomingRoomUpdates(rooms: List<ChatRoom>) {
@@ -171,7 +182,7 @@ class RoomsViewModel(
     }
 
     fun openRoom(roomId: String?) {
-        _selectedRoomId.value = roomId
+        setSelectedRoom(roomId)
     }
 
     fun clearActionError() {
@@ -185,7 +196,7 @@ class RoomsViewModel(
             val result = repository.createRoom(title, topic)
             _isBusy.value = false
             result.onSuccess { roomId ->
-                _selectedRoomId.value = roomId
+                setSelectedRoom(roomId)
                 onCreated(roomId)
             }.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Could not create room."
@@ -200,7 +211,7 @@ class RoomsViewModel(
             val result = repository.joinRoomByCode(code)
             _isBusy.value = false
             result.onSuccess { roomId ->
-                _selectedRoomId.value = roomId
+                setSelectedRoom(roomId)
                 onJoined(roomId)
             }.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Could not join room."
@@ -237,7 +248,7 @@ class RoomsViewModel(
             _isBusy.value = false
             result.onSuccess {
                 if (_selectedRoomId.value == room.id) {
-                    _selectedRoomId.value = null
+                    setSelectedRoom(null)
                 }
             }.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Failed to update room membership."

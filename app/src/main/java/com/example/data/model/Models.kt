@@ -120,3 +120,26 @@ data class AiMessage(
     val modelName: String = AiPersona.GENERAL.modelName,
     @ServerTimestamp val createdAt: Timestamp? = null
 )
+
+@Keep
+@IgnoreExtraProperties
+data class LiveVoiceThread(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val title: String = "",
+    val modelName: String = "gemini-3.8-live",
+    val lastTranscriptPreview: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class LiveVoiceMessage(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val threadId: String = "",
+    val speaker: String = "You",
+    val text: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)

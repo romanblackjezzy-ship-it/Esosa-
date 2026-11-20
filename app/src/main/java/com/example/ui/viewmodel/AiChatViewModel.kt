@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
@@ -28,10 +29,11 @@ import kotlinx.coroutines.launch
 class AiChatViewModel(
     private val repository: AiChatRepository,
     private val notificationManager: EsosaNotificationManager,
-    private val currentUserId: String
+    private val currentUserId: String,
+    private val selectionPreferences: ThreadSelectionPreferences? = null
 ) : ViewModel() {
 
-    private val _selectedThreadId = MutableStateFlow<String?>(null)
+    private val _selectedThreadId = MutableStateFlow(selectionPreferences?.getLastAiThreadId(currentUserId))
     val selectedThreadId: StateFlow<String?> = _selectedThreadId.asStateFlow()
 
     private val _streamingReply = MutableStateFlow<String?>(null)
@@ -48,10 +50,11 @@ class AiChatViewModel(
 
     val threadsState: StateFlow<UiState<List<AiThread>>> = repository.observeThreads(currentUserId)
         .onEach { threads ->
-            if (_selectedThreadId.value == null && threads.isNotEmpty()) {
-                _selectedThreadId.value = threads.first().id
-            } else if (_selectedThreadId.value != null && threads.none { it.id == _selectedThreadId.value }) {
-                _selectedThreadId.value = threads.firstOrNull()?.id
+            val currentId = _selectedThreadId.value
+            if (currentId == null && threads.isNotEmpty()) {
+                setSelectedThread(threads.first().id)
+            } else if (currentId != null && threads.none { it.id == currentId }) {
+                setSelectedThread(threads.firstOrNull()?.id)
             }
         }
         .map<List<AiThread>, UiState<List<AiThread>>> { UiState.Success(it) }
@@ -66,7 +69,7 @@ class AiChatViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = UiState.Loading
         )
 
@@ -90,9 +93,14 @@ class AiChatViewModel(
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            started = SharingStarted.Eagerly,
             initialValue = UiState.Loading
         )
+
+    private fun setSelectedThread(threadId: String?) {
+        _selectedThreadId.value = threadId
+        selectionPreferences?.setLastAiThreadId(currentUserId, threadId)
+    }
 
     fun setTabActive(active: Boolean) {
         isOnAiTab = active
@@ -103,7 +111,7 @@ class AiChatViewModel(
     }
 
     fun selectThread(threadId: String) {
-        _selectedThreadId.value = threadId
+        setSelectedThread(threadId)
         _errorBanner.value = null
     }
 
@@ -116,7 +124,7 @@ class AiChatViewModel(
             _errorBanner.value = null
             repository.createThread(persona, customTitle)
                 .onSuccess { created ->
-                    _selectedThreadId.value = created.id
+                    setSelectedThread(created.id)
                 }
                 .onFailure { err ->
                     _errorBanner.value = err.localizedMessage ?: "Could not start new Gemini chat."
@@ -160,7 +168,7 @@ class AiChatViewModel(
             try {
                 val targetThread = activeThread ?: run {
                     val createdResult = repository.createThread(AiPersona.GENERAL)
-                    createdResult.getOrThrow().also { _selectedThreadId.value = it.id }
+                    createdResult.getOrThrow().also { setSelectedThread(it.id) }
                 }
 
                 val isFirstTurn = currentMessages.isEmpty()

@@ -25,15 +25,18 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -52,10 +55,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import coil.compose.AsyncImage
+import com.example.BuildConfig
+import com.example.R
 import com.example.core.signOut
+import com.example.data.model.AppUpdateInfo
 import com.example.data.model.UserProfile
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.UserProfileHeaderInfo
@@ -69,8 +76,17 @@ fun SettingsScreen(
     userProfileInfo: UserProfileHeaderInfo,
     userProfile: UserProfile?,
     notificationManager: EsosaNotificationManager,
+    availableUpdate: AppUpdateInfo?,
+    updateStatusSummary: String,
+    isCheckingUpdates: Boolean,
+    autoUpdateCheckEnabled: Boolean,
+    githubUpdateRepo: String,
     onToggleNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Boolean,
+    onToggleAutoUpdateCheck: (Boolean) -> Unit,
+    onSaveGithubRepo: (String) -> Boolean,
+    onCheckForUpdatesNow: () -> Unit,
+    onOpenUpdateDialog: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -337,6 +353,144 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
+                    }
+                }
+            }
+
+            // App Updates & GitHub Release Feed Card
+            var repoDraft by remember(githubUpdateRepo) { mutableStateOf(githubUpdateRepo) }
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                ),
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.update_section_title),
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Text(
+                                    text = "Installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.update_auto_check_title),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = stringResource(R.string.update_auto_check_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = autoUpdateCheckEnabled,
+                            onCheckedChange = onToggleAutoUpdateCheck,
+                            modifier = Modifier.testTag("auto_update_switch")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = repoDraft,
+                            onValueChange = { repoDraft = it },
+                            label = { Text("GitHub Repo (owner/repo)") },
+                            placeholder = { Text("e.g. username/Esosa") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("github_repo_input")
+                        )
+                        FilledTonalButton(
+                            onClick = { onSaveGithubRepo(repoDraft) },
+                            modifier = Modifier.testTag("save_github_repo_button")
+                        ) {
+                            Text("Save")
+                        }
+                    }
+
+                    Text(
+                        text = updateStatusSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (availableUpdate != null) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onCheckForUpdatesNow,
+                            enabled = !isCheckingUpdates,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("check_updates_button")
+                        ) {
+                            if (isCheckingUpdates) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Checking…")
+                            } else {
+                                Text(stringResource(R.string.update_check_now))
+                            }
+                        }
+
+                        if (availableUpdate != null) {
+                            Button(
+                                onClick = onOpenUpdateDialog,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("download_update_settings_button")
+                            ) {
+                                Text("Update v${availableUpdate.versionName}")
+                            }
+                        }
                     }
                 }
             }

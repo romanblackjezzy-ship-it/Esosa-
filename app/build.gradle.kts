@@ -16,8 +16,12 @@ android {
     applicationId = "com.aistudio.esosachat.xkmqzp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    val envVersionCode = providers.environmentVariable("ESOSA_VERSION_CODE").orNull?.toIntOrNull() ?: 1
+    val envVersionName = providers.environmentVariable("ESOSA_VERSION_NAME").orNull?.takeIf { it.isNotBlank() } ?: "1.0.0"
+    val envGithubRepo = providers.environmentVariable("GITHUB_REPOSITORY").orNull?.trim()?.replace("\"", "").orEmpty()
+    versionCode = envVersionCode
+    versionName = envVersionName
+    buildConfigField("String", "GITHUB_REPOSITORY", "\"$envGithubRepo\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

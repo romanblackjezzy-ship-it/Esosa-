@@ -248,3 +248,85 @@ test("User-scoped Gemini AI threads & messages: owner succeeds, cross-user fails
     })
   );
 });
+
+test("App release metadata (/app_config/release): signed-in get succeeds; unauth, list, and client writes denied", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("app_config").doc("release").set({
+      latestVersionCode: 2,
+      latestVersionName: "1.0.1",
+      releaseNotes: "Automatic update notifications and live voice polish.",
+      downloadUrl: "https://github.com/example/Esosa/releases/latest",
+      isMandatory: false,
+    });
+  });
+
+  await assertFails(unauthDb.collection("app_config").doc("release").get());
+  await assertSucceeds(aliceDb.collection("app_config").doc("release").get());
+  await assertFails(aliceDb.collection("app_config").get());
+  await assertFails(
+    aliceDb.collection("app_config").doc("release").set({
+      latestVersionCode: 99,
+      latestVersionName: "9.9.9",
+      releaseNotes: "Tamper",
+      downloadUrl: "https://evil.example",
+    })
+  );
+});
+
+test("User-scoped Live Voice threads & transcript messages: owner succeeds, cross-user & invalid speaker denied", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 2000);
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").set({
+      userId: ALICE_UID,
+      title: "Morning Voice Session",
+      modelName: "gemini-3.8-live",
+      lastTranscriptPreview: "Listening live",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").collection("messages").doc("lm_1").set({
+      userId: ALICE_UID,
+      threadId: "live_1",
+      speaker: "You",
+      text: "Summarize my day",
+      createdAt: now,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").collection("messages").doc("lm_2").set({
+      userId: ALICE_UID,
+      threadId: "live_1",
+      speaker: "Esosa Live",
+      text: "Here is a quick plan for your morning.",
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").get());
+  await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").collection("messages").get());
+
+  // Cross-user read and write denied
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("live_threads").get());
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").collection("messages").get());
+
+  // Invalid speaker rejected
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("live_threads").doc("live_1").collection("messages").doc("lm_bad").set({
+      userId: ALICE_UID,
+      threadId: "live_1",
+      speaker: "Admin",
+      text: "Spoof",
+      createdAt: now,
+    })
+  );
+});

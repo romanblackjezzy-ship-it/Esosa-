@@ -86,6 +86,23 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
+    function isValidLiveThread(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.modelName is string && data.modelName.size() >= 1 && data.modelName.size() <= 80 &&
+             data.lastTranscriptPreview is string && data.lastTranscriptPreview.size() <= 300 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLiveMessage(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.threadId) &&
+             data.speaker in ['You', 'Esosa Live'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 10000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     // 1. Private User Profile & Settings
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
@@ -149,6 +166,52 @@ service cloud.firestore {
                            incoming().keys().hasAll(['userId', 'threadId', 'role', 'text', 'modelName', 'createdAt']) &&
                            incoming().keys().hasOnly(['userId', 'threadId', 'role', 'text', 'modelName', 'createdAt']) &&
                            isValidAiMessage(incoming());
+
+          allow update: if false;
+          allow delete: if isSignedIn() && isValidId(userId) && isValidId(threadId) && isValidId(messageId) && request.auth.uid == userId;
+        }
+      }
+
+      // 7. User-scoped Gemini Live Voice Threads
+      match /live_threads/{threadId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(threadId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(threadId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'title', 'modelName', 'lastTranscriptPreview', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'title', 'modelName', 'lastTranscriptPreview', 'createdAt', 'updatedAt']) &&
+                         isValidLiveThread(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(threadId) &&
+                         request.auth.uid == userId &&
+                         isValidLiveThread(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'modelName', 'lastTranscriptPreview', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(threadId) && request.auth.uid == userId;
+
+        // 8. User-scoped Gemini Live Voice Transcript Messages
+        match /messages/{messageId} {
+          allow get: if isSignedIn() && isValidId(userId) && isValidId(threadId) && isValidId(messageId) && request.auth.uid == userId;
+          allow list: if isSignedIn() && request.auth.uid == userId;
+
+          allow create: if isSignedIn() &&
+                           isValidId(userId) &&
+                           isValidId(threadId) &&
+                           isValidId(messageId) &&
+                           request.auth.uid == userId &&
+                           incoming().userId == request.auth.uid &&
+                           incoming().threadId == threadId &&
+                           incoming().keys().hasAll(['userId', 'threadId', 'speaker', 'text', 'createdAt']) &&
+                           incoming().keys().hasOnly(['userId', 'threadId', 'speaker', 'text', 'createdAt']) &&
+                           isValidLiveMessage(incoming());
 
           allow update: if false;
           allow delete: if isSignedIn() && isValidId(userId) && isValidId(threadId) && isValidId(messageId) && request.auth.uid == userId;
@@ -243,6 +306,13 @@ service cloud.firestore {
 
       allow update: if false;
       allow delete: if isSignedIn() && isValidId(roomCode) && existing().ownerId == request.auth.uid;
+    }
+
+    // 4. Read-Only App Release Configuration (get-only for signed-in users, admin-managed)
+    match /app_config/{configId} {
+      allow get: if isSignedIn() && isValidId(configId);
+      allow list: if false;
+      allow create, update, delete: if false;
     }
   }
 }

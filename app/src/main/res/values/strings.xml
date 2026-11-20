@@ -24,4 +24,15 @@
     <string name="profile_google_authenticated">Google Authenticated</string>
     <string name="profile_account_settings">Account &amp; Notifications</string>
     <string name="profile_sign_out">Sign Out</string>
+    <string name="notification_updates_channel_id">esosa_updates</string>
+    <string name="notification_updates_channel_name">App Updates</string>
+    <string name="notification_updates_channel_description">Alerts when a newer version of Esosa is available to download</string>
+    <string name="update_dialog_title">New Update Available</string>
+    <string name="update_download_action">Download Update</string>
+    <string name="update_later_action">Later</string>
+    <string name="update_skip_action">Skip Version</string>
+    <string name="update_section_title">App Updates</string>
+    <string name="update_auto_check_title">Automatic Update Alerts</string>
+    <string name="update_auto_check_subtitle">Check for new releases and notify on app open</string>
+    <string name="update_check_now">Check for Updates</string>
 </resources>
