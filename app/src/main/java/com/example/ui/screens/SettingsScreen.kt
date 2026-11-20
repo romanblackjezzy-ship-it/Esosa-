@@ -58,16 +58,20 @@ import coil.compose.AsyncImage
 import com.example.core.signOut
 import com.example.data.model.UserProfile
 import com.example.notifications.EsosaNotificationManager
+import com.example.ui.components.UserProfileHeaderInfo
+import com.example.ui.components.UserProfileTopBarAction
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    userProfileInfo: UserProfileHeaderInfo,
     userProfile: UserProfile?,
     notificationManager: EsosaNotificationManager,
     onToggleNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Boolean,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -112,6 +116,14 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+                },
+                actions = {
+                    UserProfileTopBarAction(
+                        userInfo = userProfileInfo,
+                        onOpenSettings = {},
+                        onSignOut = onSignOut,
+                        showNameChip = true
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background

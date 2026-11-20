@@ -1,12 +1,13 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -33,19 +34,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PhoneInTalk
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -68,48 +76,63 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.example.R
+import com.example.ui.components.UserProfileHeaderInfo
+import com.example.ui.components.UserProfileTopBarAction
 import com.example.ui.viewmodel.LiveTranscriptItem
 import com.example.ui.viewmodel.LiveVoiceStatus
 import com.example.ui.viewmodel.LiveVoiceViewModel
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun LiveVoiceScreen(
+    userProfileInfo: UserProfileHeaderInfo,
     status: LiveVoiceStatus,
     statusMessage: String,
     transcripts: List<LiveTranscriptItem>,
     isModelSpeaking: Boolean,
+    isMuted: Boolean,
+    isSpeakerOn: Boolean,
+    micLevel: Float,
+    isAecEnabled: Boolean,
     onStartConversation: () -> Unit,
     onStopConversation: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleSpeaker: () -> Unit,
     onSendTextDuringLive: (String) -> Unit,
     onClearTranscripts: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var hasMicPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-    var permissionDeniedNote by remember { mutableStateOf(false) }
+    var permissionRequestedOnce by remember { mutableStateOf(false) }
+    var startAfterGrant by remember { mutableStateOf(false) }
     var textNudge by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
+    val micPermissionState = rememberPermissionState(
+        permission = Manifest.permission.RECORD_AUDIO
     ) { granted ->
-        hasMicPermission = granted
-        permissionDeniedNote = !granted
-        if (granted) {
+        permissionRequestedOnce = true
+        if (granted && startAfterGrant) {
+            startAfterGrant = false
             onStartConversation()
+        } else {
+            startAfterGrant = false
         }
     }
+
+    val hasMicPermission = micPermissionState.status.isGranted
+    val showRationale = !hasMicPermission && micPermissionState.status.shouldShowRationale
+    val isPermanentlyDenied =
+        !hasMicPermission && permissionRequestedOnce && !micPermissionState.status.shouldShowRationale
 
     LaunchedEffect(transcripts.size) {
         if (transcripts.isNotEmpty()) {
@@ -123,7 +146,10 @@ fun LiveVoiceScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Live Voice", style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            text = stringResource(R.string.live_voice_title),
+                            style = MaterialTheme.typography.headlineSmall
+                        )
                         Text(
                             text = "${LiveVoiceViewModel.LIVE_MODEL_NAME.uppercase()} • REAL-TIME AUDIO",
                             style = MaterialTheme.typography.labelSmall,
@@ -143,6 +169,12 @@ fun LiveVoiceScreen(
                             )
                         }
                     }
+                    UserProfileTopBarAction(
+                        userInfo = userProfileInfo,
+                        onOpenSettings = onOpenSettings,
+                        onSignOut = onSignOut,
+                        showNameChip = transcripts.isEmpty()
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -159,7 +191,7 @@ fun LiveVoiceScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // Animated Voice Orb Card
+            // Animated Voice Orb & Audio Streaming Card
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -170,14 +202,16 @@ fun LiveVoiceScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 22.dp, horizontal = 18.dp),
+                        .padding(vertical = 20.dp, horizontal = 18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     VoicePulseOrb(
                         isActive = status == LiveVoiceStatus.ACTIVE,
                         isConnecting = status == LiveVoiceStatus.CONNECTING,
-                        isModelSpeaking = isModelSpeaking
+                        isModelSpeaking = isModelSpeaking,
+                        isMuted = isMuted,
+                        micLevel = micLevel
                     )
 
                     Surface(
@@ -206,15 +240,108 @@ fun LiveVoiceScreen(
                         }
                     }
 
-                    if (permissionDeniedNote && !hasMicPermission) {
-                        Text(
-                            text = "Microphone access is required for real-time voice conversations.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
+                    // Audio pipeline telemetry indicator
+                    Text(
+                        text = if (status == LiveVoiceStatus.ACTIVE && isAecEnabled) {
+                            stringResource(R.string.live_voice_audio_pipeline_badge)
+                        } else {
+                            "16kHz PCM Capture • 24kHz Live Stream"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (status == LiveVoiceStatus.ACTIVE) {
+                        val animatedMeter by animateFloatAsState(
+                            targetValue = if (isMuted) 0f else micLevel,
+                            animationSpec = tween(durationMillis = 80),
+                            label = "mic_rms_meter"
+                        )
+                        LinearProgressIndicator(
+                            progress = { animatedMeter },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 260.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .testTag("live_mic_level_meter"),
+                            color = if (isMuted) {
+                                MaterialTheme.colorScheme.outline
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         )
                     }
 
-                    // Primary Call / Mic Button
+                    if (showRationale) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.live_voice_mic_permission_rationale),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        startAfterGrant = true
+                                        micPermissionState.launchPermissionRequest()
+                                    },
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("grant_mic_permission_button")
+                                ) {
+                                    Text(stringResource(R.string.live_voice_grant_mic))
+                                }
+                            }
+                        }
+                    } else if (isPermanentlyDenied) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.live_voice_mic_permission_denied),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                FilledTonalButton(
+                                    onClick = {
+                                        val intent = Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", context.packageName, null)
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(intent)
+                                    },
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("open_mic_settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.live_voice_open_settings))
+                                }
+                            }
+                        }
+                    }
+
+                    // Primary Call / Mic / Audio Routing Controls
                     when (status) {
                         LiveVoiceStatus.IDLE, LiveVoiceStatus.ERROR -> {
                             Button(
@@ -222,7 +349,8 @@ fun LiveVoiceScreen(
                                     if (hasMicPermission) {
                                         onStartConversation()
                                     } else {
-                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        startAfterGrant = true
+                                        micPermissionState.launchPermissionRequest()
                                     }
                                 },
                                 shape = RoundedCornerShape(18.dp),
@@ -270,6 +398,65 @@ fun LiveVoiceScreen(
                         }
 
                         LiveVoiceStatus.ACTIVE -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 360.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                FilledTonalButton(
+                                    onClick = onToggleMute,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("toggle_mute_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                                        contentDescription = if (isMuted) {
+                                            stringResource(R.string.live_voice_unmute)
+                                        } else {
+                                            stringResource(R.string.live_voice_mute)
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isMuted) "Unmute" else "Mute",
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+
+                                FilledTonalButton(
+                                    onClick = onToggleSpeaker,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("toggle_speaker_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSpeakerOn) {
+                                            Icons.AutoMirrored.Filled.VolumeUp
+                                        } else {
+                                            Icons.Filled.PhoneInTalk
+                                        },
+                                        contentDescription = if (isSpeakerOn) {
+                                            stringResource(R.string.live_voice_speaker_on)
+                                        } else {
+                                            stringResource(R.string.live_voice_speaker_off)
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isSpeakerOn) "Speaker" else "Earpiece",
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+                            }
+
                             Button(
                                 onClick = onStopConversation,
                                 colors = ButtonDefaults.buttonColors(
@@ -279,8 +466,8 @@ fun LiveVoiceScreen(
                                 shape = RoundedCornerShape(18.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .widthIn(max = 320.dp)
-                                    .height(54.dp)
+                                    .widthIn(max = 360.dp)
+                                    .height(52.dp)
                                     .testTag("stop_live_voice_button")
                             ) {
                                 Icon(
@@ -412,12 +599,14 @@ fun LiveVoiceScreen(
 private fun VoicePulseOrb(
     isActive: Boolean,
     isConnecting: Boolean,
-    isModelSpeaking: Boolean
+    isModelSpeaking: Boolean,
+    isMuted: Boolean,
+    micLevel: Float
 ) {
     val transition = rememberInfiniteTransition(label = "voice_pulse")
-    val pulse by transition.animateFloat(
+    val idlePulse by transition.animateFloat(
         initialValue = 0.88f,
-        targetValue = 1.18f,
+        targetValue = 1.14f,
         animationSpec = infiniteRepeatable(
             animation = tween(
                 durationMillis = if (isModelSpeaking) 650 else 1300,
@@ -427,9 +616,12 @@ private fun VoicePulseOrb(
         ),
         label = "pulse_scale"
     )
+    val dynamicBoost = if (isActive && !isMuted && !isModelSpeaking) micLevel * 0.28f else 0f
+    val pulse = (idlePulse + dynamicBoost).coerceAtMost(1.32f)
 
     val ringColorPrimary = MaterialTheme.colorScheme.primary
     val ringColorSecondary = MaterialTheme.colorScheme.tertiary
+    val mutedColor = MaterialTheme.colorScheme.outline
 
     Box(
         modifier = Modifier.size(138.dp),
@@ -437,18 +629,23 @@ private fun VoicePulseOrb(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val baseRadius = size.minDimension / 2f
+            val activeRingColor = when {
+                isModelSpeaking -> ringColorSecondary
+                isMuted -> mutedColor
+                else -> ringColorPrimary
+            }
             if (isActive || isConnecting) {
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            (if (isModelSpeaking) ringColorSecondary else ringColorPrimary).copy(alpha = 0.35f),
+                            activeRingColor.copy(alpha = 0.35f),
                             Color.Transparent
                         )
                     ),
                     radius = baseRadius * pulse
                 )
                 drawCircle(
-                    color = (if (isModelSpeaking) ringColorSecondary else ringColorPrimary).copy(alpha = 0.55f),
+                    color = activeRingColor.copy(alpha = 0.55f),
                     radius = baseRadius * 0.78f * (0.94f + (pulse - 0.88f) * 0.35f),
                     style = Stroke(width = 3.dp.toPx())
                 )

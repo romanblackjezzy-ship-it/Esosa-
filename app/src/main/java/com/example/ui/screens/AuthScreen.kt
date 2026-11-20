@@ -30,6 +30,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,7 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.core.attemptAutoSignIn
+import com.example.core.checkPendingGoogleProviderSignIn
 import com.example.core.onGoogleSignInClicked
+import com.example.core.signInWithGoogleProvider
 
 @Composable
 fun AuthScreen(onAuthSuccess: () -> Unit) {
@@ -68,6 +71,17 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
+        checkPendingGoogleProviderSignIn(
+            onAuthSuccess = {
+                isCheckingAutoSignIn = false
+                onAuthSuccess()
+            },
+            onAuthError = { msg ->
+                isCheckingAutoSignIn = false
+                errorMessage = msg
+            },
+            scope = scope
+        )
         attemptAutoSignIn(
             context = context,
             credentialManager = credentialManager,
@@ -255,6 +269,39 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        errorMessage = null
+                        isSigningIn = true
+                        signInWithGoogleProvider(
+                            context = context,
+                            onAuthSuccess = {
+                                isSigningIn = false
+                                onAuthSuccess()
+                            },
+                            onAuthError = { msg ->
+                                isSigningIn = false
+                                errorMessage = msg
+                            },
+                            scope = scope,
+                            onAuthCancelled = {
+                                isSigningIn = false
+                            }
+                        )
+                    },
+                    enabled = !isSigningIn && !isCheckingAutoSignIn,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("google_oauth_provider_button"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.sign_in_google_browser),
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             }
         }

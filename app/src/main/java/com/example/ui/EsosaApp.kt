@@ -24,12 +24,12 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -37,15 +37,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.R
+import com.example.core.authStateFlow
+import com.example.core.signOut
+import com.example.data.audio.VoiceAudioStreamer
 import com.example.data.repository.AiChatRepository
 import com.example.data.repository.ChatRepository
 import com.example.notifications.EsosaNotificationManager
+import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.LiveVoiceScreen
@@ -55,7 +60,7 @@ import com.example.ui.viewmodel.AiChatViewModel
 import com.example.ui.viewmodel.LiveVoiceViewModel
 import com.example.ui.viewmodel.RoomsViewModel
 import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -76,25 +81,18 @@ fun EsosaApp(
     initialRoomId: String? = null,
     initialTab: String? = null
 ) {
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose { Firebase.auth.removeAuthStateListener(listener) }
-    }
+    val authFlow = remember { Firebase.auth.authStateFlow() }
+    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
 
     val user = currentUser
     if (user == null) {
         AuthScreen(
-            onAuthSuccess = { currentUser = Firebase.auth.currentUser }
+            onAuthSuccess = { /* authStateFlow updates currentUser automatically */ }
         )
     } else {
         key(user.uid) {
             AuthenticatedEsosaShell(
-                currentUserId = user.uid,
+                currentUser = user,
                 initialRoomId = initialRoomId,
                 initialTab = initialTab
             )
@@ -104,11 +102,14 @@ fun EsosaApp(
 
 @Composable
 private fun AuthenticatedEsosaShell(
-    currentUserId: String,
+    currentUser: FirebaseUser,
     initialRoomId: String?,
     initialTab: String?
 ) {
+    val currentUserId = currentUser.uid
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
     val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
     val roomsViewModel: RoomsViewModel = viewModel(
@@ -143,7 +144,17 @@ private fun AuthenticatedEsosaShell(
         }
     )
 
-    val liveVoiceViewModel: LiveVoiceViewModel = viewModel(key = "live_$currentUserId")
+    val liveVoiceViewModel: LiveVoiceViewModel = viewModel(
+        key = "live_$currentUserId",
+        factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY])
+                LiveVoiceViewModel(
+                    audioStreamer = VoiceAudioStreamer(app.applicationContext)
+                )
+            }
+        }
+    )
 
     var selectedTab by rememberSaveable {
         mutableStateOf(
@@ -182,6 +193,10 @@ private fun AuthenticatedEsosaShell(
     val liveStatusMessage by liveVoiceViewModel.statusMessage.collectAsStateWithLifecycle()
     val liveTranscripts by liveVoiceViewModel.transcripts.collectAsStateWithLifecycle()
     val liveModelSpeaking by liveVoiceViewModel.isModelSpeaking.collectAsStateWithLifecycle()
+    val liveMuted by liveVoiceViewModel.isMuted.collectAsStateWithLifecycle()
+    val liveSpeakerOn by liveVoiceViewModel.isSpeakerOn.collectAsStateWithLifecycle()
+    val liveMicLevel by liveVoiceViewModel.micLevel.collectAsStateWithLifecycle()
+    val liveAecEnabled by liveVoiceViewModel.isAecEnabled.collectAsStateWithLifecycle()
 
     LaunchedEffect(selectedTab) {
         roomsViewModel.setOnMessagesScreen(selectedTab == EsosaTab.MESSAGES)
@@ -190,6 +205,21 @@ private fun AuthenticatedEsosaShell(
 
     LaunchedEffect(userProfile?.notificationsEnabled) {
         aiChatViewModel.setNotificationsEnabled(userProfile?.notificationsEnabled ?: true)
+    }
+
+    val topBarUserInfo = remember(userProfile, currentUser) {
+        UserProfileHeaderInfo(
+            displayName = userProfile?.displayName?.ifBlank { null }
+                ?: currentUser.displayName.orEmpty().ifBlank { "Esosa Member" },
+            email = userProfile?.email?.ifBlank { null }
+                ?: currentUser.email.orEmpty(),
+            photoUrl = userProfile?.photoUrl?.ifBlank { null }
+                ?: currentUser.photoUrl?.toString()
+        )
+    }
+
+    val handleSignOut: () -> Unit = {
+        signOut(credentialManager = credentialManager, scope = scope)
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -252,6 +282,7 @@ private fun AuthenticatedEsosaShell(
                 when (selectedTab) {
                     EsosaTab.MESSAGES -> MessagesScreen(
                         currentUserId = currentUserId,
+                        userProfileInfo = topBarUserInfo,
                         roomsState = roomsState,
                         selectedRoomId = selectedRoomId,
                         activeRoom = activeRoom,
@@ -265,10 +296,13 @@ private fun AuthenticatedEsosaShell(
                         onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
                         onLeaveOrDeleteRoom = { room -> roomsViewModel.leaveOrDeleteRoom(room) },
                         onClearError = { roomsViewModel.clearActionError() },
+                        onOpenSettings = { selectedTab = EsosaTab.SETTINGS },
+                        onSignOut = handleSignOut,
                         modifier = Modifier.weight(1f)
                     )
 
                     EsosaTab.AI_CHAT -> AiChatScreen(
+                        userProfileInfo = topBarUserInfo,
                         threadsState = aiThreadsState,
                         selectedThreadId = selectedAiThreadId,
                         messagesState = aiMessagesState,
@@ -283,26 +317,39 @@ private fun AuthenticatedEsosaShell(
                             aiChatViewModel.sendPrompt(prompt, thread, msgs)
                         },
                         onClearError = { aiChatViewModel.clearError() },
+                        onOpenSettings = { selectedTab = EsosaTab.SETTINGS },
+                        onSignOut = handleSignOut,
                         modifier = Modifier.weight(1f)
                     )
 
                     EsosaTab.LIVE_VOICE -> LiveVoiceScreen(
+                        userProfileInfo = topBarUserInfo,
                         status = liveStatus,
                         statusMessage = liveStatusMessage,
                         transcripts = liveTranscripts,
                         isModelSpeaking = liveModelSpeaking,
+                        isMuted = liveMuted,
+                        isSpeakerOn = liveSpeakerOn,
+                        micLevel = liveMicLevel,
+                        isAecEnabled = liveAecEnabled,
                         onStartConversation = { liveVoiceViewModel.startConversation() },
                         onStopConversation = { liveVoiceViewModel.stopConversation() },
+                        onToggleMute = { liveVoiceViewModel.toggleMute() },
+                        onToggleSpeaker = { liveVoiceViewModel.toggleSpeakerphone() },
                         onSendTextDuringLive = { liveVoiceViewModel.sendTextDuringLive(it) },
                         onClearTranscripts = { liveVoiceViewModel.clearTranscripts() },
+                        onOpenSettings = { selectedTab = EsosaTab.SETTINGS },
+                        onSignOut = handleSignOut,
                         modifier = Modifier.weight(1f)
                     )
 
                     EsosaTab.SETTINGS -> SettingsScreen(
+                        userProfileInfo = topBarUserInfo,
                         userProfile = userProfile,
                         notificationManager = notificationManager,
                         onToggleNotifications = { roomsViewModel.setNotificationsEnabled(it) },
                         onSendTestNotification = { roomsViewModel.sendTestNotification() },
+                        onSignOut = handleSignOut,
                         modifier = Modifier.weight(1f)
                     )
                 }

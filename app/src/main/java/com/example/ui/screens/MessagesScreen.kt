@@ -73,6 +73,8 @@ import coil.compose.AsyncImage
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
+import com.example.ui.components.UserProfileHeaderInfo
+import com.example.ui.components.UserProfileTopBarAction
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -80,6 +82,7 @@ import java.util.Locale
 @Composable
 fun MessagesScreen(
     currentUserId: String,
+    userProfileInfo: UserProfileHeaderInfo,
     roomsState: UiState<List<ChatRoom>>,
     selectedRoomId: String?,
     activeRoom: ChatRoom?,
@@ -93,12 +96,15 @@ fun MessagesScreen(
     onDeleteMessage: (String, String) -> Unit,
     onLeaveOrDeleteRoom: (ChatRoom) -> Unit,
     onClearError: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (selectedRoomId != null) {
         BackHandler { onOpenRoom(null) }
         RoomDetailView(
             currentUserId = currentUserId,
+            userProfileInfo = userProfileInfo,
             room = activeRoom,
             messagesState = activeMessagesState,
             actionError = actionError,
@@ -113,10 +119,13 @@ fun MessagesScreen(
                 activeRoom?.let { onLeaveOrDeleteRoom(it) }
             },
             onClearError = onClearError,
+            onOpenSettings = onOpenSettings,
+            onSignOut = onSignOut,
             modifier = modifier
         )
     } else {
         RoomsListView(
+            userProfileInfo = userProfileInfo,
             roomsState = roomsState,
             actionError = actionError,
             isBusy = isBusy,
@@ -124,6 +133,8 @@ fun MessagesScreen(
             onCreateRoom = onCreateRoom,
             onJoinRoom = onJoinRoom,
             onClearError = onClearError,
+            onOpenSettings = onOpenSettings,
+            onSignOut = onSignOut,
             modifier = modifier
         )
     }
@@ -132,6 +143,7 @@ fun MessagesScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RoomsListView(
+    userProfileInfo: UserProfileHeaderInfo,
     roomsState: UiState<List<ChatRoom>>,
     actionError: String?,
     isBusy: Boolean,
@@ -139,6 +151,8 @@ private fun RoomsListView(
     onCreateRoom: (String, String) -> Unit,
     onJoinRoom: (String) -> Unit,
     onClearError: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -165,18 +179,24 @@ private fun RoomsListView(
                     FilledTonalButton(
                         onClick = { showJoinDialog = true },
                         modifier = Modifier
-                            .padding(end = 12.dp)
+                            .padding(end = 6.dp)
                             .testTag("join_room_button"),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Filled.GroupAdd,
                             contentDescription = "Join room by code",
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Join Code", style = MaterialTheme.typography.labelLarge)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Join", style = MaterialTheme.typography.labelMedium)
                     }
+                    UserProfileTopBarAction(
+                        userInfo = userProfileInfo,
+                        onOpenSettings = onOpenSettings,
+                        onSignOut = onSignOut,
+                        showNameChip = true
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -474,6 +494,7 @@ private fun RoomCard(
 @Composable
 private fun RoomDetailView(
     currentUserId: String,
+    userProfileInfo: UserProfileHeaderInfo,
     room: ChatRoom?,
     messagesState: UiState<List<RoomMessage>>,
     actionError: String?,
@@ -482,6 +503,8 @@ private fun RoomDetailView(
     onDeleteMessage: (String) -> Unit,
     onLeaveOrDeleteRoom: () -> Unit,
     onClearError: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var draft by remember { mutableStateOf("") }
@@ -572,6 +595,12 @@ private fun RoomDetailView(
                             }
                         }
                     }
+                    UserProfileTopBarAction(
+                        userInfo = userProfileInfo,
+                        onOpenSettings = onOpenSettings,
+                        onSignOut = onSignOut,
+                        showNameChip = false
+                    )
                 }
             )
         }

@@ -10,4 +10,18 @@
     <string name="notification_channel_id">esosa_messages</string>
     <string name="notification_channel_name">Esosa Messages</string>
     <string name="notification_channel_description">Real-time incoming chat messages and AI responses</string>
+    <string name="live_voice_title">Live Voice</string>
+    <string name="live_voice_mic_permission_rationale">Microphone access is needed so Esosa can capture 16 kHz voice audio and stream real-time replies.</string>
+    <string name="live_voice_mic_permission_denied">Microphone permission was denied. Enable it in App Settings to use live voice.</string>
+    <string name="live_voice_open_settings">Open Settings</string>
+    <string name="live_voice_grant_mic">Allow Microphone</string>
+    <string name="live_voice_mute">Mute mic</string>
+    <string name="live_voice_unmute">Unmute mic</string>
+    <string name="live_voice_speaker_on">Speaker on</string>
+    <string name="live_voice_speaker_off">Earpiece</string>
+    <string name="live_voice_audio_pipeline_badge">16kHz PCM Capture • AEC • 24kHz Stream</string>
+    <string name="sign_in_google_browser">Continue with Google Browser Sign-In</string>
+    <string name="profile_google_authenticated">Google Authenticated</string>
+    <string name="profile_account_settings">Account &amp; Notifications</string>
+    <string name="profile_sign_out">Sign Out</string>
 </resources>

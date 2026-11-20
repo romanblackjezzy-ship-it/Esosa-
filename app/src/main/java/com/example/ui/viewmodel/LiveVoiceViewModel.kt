@@ -1,21 +1,26 @@
 package com.example.ui.viewmodel
 
-import android.annotation.SuppressLint
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.audio.VoiceAudioStreamer
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.AudioTranscriptionConfig
+import com.google.firebase.ai.type.InlineData
+import com.google.firebase.ai.type.InlineDataPart
+import com.google.firebase.ai.type.LiveServerContent
+import com.google.firebase.ai.type.LiveServerGoAway
 import com.google.firebase.ai.type.LiveSession
 import com.google.firebase.ai.type.PublicPreviewAPI
 import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.content
-import com.google.firebase.ai.type.liveAudioConversationConfig
 import com.google.firebase.ai.type.liveGenerationConfig
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,7 +42,9 @@ data class LiveTranscriptItem(
 )
 
 @OptIn(PublicPreviewAPI::class)
-class LiveVoiceViewModel : ViewModel() {
+class LiveVoiceViewModel(
+    private val audioStreamer: VoiceAudioStreamer
+) : ViewModel() {
 
     private val liveModel by lazy {
         Firebase.ai.liveModel(
@@ -57,12 +64,16 @@ class LiveVoiceViewModel : ViewModel() {
     }
 
     private var activeSession: LiveSession? = null
+    private var captureJob: Job? = null
+    private var receiveJob: Job? = null
+    private var playbackJob: Job? = null
+    private var playbackChannel: Channel<ByteArray>? = null
     private var entryCounter = 0L
 
     private val _status = MutableStateFlow(LiveVoiceStatus.IDLE)
     val status: StateFlow<LiveVoiceStatus> = _status.asStateFlow()
 
-    private val _statusMessage = MutableStateFlow("Tap Start Voice to speak with gemini-3.8-live")
+    private val _statusMessage = MutableStateFlow("Tap Start Live Conversation to speak with gemini-3.8-live")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
     private val _transcripts = MutableStateFlow<List<LiveTranscriptItem>>(emptyList())
@@ -71,48 +82,54 @@ class LiveVoiceViewModel : ViewModel() {
     private val _isModelSpeaking = MutableStateFlow(false)
     val isModelSpeaking: StateFlow<Boolean> = _isModelSpeaking.asStateFlow()
 
-    @SuppressLint("MissingPermission")
+    val isMuted: StateFlow<Boolean> = audioStreamer.isMuted
+    val isSpeakerOn: StateFlow<Boolean> = audioStreamer.isSpeakerOn
+    val micLevel: StateFlow<Float> = audioStreamer.micLevel
+    val isAecEnabled: StateFlow<Boolean> = audioStreamer.isAecEnabled
+
     fun startConversation() {
         if (_status.value == LiveVoiceStatus.CONNECTING || _status.value == LiveVoiceStatus.ACTIVE) {
             return
         }
+        if (!audioStreamer.hasRecordPermission()) {
+            _status.value = LiveVoiceStatus.ERROR
+            _statusMessage.value = "Microphone permission is required to stream live voice."
+            return
+        }
+
         viewModelScope.launch {
             _status.value = LiveVoiceStatus.CONNECTING
             _statusMessage.value = "Connecting to $LIVE_MODEL_NAME…"
             _isModelSpeaking.value = false
+            audioStreamer.setMuted(false)
 
             try {
+                audioStreamer.prepareAudioSession()
+
                 val session = withTimeout(30_000L) {
                     liveModel.connect()
                 }
                 activeSession = session
 
-                val audioConfig = liveAudioConversationConfig {
-                    enableInterruptions = true
-                    transcriptHandler = { inputTranscription, outputTranscription ->
-                        val userText = inputTranscription?.text?.trim()
-                        val modelText = outputTranscription?.text?.trim()
+                val queue = Channel<ByteArray>(Channel.UNLIMITED)
+                playbackChannel = queue
 
-                        if (!userText.isNullOrEmpty()) {
-                            _isModelSpeaking.value = false
-                            appendTranscriptChunk("You", userText)
-                        }
-                        if (!modelText.isNullOrEmpty()) {
-                            _isModelSpeaking.value = true
-                            appendTranscriptChunk("Esosa Live", modelText)
-                        }
-                    }
-                    goAwayHandler = {
-                        viewModelScope.launch {
-                            _statusMessage.value = "Live session wrapped up by server."
-                            stopConversation()
-                        }
+                playbackJob = launch {
+                    for (audioChunk in queue) {
+                        audioStreamer.enqueuePlayback(audioChunk)
                     }
                 }
 
+                receiveJob = launch {
+                    collectLiveServerResponses(session, queue)
+                }
+
+                captureJob = launch {
+                    streamMicrophoneToLiveSession(session)
+                }
+
                 _status.value = LiveVoiceStatus.ACTIVE
-                _statusMessage.value = "Listening live • Speak naturally"
-                session.startAudioConversation(audioConfig)
+                _statusMessage.value = "Listening live • 16kHz PCM stream active"
             } catch (e: TimeoutCancellationException) {
                 Log.e(TAG, "Live session connection timed out", e)
                 cleanupSession()
@@ -128,6 +145,112 @@ class LiveVoiceViewModel : ViewModel() {
                 _statusMessage.value = e.localizedMessage ?: "Live voice session failed."
             }
         }
+    }
+
+    private suspend fun streamMicrophoneToLiveSession(session: LiveSession) {
+        try {
+            audioStreamer.capturedAudioFlow().collect { pcmFrame ->
+                session.sendAudioRealtime(
+                    InlineData(
+                        data = pcmFrame,
+                        mimeType = VoiceAudioStreamer.INPUT_MIME_TYPE
+                    )
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Microphone capture/streaming error", e)
+            _statusMessage.value = e.localizedMessage ?: "Microphone stream interrupted."
+            cleanupSession()
+            _status.value = LiveVoiceStatus.ERROR
+        }
+    }
+
+    private suspend fun collectLiveServerResponses(
+        session: LiveSession,
+        queue: Channel<ByteArray>
+    ) {
+        try {
+            session.receive().collect { message ->
+                when (message) {
+                    is LiveServerContent -> {
+                        if (message.interrupted) {
+                            drainPlaybackQueue(queue)
+                            audioStreamer.flushPlayback()
+                            _isModelSpeaking.value = false
+                            _statusMessage.value = "Listening live • Interrupted"
+                        } else {
+                            val parts = message.content?.parts.orEmpty()
+                            parts.filterIsInstance<InlineDataPart>()
+                                .filter { it.mimeType.startsWith("audio/pcm", ignoreCase = true) }
+                                .forEach { audioPart ->
+                                    if (audioPart.inlineData.isNotEmpty()) {
+                                        _isModelSpeaking.value = true
+                                        queue.trySend(audioPart.inlineData)
+                                    }
+                                }
+
+                            if (message.turnComplete || message.generationComplete) {
+                                _isModelSpeaking.value = false
+                                _statusMessage.value = if (isMuted.value) {
+                                    "Microphone muted • Tap unmute to speak"
+                                } else {
+                                    "Listening live • 16kHz PCM stream active"
+                                }
+                            }
+                        }
+
+                        val userText = message.inputTranscription?.text?.trim()
+                        val modelText = message.outputTranscription?.text?.trim()
+                        if (!userText.isNullOrEmpty()) {
+                            _isModelSpeaking.value = false
+                            appendTranscriptChunk("You", userText)
+                        }
+                        if (!modelText.isNullOrEmpty()) {
+                            appendTranscriptChunk("Esosa Live", modelText)
+                        }
+                    }
+
+                    is LiveServerGoAway -> {
+                        _statusMessage.value = "Live session wrapped up by server."
+                        stopConversation()
+                    }
+
+                    else -> Unit
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Error receiving live audio response", e)
+            if (_status.value == LiveVoiceStatus.ACTIVE) {
+                cleanupSession()
+                _status.value = LiveVoiceStatus.ERROR
+                _statusMessage.value = e.localizedMessage ?: "Lost connection to live voice session."
+            }
+        }
+    }
+
+    private fun drainPlaybackQueue(queue: Channel<ByteArray>) {
+        while (queue.tryReceive().isSuccess) {
+            // Drain stale buffered audio chunks on barge-in interruption
+        }
+    }
+
+    fun toggleMute() {
+        val nowMuted = audioStreamer.toggleMute()
+        if (_status.value == LiveVoiceStatus.ACTIVE) {
+            _statusMessage.value = if (nowMuted) {
+                "Microphone muted • Tap unmute to speak"
+            } else {
+                "Listening live • 16kHz PCM stream active"
+            }
+        }
+    }
+
+    fun toggleSpeakerphone() {
+        audioStreamer.toggleSpeakerphone()
     }
 
     fun sendTextDuringLive(rawText: String) {
@@ -153,7 +276,7 @@ class LiveVoiceViewModel : ViewModel() {
             cleanupSession()
             _status.value = LiveVoiceStatus.IDLE
             _isModelSpeaking.value = false
-            _statusMessage.value = "Session ended • Tap Start Voice to reconnect"
+            _statusMessage.value = "Session ended • Tap Start Live Conversation to reconnect"
         }
     }
 
@@ -176,13 +299,25 @@ class LiveVoiceViewModel : ViewModel() {
 
     private suspend fun cleanupSession() {
         withContext(NonCancellable) {
+            captureJob?.cancel()
+            captureJob = null
+
+            receiveJob?.cancel()
+            receiveJob = null
+
+            playbackChannel?.close()
+            playbackChannel = null
+
+            playbackJob?.cancel()
+            playbackJob = null
+
             val session = activeSession
             activeSession = null
             if (session != null) {
                 try {
-                    session.stopAudioConversation()
+                    session.stopReceiving()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping audio conversation: ${e.message}")
+                    Log.w(TAG, "Error stopping live receiver: ${e.message}")
                 }
                 try {
                     session.close()
@@ -190,17 +325,23 @@ class LiveVoiceViewModel : ViewModel() {
                     Log.w(TAG, "Error closing live session: ${e.message}")
                 }
             }
+            audioStreamer.stopAndRelease()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
+        captureJob?.cancel()
+        receiveJob?.cancel()
+        playbackChannel?.close()
+        playbackJob?.cancel()
         val session = activeSession
         activeSession = null
         try {
-            session?.stopAudioConversation()
+            session?.stopReceiving()
         } catch (_: Exception) {
         }
+        audioStreamer.stopAndRelease()
     }
 
     companion object {

@@ -68,10 +68,13 @@ import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
+import com.example.ui.components.UserProfileHeaderInfo
+import com.example.ui.components.UserProfileTopBarAction
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiChatScreen(
+    userProfileInfo: UserProfileHeaderInfo,
     threadsState: UiState<List<AiThread>>,
     selectedThreadId: String?,
     messagesState: UiState<List<AiMessage>>,
@@ -84,6 +87,8 @@ fun AiChatScreen(
     onDeleteThread: (String) -> Unit,
     onSendPrompt: (String, AiThread?, List<AiMessage>) -> Unit,
     onClearError: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val threads = (threadsState as? UiState.Success)?.data.orEmpty()
@@ -135,15 +140,6 @@ fun AiChatScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { showSystemInfo = true },
-                        modifier = Modifier.testTag("ai_system_prompt_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Tune,
-                            contentDescription = "View system instruction"
-                        )
-                    }
-                    IconButton(
                         onClick = { showHistorySheet = true },
                         modifier = Modifier.testTag("ai_history_button")
                     ) {
@@ -161,6 +157,12 @@ fun AiChatScreen(
                             contentDescription = "New Gemini thread"
                         )
                     }
+                    UserProfileTopBarAction(
+                        userInfo = userProfileInfo,
+                        onOpenSettings = onOpenSettings,
+                        onSignOut = onSignOut,
+                        showNameChip = false
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -203,6 +205,26 @@ fun AiChatScreen(
                             )
                         },
                         modifier = Modifier.testTag("persona_chip_${persona.id}")
+                    )
+                }
+                item(key = "system_prompt_chip") {
+                    FilterChip(
+                        selected = false,
+                        onClick = { showSystemInfo = true },
+                        label = {
+                            Text(
+                                text = "System Prompt",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Filled.Tune,
+                                contentDescription = "View system instruction",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        modifier = Modifier.testTag("ai_system_prompt_button")
                     )
                 }
             }

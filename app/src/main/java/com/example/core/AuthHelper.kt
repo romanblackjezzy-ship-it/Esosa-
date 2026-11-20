@@ -8,6 +8,8 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialUnsupportedException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -17,7 +19,9 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
@@ -35,6 +39,25 @@ fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
     }
     addAuthStateListener(listener)
     awaitClose { removeAuthStateListener(listener) }
+}
+
+fun checkPendingGoogleProviderSignIn(
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    scope: CoroutineScope
+) {
+    val pendingTask = Firebase.auth.pendingAuthResult ?: return
+    scope.launch {
+        try {
+            pendingTask.await()
+            onAuthSuccess()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(AUTH_TAG, "Pending Google OAuth provider sign-in failed", e)
+            onAuthError(e.localizedMessage ?: "Google sign-in failed")
+        }
+    }
 }
 
 fun attemptAutoSignIn(
@@ -75,6 +98,8 @@ fun attemptAutoSignIn(
             } else {
                 onUnauthenticated()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             onUnauthenticated()
         }
@@ -117,9 +142,73 @@ fun onGoogleSignInClicked(
         } catch (e: GetCredentialCancellationException) {
             Log.w(AUTH_TAG, "Google Sign-In cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
+        } catch (e: NoCredentialException) {
+            Log.w(AUTH_TAG, "No Credential Manager Google account available, launching Firebase Google OAuth provider: ${e.message}")
+            launchGoogleOAuthProvider(
+                context = context,
+                onAuthSuccess = onAuthSuccess,
+                onAuthError = onAuthError,
+                onAuthCancelled = onAuthCancelled
+            )
+        } catch (e: GetCredentialUnsupportedException) {
+            Log.w(AUTH_TAG, "Credential Manager unsupported on device, launching Firebase Google OAuth provider: ${e.message}")
+            launchGoogleOAuthProvider(
+                context = context,
+                onAuthSuccess = onAuthSuccess,
+                onAuthError = onAuthError,
+                onAuthCancelled = onAuthCancelled
+            )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(AUTH_TAG, "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Sign in failed")
+        }
+    }
+}
+
+fun signInWithGoogleProvider(
+    context: Context,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    scope: CoroutineScope,
+    onAuthCancelled: () -> Unit = {}
+) {
+    scope.launch {
+        launchGoogleOAuthProvider(
+            context = context,
+            onAuthSuccess = onAuthSuccess,
+            onAuthError = onAuthError,
+            onAuthCancelled = onAuthCancelled
+        )
+    }
+}
+
+private suspend fun launchGoogleOAuthProvider(
+    context: Context,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    onAuthCancelled: () -> Unit
+) {
+    try {
+        val activity = context as? Activity
+            ?: throw IllegalStateException("Activity context required for Google OAuth provider")
+        val provider = OAuthProvider.newBuilder("google.com")
+            .setScopes(listOf("email", "profile"))
+            .addCustomParameter("prompt", "select_account")
+            .build()
+        Firebase.auth.startActivityForSignInWithProvider(activity, provider).await()
+        onAuthSuccess()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        val msg = e.localizedMessage ?: "Google provider sign-in failed"
+        if (msg.contains("cancel", ignoreCase = true)) {
+            Log.w(AUTH_TAG, "Firebase Google OAuth provider cancelled: $msg", e)
+            onAuthCancelled()
+        } else {
+            Log.e(AUTH_TAG, "Firebase Google OAuth provider failed", e)
+            onAuthError(msg)
         }
     }
 }
