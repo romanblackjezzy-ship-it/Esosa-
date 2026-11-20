@@ -55,7 +55,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +72,7 @@ import coil.compose.AsyncImage
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
+import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
 import com.example.ui.components.RoomsLoadingSkeleton
 import com.example.ui.components.UserProfileHeaderInfo
@@ -517,11 +517,15 @@ private fun RoomDetailView(
     val listState = rememberLazyListState()
 
     val messagesList = (messagesState as? UiState.Success)?.data.orEmpty()
-    LaunchedEffect(messagesList.size) {
-        if (messagesList.isNotEmpty()) {
-            listState.animateScrollToItem(messagesList.lastIndex)
-        }
-    }
+    val newestMessage = messagesList.lastOrNull()
+    AutoScrollToBottomEffect(
+        listState = listState,
+        itemCount = messagesList.size,
+        lastItemKey = newestMessage?.id,
+        lastItemContent = newestMessage?.text,
+        conversationKey = room?.id,
+        animate = true
+    )
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

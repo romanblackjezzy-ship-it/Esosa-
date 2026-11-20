@@ -61,7 +61,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.example.R
 import com.example.core.UiState
 import com.example.data.model.LiveVoiceThread
+import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
 import com.example.ui.viewmodel.LiveTranscriptItem
@@ -150,11 +150,15 @@ fun LiveVoiceScreen(
     val isPermanentlyDenied =
         !hasMicPermission && permissionRequestedOnce && !micPermissionState.status.shouldShowRationale
 
-    LaunchedEffect(transcripts.size) {
-        if (transcripts.isNotEmpty()) {
-            listState.animateScrollToItem(transcripts.lastIndex)
-        }
-    }
+    val newestTranscript = transcripts.lastOrNull()
+    AutoScrollToBottomEffect(
+        listState = listState,
+        itemCount = transcripts.size,
+        lastItemKey = newestTranscript?.id,
+        lastItemContent = newestTranscript?.text,
+        conversationKey = selectedThreadId,
+        animate = status != LiveVoiceStatus.ACTIVE
+    )
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

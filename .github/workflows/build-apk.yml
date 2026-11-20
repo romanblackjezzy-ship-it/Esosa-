@@ -27,6 +27,8 @@ jobs:
       - name: Configure Android SDK 36.1 & licenses
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME="${SDK_ROOT}"
+          export ANDROID_SDK_ROOT="${SDK_ROOT}"
           echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
 
@@ -42,13 +44,18 @@ jobs:
             exit 1
           fi
 
-          echo "Using sdkmanager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install \
+          echo "Using sdkmanager: $SDKMANAGER (SDK_ROOT=$SDK_ROOT)"
+          mkdir -p "$SDK_ROOT/licenses"
+          printf '\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n' > "$SDK_ROOT/licenses/android-sdk-license"
+          printf '\n84831b9409646d8abd\n' > "$SDK_ROOT/licenses/android-sdk-preview-license"
+          yes | "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install \
             "platform-tools" \
             "platforms;android-36.1" \
             "build-tools;36.0.0"
-          "$SDKMANAGER" --install "platforms;android-36" || true
+          "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install "platforms;android-36" || true
+          "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install "build-tools;36.1.0" || true
+          test -f "$SDK_ROOT/platforms/android-36.1/android.jar"
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
@@ -64,7 +71,8 @@ jobs:
           if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           fi
-          if [ ! -f debug.keystore ]; then
+          if [ ! -f debug.keystore ] || ! keytool -list -keystore debug.keystore -storepass android >/dev/null 2>&1; then
+            rm -f debug.keystore
             keytool -genkeypair -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
@@ -76,11 +84,28 @@ jobs:
 
       - name: Build Debug APK
         run: |
+          set -o pipefail
+          echo "Java: $(java -version 2>&1 | head -n 1)"
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "Version: ${ESOSA_VERSION_NAME} (${ESOSA_VERSION_CODE}) Repo: ${GITHUB_REPOSITORY}"
           gradle :app:assembleDebug \
             --no-daemon \
+            --no-configuration-cache \
+            --max-workers=1 \
             --stacktrace \
-            --max-workers=2 \
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+            --console=plain \
+            -Dorg.gradle.parallel=false \
+            -Dorg.gradle.jvmargs="-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
+            2>&1 | tee ci-build.log
+
+      - name: Upload CI build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build-failure-log
+          path: ci-build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Rename APK artifact
         run: cp app/build/outputs/apk/debug/app-debug.apk "Esosa-v${ESOSA_VERSION_NAME}.apk"

@@ -50,7 +50,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +67,7 @@ import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
+import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
 import com.example.ui.components.TypingPulseDots
 import com.example.ui.components.UserProfileHeaderInfo
@@ -103,12 +103,16 @@ fun AiChatScreen(
     var showSystemInfo by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size, streamingReply) {
-        val total = messages.size + if (streamingReply != null) 1 else 0
-        if (total > 0) {
-            listState.animateScrollToItem(total - 1)
-        }
-    }
+    val totalItems = messages.size + if (streamingReply != null) 1 else 0
+    val newestSavedMessage = messages.lastOrNull()
+    AutoScrollToBottomEffect(
+        listState = listState,
+        itemCount = totalItems,
+        lastItemKey = if (streamingReply != null) "streaming_turn" else newestSavedMessage?.id,
+        lastItemContent = streamingReply ?: newestSavedMessage?.text,
+        conversationKey = selectedThreadId,
+        animate = streamingReply == null
+    )
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -30,7 +31,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -41,6 +45,39 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.R
+import kotlinx.coroutines.flow.first
+
+@Composable
+fun AutoScrollToBottomEffect(
+    listState: LazyListState,
+    itemCount: Int,
+    lastItemKey: Any?,
+    lastItemContent: Any?,
+    conversationKey: Any? = null,
+    animate: Boolean = true
+) {
+    LaunchedEffect(conversationKey, itemCount, lastItemKey, lastItemContent) {
+        if (itemCount <= 0) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.totalItemsCount }
+            .first { it >= itemCount }
+        withFrameNanos { }
+        val targetIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+        if (animate) {
+            listState.animateScrollToItem(targetIndex)
+        } else {
+            listState.scrollToItem(targetIndex)
+        }
+        withFrameNanos { }
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull { it.index == targetIndex }
+        val viewportHeight = listState.layoutInfo.viewportSize.height
+        if (lastVisible != null && viewportHeight > 0 && lastVisible.size > viewportHeight) {
+            listState.scrollToItem(
+                index = targetIndex,
+                scrollOffset = lastVisible.size - viewportHeight
+            )
+        }
+    }
+}
 
 @Composable
 fun AuthSessionLoadingView(modifier: Modifier = Modifier) {
