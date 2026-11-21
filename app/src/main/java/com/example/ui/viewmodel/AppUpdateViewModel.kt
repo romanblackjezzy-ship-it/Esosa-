@@ -20,8 +20,7 @@ class AppUpdateViewModel(
     private val notificationManager: EsosaNotificationManager
 ) : ViewModel() {
 
-    private var hasCheckedUnauthenticated = false
-    private var hasCheckedAuthenticated = false
+    private var hasCheckedOnOpen = false
 
     private val _availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
     val availableUpdate: StateFlow<AppUpdateInfo?> = _availableUpdate.asStateFlow()
@@ -43,21 +42,14 @@ class AppUpdateViewModel(
     )
     val statusSummary: StateFlow<String> = _statusSummary.asStateFlow()
 
-    fun checkForUpdatesOnOpen(isSignedIn: Boolean) {
-        if (!preferences.autoCheckEnabled) return
-        if (isSignedIn) {
-            if (hasCheckedAuthenticated) return
-            hasCheckedAuthenticated = true
-            hasCheckedUnauthenticated = true
-        } else {
-            if (hasCheckedUnauthenticated) return
-            hasCheckedUnauthenticated = true
-        }
-        runUpdateCheck(includeFirestore = isSignedIn, forcePromptIfSkipped = false)
+    fun checkForUpdatesOnOpen() {
+        if (!preferences.autoCheckEnabled || hasCheckedOnOpen) return
+        hasCheckedOnOpen = true
+        runUpdateCheck(forcePromptIfSkipped = false)
     }
 
-    fun checkForUpdatesNow(isSignedIn: Boolean) {
-        runUpdateCheck(includeFirestore = isSignedIn, forcePromptIfSkipped = true)
+    fun checkForUpdatesNow() {
+        runUpdateCheck(forcePromptIfSkipped = true)
     }
 
     fun openUpdateDialog() {
@@ -83,7 +75,7 @@ class AppUpdateViewModel(
         _autoCheckEnabled.value = enabled
     }
 
-    fun saveGithubRepository(rawRepo: String, isSignedIn: Boolean): Boolean {
+    fun saveGithubRepository(rawRepo: String): Boolean {
         val trimmed = rawRepo.trim()
         if (trimmed.isNotEmpty() && !AppUpdateRepository.isValidGitHubRepoSlug(trimmed)) {
             _statusSummary.value = "Use format owner/repository (e.g. alex/Esosa)."
@@ -92,14 +84,14 @@ class AppUpdateViewModel(
         preferences.githubRepository = trimmed
         _githubRepo.value = trimmed
         if (trimmed.isNotEmpty()) {
-            runUpdateCheck(includeFirestore = isSignedIn, forcePromptIfSkipped = true)
+            runUpdateCheck(forcePromptIfSkipped = true)
         } else {
-            _statusSummary.value = "GitHub repository cleared • Using Firebase release feed"
+            _statusSummary.value = "GitHub repository cleared"
         }
         return true
     }
 
-    private fun runUpdateCheck(includeFirestore: Boolean, forcePromptIfSkipped: Boolean) {
+    private fun runUpdateCheck(forcePromptIfSkipped: Boolean) {
         viewModelScope.launch {
             _isChecking.value = true
             _statusSummary.value = "Checking for Esosa updates…"
@@ -107,8 +99,7 @@ class AppUpdateViewModel(
                 val update = repository.checkLatestUpdate(
                     currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
                     currentVersionName = BuildConfig.VERSION_NAME,
-                    githubRepository = preferences.githubRepository,
-                    includeFirestore = includeFirestore
+                    githubRepository = preferences.githubRepository
                 )
 
                 if (update != null) {
@@ -116,7 +107,6 @@ class AppUpdateViewModel(
                     _statusSummary.value =
                         "Update available: v${update.versionName} via ${update.sourceLabel}"
 
-                    // Post Android system notification automatically once per newly detected version
                     if (preferences.lastNotifiedVersionKey != update.releaseKey || forcePromptIfSkipped) {
                         val posted = notificationManager.showAppUpdateNotification(
                             versionName = update.versionName,

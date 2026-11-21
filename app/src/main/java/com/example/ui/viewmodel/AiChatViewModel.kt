@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.model.AiMessage
@@ -10,7 +11,6 @@ import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
 import com.example.data.repository.AiChatRepository
 import com.example.notifications.EsosaNotificationManager
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,11 +29,11 @@ import kotlinx.coroutines.launch
 class AiChatViewModel(
     private val repository: AiChatRepository,
     private val notificationManager: EsosaNotificationManager,
-    private val currentUserId: String,
     private val selectionPreferences: ThreadSelectionPreferences? = null
 ) : ViewModel() {
 
-    private val _selectedThreadId = MutableStateFlow(selectionPreferences?.getLastAiThreadId(currentUserId))
+    private val localUserId = LocalProfilePreferences.LOCAL_USER_ID
+    private val _selectedThreadId = MutableStateFlow(selectionPreferences?.getLastAiThreadId(localUserId))
     val selectedThreadId: StateFlow<String?> = _selectedThreadId.asStateFlow()
 
     private val _streamingReply = MutableStateFlow<String?>(null)
@@ -48,7 +48,7 @@ class AiChatViewModel(
     private var isOnAiTab = false
     private var notificationsEnabled = true
 
-    val threadsState: StateFlow<UiState<List<AiThread>>> = repository.observeThreads(currentUserId)
+    val threadsState: StateFlow<UiState<List<AiThread>>> = repository.observeThreads()
         .onEach { threads ->
             val currentId = _selectedThreadId.value
             if (currentId == null && threads.isNotEmpty()) {
@@ -59,13 +59,9 @@ class AiChatViewModel(
         }
         .map<List<AiThread>, UiState<List<AiThread>>> { UiState.Success(it) }
         .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w(TAG, "Error observing AI threads", rootError)
-            emit(UiState.Error(rootError.localizedMessage ?: "Failed to load AI threads"))
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Error observing AI threads", error)
+            emit(UiState.Error(error.localizedMessage ?: "Failed to load AI threads"))
         }
         .stateIn(
             scope = viewModelScope,
@@ -78,16 +74,12 @@ class AiChatViewModel(
             if (threadId.isNullOrBlank()) {
                 flowOf(UiState.Success(emptyList()))
             } else {
-                repository.observeThreadMessages(currentUserId, threadId)
+                repository.observeThreadMessages(threadId)
                     .map<List<AiMessage>, UiState<List<AiMessage>>> { UiState.Success(it) }
                     .catch { error ->
-                        val firestoreError = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (firestoreError == null && error is CancellationException) throw error
-                        val rootError = firestoreError ?: error
-                        Log.w(TAG, "Error observing AI messages", rootError)
-                        emit(UiState.Error(rootError.localizedMessage ?: "Failed to load AI history"))
+                        if (error is CancellationException) throw error
+                        Log.w(TAG, "Error observing AI messages", error)
+                        emit(UiState.Error(error.localizedMessage ?: "Failed to load AI history"))
                     }
             }
         }
@@ -99,7 +91,7 @@ class AiChatViewModel(
 
     private fun setSelectedThread(threadId: String?) {
         _selectedThreadId.value = threadId
-        selectionPreferences?.setLastAiThreadId(currentUserId, threadId)
+        selectionPreferences?.setLastAiThreadId(localUserId, threadId)
     }
 
     fun setTabActive(active: Boolean) {
@@ -123,11 +115,9 @@ class AiChatViewModel(
         viewModelScope.launch {
             _errorBanner.value = null
             repository.createThread(persona, customTitle)
-                .onSuccess { created ->
-                    setSelectedThread(created.id)
-                }
+                .onSuccess { created -> setSelectedThread(created.id) }
                 .onFailure { err ->
-                    _errorBanner.value = err.localizedMessage ?: "Could not start new Gemini chat."
+                    _errorBanner.value = err.localizedMessage ?: "Could not start new AI chat."
                 }
         }
     }
@@ -142,7 +132,7 @@ class AiChatViewModel(
             _errorBanner.value = null
             repository.switchThreadPersona(currentId, persona)
                 .onFailure { err ->
-                    _errorBanner.value = err.localizedMessage ?: "Could not switch Gemini persona."
+                    _errorBanner.value = err.localizedMessage ?: "Could not switch AI persona."
                 }
         }
     }
@@ -217,13 +207,13 @@ class AiChatViewModel(
                         )
                     }
                 } else {
-                    _errorBanner.value = "Gemini returned an empty response. Please try again."
+                    _errorBanner.value = "AI returned an empty response. Please try again."
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Gemini chat error", e)
-                _errorBanner.value = e.localizedMessage ?: "Gemini request failed."
+                Log.e(TAG, "AI chat error", e)
+                _errorBanner.value = e.localizedMessage ?: "AI request failed."
             } finally {
                 _streamingReply.value = null
                 _isGenerating.value = false
@@ -233,6 +223,5 @@ class AiChatViewModel(
 
     private companion object {
         const val TAG = "AiChatVM"
-        const val STOP_TIMEOUT_MILLIS = 5000L
     }
 }

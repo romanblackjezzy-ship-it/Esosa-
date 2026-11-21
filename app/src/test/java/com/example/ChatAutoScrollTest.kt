@@ -7,13 +7,12 @@ import androidx.compose.ui.test.onNodeWithText
 import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiThread
+import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
-import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.theme.EsosaTheme
-import com.google.firebase.Timestamp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,38 +26,32 @@ class ChatAutoScrollTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    private val profile = UserProfileHeaderInfo(
-        displayName = "Roman",
-        email = "roman@example.com",
-        photoUrl = null
-    )
-
     @Test
     fun `room messages auto-scroll to newest message on list update`() {
+        val baseMillis = 1_700_000_000_000L
         val initialMessages = (1..25).map { idx ->
             RoomMessage(
                 id = "msg_$idx",
                 roomId = "room_1",
-                senderId = if (idx % 2 == 0) "u1" else "u2",
-                senderName = if (idx % 2 == 0) "Roman" else "Esosa",
+                senderId = if (idx % 2 == 0) "local_me" else "u2",
+                senderName = if (idx % 2 == 0) "Esosa User" else "Alex",
                 text = "Room message #$idx",
-                createdAt = Timestamp(1_700_000_000L + idx, 0)
+                createdAtMillis = baseMillis + idx * 1000L
             )
         }
         val messagesState = mutableStateOf<UiState<List<RoomMessage>>>(UiState.Success(initialMessages))
         val room = ChatRoom(
             id = "room_1",
             title = "General",
+            chatKind = ChatKind.GROUP,
             roomCode = "ES1234",
-            ownerId = "u1",
-            memberUids = listOf("u1", "u2")
+            memberCount = 2
         )
 
         composeTestRule.setContent {
             EsosaTheme {
                 MessagesScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
+                    currentUserId = "local_me",
                     roomsState = UiState.Success(listOf(room)),
                     selectedRoomId = room.id,
                     activeRoom = room,
@@ -66,14 +59,11 @@ class ChatAutoScrollTest {
                     actionError = null,
                     isBusy = false,
                     onOpenRoom = {},
-                    onCreateRoom = { _, _ -> },
-                    onJoinRoom = {},
+                    onCreateRoom = { _, _, _ -> },
                     onSendMessage = { _, _ -> },
                     onDeleteMessage = { _, _ -> },
-                    onLeaveOrDeleteRoom = {},
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onDeleteRoom = {},
+                    onClearError = {}
                 )
             }
         }
@@ -86,9 +76,9 @@ class ChatAutoScrollTest {
             id = "msg_26",
             roomId = "room_1",
             senderId = "u2",
-            senderName = "Esosa",
+            senderName = "Alex",
             text = "Newest incoming room message #26",
-            createdAt = Timestamp(1_700_000_026L, 0)
+            createdAtMillis = baseMillis + 26_000L
         )
         messagesState.value = UiState.Success(updatedMessages)
         composeTestRule.waitForIdle()
@@ -97,24 +87,24 @@ class ChatAutoScrollTest {
 
     @Test
     fun `ai chat auto-scrolls on new message and streaming reply update`() {
+        val baseMillis = 1_700_000_000_000L
         val initialMessages = (1..20).map { idx ->
             AiMessage(
                 id = "ai_$idx",
-                userId = "u1",
+                userId = "local_me",
                 threadId = "thread_1",
                 role = if (idx % 2 == 1) "user" else "model",
                 text = "Gemini message #$idx",
-                createdAt = Timestamp(1_700_000_000L + idx, 0)
+                createdAtMillis = baseMillis + idx * 1000L
             )
         }
         val messagesState = mutableStateOf<UiState<List<AiMessage>>>(UiState.Success(initialMessages))
         val streamingReply = mutableStateOf<String?>(null)
-        val thread = AiThread(id = "thread_1", userId = "u1", title = "Assistant")
+        val thread = AiThread(id = "thread_1", userId = "local_me", title = "Assistant")
 
         composeTestRule.setContent {
             EsosaTheme {
                 AiChatScreen(
-                    userProfileInfo = profile,
                     threadsState = UiState.Success(listOf(thread)),
                     selectedThreadId = thread.id,
                     messagesState = messagesState.value,
@@ -126,9 +116,7 @@ class ChatAutoScrollTest {
                     onSwitchPersona = {},
                     onDeleteThread = {},
                     onSendPrompt = { _, _, _ -> },
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onClearError = {}
                 )
             }
         }

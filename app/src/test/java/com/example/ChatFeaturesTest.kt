@@ -14,25 +14,23 @@ import androidx.compose.ui.test.performTextInput
 import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiThread
+import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
-import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.LiveVoiceScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.theme.EsosaTheme
 import com.example.ui.viewmodel.LiveTranscriptItem
 import com.example.ui.viewmodel.LiveVoiceStatus
-import com.google.firebase.Timestamp
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.Date
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], qualifiers = "w411dp-h891dp-xxhdpi")
@@ -41,21 +39,15 @@ class ChatFeaturesTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    private val profile = UserProfileHeaderInfo(
-        displayName = "Roman",
-        email = "roman@example.com",
-        photoUrl = null
-    )
-
     @Test
     fun `room displays timestamps, typing indicator, and toggles emoji reactions`() {
-        val now = Timestamp(Date())
+        val nowMillis = System.currentTimeMillis()
         val room = ChatRoom(
             id = "room_1",
             title = "Design Lounge",
+            chatKind = ChatKind.GROUP,
             roomCode = "ES1234",
-            ownerId = "u1",
-            memberUids = listOf("u1", "u2", "u3")
+            memberCount = 3
         )
         val message = RoomMessage(
             id = "msg_1",
@@ -63,9 +55,8 @@ class ChatFeaturesTest {
             senderId = "u2",
             senderName = "Alice",
             text = "Hello Esosa!",
-            memberUids = listOf("u1", "u2", "u3"),
             reactions = mapOf("👍" to listOf("u2")),
-            createdAt = now
+            createdAtMillis = nowMillis
         )
         val typingUsers = listOf(
             RoomTypingStatus(
@@ -83,8 +74,7 @@ class ChatFeaturesTest {
         composeTestRule.setContent {
             EsosaTheme {
                 MessagesScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
+                    currentUserId = "local_me",
                     roomsState = UiState.Success(listOf(room)),
                     selectedRoomId = room.id,
                     activeRoom = room,
@@ -93,18 +83,15 @@ class ChatFeaturesTest {
                     actionError = null,
                     isBusy = false,
                     onOpenRoom = {},
-                    onCreateRoom = { _, _ -> },
-                    onJoinRoom = {},
+                    onCreateRoom = { _, _, _ -> },
                     onDraftChanged = { _, text -> lastDraft = text },
                     onSendMessage = { _, _ -> },
                     onToggleReaction = { rId, mId, emoji ->
                         toggledReactions.add(Triple(rId, mId, emoji))
                     },
                     onDeleteMessage = { _, _ -> },
-                    onLeaveOrDeleteRoom = {},
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onDeleteRoom = {},
+                    onClearError = {}
                 )
             }
         }
@@ -125,7 +112,7 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("reaction_picker_msg_1").assertIsDisplayed()
         composeTestRule.onNodeWithTag("reaction_option_msg_1_❤️").performClick()
 
-        // Type into composer to trigger typing indicator draft callback
+        // Type into composer to verify draft callback
         composeTestRule.onNodeWithTag("room_message_input").performTextInput("On my way")
 
         assertEquals(
@@ -140,24 +127,23 @@ class ChatFeaturesTest {
 
     @Test
     fun `ai chat displays timestamps, typing indicator while generating, and emoji reactions`() {
-        val now = Timestamp(Date())
-        val thread = AiThread(id = "thread_1", userId = "u1", title = "Assistant")
+        val nowMillis = System.currentTimeMillis()
+        val thread = AiThread(id = "thread_1", userId = "local_me", title = "Assistant")
         val aiMsg = AiMessage(
             id = "ai_1",
-            userId = "u1",
+            userId = "local_me",
             threadId = "thread_1",
             role = "model",
             text = "Here is your summary.",
-            reactions = mapOf("🔥" to listOf("u1")),
-            createdAt = now
+            reactions = mapOf("🔥" to listOf("local_me")),
+            createdAtMillis = nowMillis
         )
         val toggledAiReactions = mutableListOf<Triple<String, String, String>>()
 
         composeTestRule.setContent {
             EsosaTheme {
                 AiChatScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
+                    currentUserId = "local_me",
                     threadsState = UiState.Success(listOf(thread)),
                     selectedThreadId = thread.id,
                     messagesState = UiState.Success(listOf(aiMsg)),
@@ -172,9 +158,7 @@ class ChatFeaturesTest {
                     onToggleReaction = { tId, mId, emoji ->
                         toggledAiReactions.add(Triple(tId, mId, emoji))
                     },
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onClearError = {}
                 )
             }
         }
@@ -193,21 +177,20 @@ class ChatFeaturesTest {
 
     @Test
     fun `live voice screen shows transcript timestamps and live speaking indicator`() {
-        val now = Timestamp(Date())
+        val nowMillis = System.currentTimeMillis()
         val transcripts = listOf(
             LiveTranscriptItem(
                 id = "lv_1",
                 speaker = "You",
                 text = "What is on my schedule?",
                 isStreaming = false,
-                createdAt = now
+                createdAtMillis = nowMillis
             )
         )
 
         composeTestRule.setContent {
             EsosaTheme {
                 LiveVoiceScreen(
-                    userProfileInfo = profile,
                     status = LiveVoiceStatus.ACTIVE,
                     statusMessage = "Listening live",
                     transcripts = transcripts,
@@ -221,9 +204,7 @@ class ChatFeaturesTest {
                     onToggleMute = {},
                     onToggleSpeaker = {},
                     onSendTextDuringLive = {},
-                    onClearTranscripts = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onClearTranscripts = {}
                 )
             }
         }
@@ -236,26 +217,26 @@ class ChatFeaturesTest {
 
     @Test
     fun `chat list search bar filters conversations, shows message matches, and opens target message`() {
-        val now = Timestamp(Date())
+        val nowMillis = System.currentTimeMillis()
         val designRoom = ChatRoom(
             id = "room_design",
             title = "Design Lounge",
+            chatKind = ChatKind.GROUP,
             roomCode = "ES1001",
-            ownerId = "u1",
-            memberUids = listOf("u1", "u2"),
+            memberCount = 2,
             lastMessageSenderName = "Alice",
             lastMessageText = "Updated Figma tokens",
-            lastMessageAt = now
+            lastMessageAtMillis = nowMillis
         )
         val travelRoom = ChatRoom(
             id = "room_travel",
             title = "Weekend Trip",
+            chatKind = ChatKind.GROUP,
             roomCode = "ES2002",
-            ownerId = "u1",
-            memberUids = listOf("u1", "u2"),
+            memberCount = 2,
             lastMessageSenderName = "Bob",
             lastMessageText = "Booked the cabin",
-            lastMessageAt = now
+            lastMessageAtMillis = nowMillis
         )
         val pastMessage = RoomMessage(
             id = "msg_old_9",
@@ -263,8 +244,7 @@ class ChatFeaturesTest {
             senderId = "u2",
             senderName = "Bob",
             text = "Don't forget the release checklist before Friday",
-            memberUids = listOf("u1", "u2"),
-            createdAt = now
+            createdAtMillis = nowMillis
         )
         var openedSearchHit: Pair<String, String?>? = null
 
@@ -279,8 +259,7 @@ class ChatFeaturesTest {
             }
             EsosaTheme {
                 MessagesScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
+                    currentUserId = "local_me",
                     roomsState = UiState.Success(listOf(designRoom, travelRoom)),
                     selectedRoomId = null,
                     activeRoom = null,
@@ -292,14 +271,11 @@ class ChatFeaturesTest {
                     onOpenRoom = {},
                     onSearchQueryChanged = { query = it },
                     onOpenSearchResult = { rId, mId -> openedSearchHit = rId to mId },
-                    onCreateRoom = { _, _ -> },
-                    onJoinRoom = {},
+                    onCreateRoom = { _, _, _ -> },
                     onSendMessage = { _, _ -> },
                     onDeleteMessage = { _, _ -> },
-                    onLeaveOrDeleteRoom = {},
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onDeleteRoom = {},
+                    onClearError = {}
                 )
             }
         }
@@ -339,27 +315,25 @@ class ChatFeaturesTest {
 
     @Test
     fun `ai history sheet includes search bar to filter past conversations`() {
-        val now = Timestamp(Date())
+        val nowMillis = System.currentTimeMillis()
         val threadOne = AiThread(
             id = "ai_t1",
-            userId = "u1",
+            userId = "local_me",
             title = "Android Release Plan",
             lastMessagePreview = "APK signing steps",
-            updatedAt = now
+            updatedAtMillis = nowMillis
         )
         val threadTwo = AiThread(
             id = "ai_t2",
-            userId = "u1",
+            userId = "local_me",
             title = "Grocery Recipes",
             lastMessagePreview = "Pasta sauce ideas",
-            updatedAt = now
+            updatedAtMillis = nowMillis
         )
 
         composeTestRule.setContent {
             EsosaTheme {
                 AiChatScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
                     threadsState = UiState.Success(listOf(threadOne, threadTwo)),
                     selectedThreadId = threadOne.id,
                     messagesState = UiState.Success(emptyList()),
@@ -371,9 +345,7 @@ class ChatFeaturesTest {
                     onSwitchPersona = {},
                     onDeleteThread = {},
                     onSendPrompt = { _, _, _ -> },
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onClearError = {}
                 )
             }
         }
@@ -392,32 +364,30 @@ class ChatFeaturesTest {
 
     @Test
     fun `room displays camera button, photo upload progress, inline photo bubble, and full-screen photo preview`() {
-        val now = Timestamp(Date())
+        val nowMillis = System.currentTimeMillis()
         val room = ChatRoom(
             id = "room_photo",
             title = "Field Snapshots",
+            chatKind = ChatKind.GROUP,
             roomCode = "ES9090",
-            ownerId = "u1",
-            memberUids = listOf("u1", "u2")
+            memberCount = 2
         )
         val photoMessage = RoomMessage(
             id = "msg_cam_1",
             roomId = "room_photo",
-            senderId = "u1",
-            senderName = "Roman",
+            senderId = "local_me",
+            senderName = "Esosa User",
             text = "Whiteboard notes",
-            imageUrl = "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/rooms%2Froom_photo%2Fphotos%2Fmsg_cam_1.jpg?alt=media",
-            storagePath = "rooms/room_photo/photos/msg_cam_1.jpg",
+            imageUrl = "file:///data/user/0/com.example/files/chat_photos/msg_cam_1.jpg",
+            storagePath = "/data/user/0/com.example/files/chat_photos/msg_cam_1.jpg",
             messageType = "image",
-            memberUids = listOf("u1", "u2"),
-            createdAt = now
+            createdAtMillis = nowMillis
         )
 
         composeTestRule.setContent {
             EsosaTheme {
                 MessagesScreen(
-                    currentUserId = "u1",
-                    userProfileInfo = profile,
+                    currentUserId = "local_me",
                     roomsState = UiState.Success(listOf(room)),
                     selectedRoomId = room.id,
                     activeRoom = room,
@@ -427,14 +397,11 @@ class ChatFeaturesTest {
                     actionError = null,
                     isBusy = false,
                     onOpenRoom = {},
-                    onCreateRoom = { _, _ -> },
-                    onJoinRoom = {},
+                    onCreateRoom = { _, _, _ -> },
                     onSendMessage = { _, _ -> },
                     onDeleteMessage = { _, _ -> },
-                    onLeaveOrDeleteRoom = {},
-                    onClearError = {},
-                    onOpenSettings = {},
-                    onSignOut = {}
+                    onDeleteRoom = {},
+                    onClearError = {}
                 )
             }
         }
@@ -455,4 +422,3 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("full_screen_photo_dialog").assertDoesNotExist()
     }
 }
-

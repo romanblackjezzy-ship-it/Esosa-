@@ -1,10 +1,13 @@
 package com.example.ui.viewmodel
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
+import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
@@ -12,16 +15,10 @@ import com.example.data.model.RoomTypingStatus
 import com.example.data.model.UserProfile
 import com.example.data.repository.ChatRepository
 import com.example.notifications.EsosaNotificationManager
-import com.google.firebase.Firebase
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,9 +35,10 @@ import kotlinx.coroutines.launch
 class RoomsViewModel(
     private val repository: ChatRepository,
     private val notificationManager: EsosaNotificationManager,
-    private val currentUserId: String,
     private val selectionPreferences: ThreadSelectionPreferences? = null
 ) : ViewModel() {
+
+    val currentUserId: String = repository.currentUserId()
 
     private val _selectedRoomId = MutableStateFlow(selectionPreferences?.getLastRoomId(currentUserId))
     val selectedRoomId: StateFlow<String?> = _selectedRoomId.asStateFlow()
@@ -73,45 +71,30 @@ class RoomsViewModel(
     private val _highlightedMessageId = MutableStateFlow<String?>(null)
     val highlightedMessageId: StateFlow<String?> = _highlightedMessageId.asStateFlow()
 
-    private val knownRoomTimestamps = mutableMapOf<String, Timestamp>()
-    private var initialRoomsLoaded = false
-    private var typingTimeoutJob: Job? = null
-    private var searchJob: Job? = null
-    private var lastTypingSentTrueAtMs = 0L
-    private var activeTypingRoom: ChatRoom? = null
+    private val _typingUsers = MutableStateFlow<List<RoomTypingStatus>>(emptyList())
+    val typingUsers: StateFlow<List<RoomTypingStatus>> = _typingUsers.asStateFlow()
 
-    val userProfile: StateFlow<UserProfile?> = repository.observeUserProfile(currentUserId)
-        .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            Log.w(TAG, "Error observing user profile", firestoreError ?: error)
-            emit(null)
-        }
+    private var searchJob: Job? = null
+
+    val userProfile: StateFlow<UserProfile> = repository.observeUserProfile()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = null
+            initialValue = UserProfile(id = LocalProfilePreferences.LOCAL_USER_ID)
         )
 
-    val roomsState: StateFlow<UiState<List<ChatRoom>>> = repository.observeRooms(currentUserId)
+    val roomsState: StateFlow<UiState<List<ChatRoom>>> = repository.observeRooms()
         .onEach { rooms ->
             val currentSelected = _selectedRoomId.value
             if (currentSelected != null && rooms.none { it.id == currentSelected }) {
                 setSelectedRoom(null)
             }
-            handleIncomingRoomUpdates(rooms)
         }
         .map<List<ChatRoom>, UiState<List<ChatRoom>>> { UiState.Success(it) }
         .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w(TAG, "Error observing rooms", rootError)
-            emit(UiState.Error(rootError.localizedMessage ?: "Failed to load chat rooms"))
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Error observing local chats", error)
+            emit(UiState.Error(error.localizedMessage ?: "Failed to load chats"))
         }
         .stateIn(
             scope = viewModelScope,
@@ -122,14 +105,11 @@ class RoomsViewModel(
     val activeRoom: StateFlow<ChatRoom?> = _selectedRoomId
         .flatMapLatest { roomId ->
             if (roomId.isNullOrBlank()) flowOf(null)
-            else repository.observeRoom(roomId, currentUserId)
+            else repository.observeRoom(roomId)
         }
         .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            Log.w(TAG, "Error observing active room", firestoreError ?: error)
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Error observing active chat", error)
             emit(null)
         }
         .stateIn(
@@ -143,16 +123,12 @@ class RoomsViewModel(
             if (roomId.isNullOrBlank()) {
                 flowOf(UiState.Success(emptyList()))
             } else {
-                repository.observeMessages(roomId, currentUserId)
+                repository.observeMessages(roomId)
                     .map<List<RoomMessage>, UiState<List<RoomMessage>>> { UiState.Success(it) }
                     .catch { error ->
-                        val firestoreError = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (firestoreError == null && error is CancellationException) throw error
-                        val rootError = firestoreError ?: error
-                        Log.w(TAG, "Error observing room messages", rootError)
-                        emit(UiState.Error(rootError.localizedMessage ?: "Failed to load messages"))
+                        if (error is CancellationException) throw error
+                        Log.w(TAG, "Error observing messages", error)
+                        emit(UiState.Error(error.localizedMessage ?: "Failed to load messages"))
                     }
             }
         }
@@ -162,77 +138,17 @@ class RoomsViewModel(
             initialValue = UiState.Loading
         )
 
-    val typingUsers: StateFlow<List<RoomTypingStatus>> = _selectedRoomId
-        .flatMapLatest { roomId ->
-            if (roomId.isNullOrBlank()) {
-                flowOf(emptyList())
-            } else {
-                repository.observeTypingStatuses(roomId, currentUserId)
-                    .map { statuses ->
-                        statuses.filter { it.typing && it.userId != currentUserId }
-                    }
-                    .catch { error ->
-                        val firestoreError = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (firestoreError == null && error is CancellationException) throw error
-                        Log.w(TAG, "Error observing typing statuses", firestoreError ?: error)
-                        emit(emptyList())
-                    }
-            }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = emptyList()
-        )
-
     init {
         viewModelScope.launch {
-            repository.ensureUserProfile()
+            repository.ensureStarterChats()
         }
     }
 
     private fun setSelectedRoom(roomId: String?) {
-        if (_selectedRoomId.value != roomId) {
-            clearTyping(activeTypingRoom)
-        }
         _selectedRoomId.value = roomId
         selectionPreferences?.setLastRoomId(currentUserId, roomId)
-    }
-
-    private fun handleIncomingRoomUpdates(rooms: List<ChatRoom>) {
-        if (!initialRoomsLoaded) {
-            rooms.forEach { room ->
-                room.lastMessageAt?.let { knownRoomTimestamps[room.id] = it }
-            }
-            initialRoomsLoaded = true
-            return
-        }
-
-        val notificationsOn = userProfile.value?.notificationsEnabled ?: true
-        val myName = userProfile.value?.displayName
-            ?: Firebase.auth.currentUser?.displayName
-            ?: ""
-
-        rooms.forEach { room ->
-            val latestTs = room.lastMessageAt ?: return@forEach
-            val prevTs = knownRoomTimestamps[room.id]
-            val isNewer = prevTs == null || latestTs > prevTs
-            knownRoomTimestamps[room.id] = latestTs
-
-            val currentlyViewingThisRoom = _isOnMessagesScreen.value && _selectedRoomId.value == room.id
-            val fromAnotherUser = room.lastMessageSenderName.isNotBlank() &&
-                room.lastMessageSenderName != myName
-
-            if (isNewer && notificationsOn && !currentlyViewingThisRoom && fromAnotherUser) {
-                notificationManager.showIncomingMessageNotification(
-                    roomId = room.id,
-                    roomTitle = room.title,
-                    senderName = room.lastMessageSenderName,
-                    messageText = room.lastMessageText
-                )
-            }
+        if (!roomId.isNullOrBlank()) {
+            viewModelScope.launch { repository.markRoomRead(roomId) }
         }
     }
 
@@ -272,8 +188,8 @@ class RoomsViewModel(
         searchJob = viewModelScope.launch {
             _isSearchingMessages.value = true
             try {
-                delay(220)
-                val hits = repository.searchRoomMessages(rooms, currentUserId, trimmed)
+                delay(150)
+                val hits = repository.searchRoomMessages(rooms, trimmed)
                 if (_searchQuery.value.trim() == trimmed) {
                     _matchingMessages.value = hits
                 }
@@ -296,73 +212,36 @@ class RoomsViewModel(
         _actionError.value = null
     }
 
-    fun createRoom(title: String, topic: String, onCreated: (String) -> Unit = {}) {
+    fun createRoom(
+        title: String,
+        topic: String,
+        chatKind: ChatKind = ChatKind.GROUP,
+        onCreated: (String) -> Unit = {}
+    ) {
         viewModelScope.launch {
             _isBusy.value = true
             _actionError.value = null
-            val result = repository.createRoom(title, topic)
+            val result = repository.createRoom(title, topic, chatKind)
             _isBusy.value = false
             result.onSuccess { roomId ->
                 setSelectedRoom(roomId)
                 onCreated(roomId)
             }.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Could not create room."
+                _actionError.value = err.localizedMessage ?: "Could not create chat."
             }
         }
     }
 
-    fun joinRoomByCode(code: String, onJoined: (String) -> Unit = {}) {
+    fun togglePinRoom(roomId: String) {
         viewModelScope.launch {
-            _isBusy.value = true
-            _actionError.value = null
-            val result = repository.joinRoomByCode(code)
-            _isBusy.value = false
-            result.onSuccess { roomId ->
-                setSelectedRoom(roomId)
-                onJoined(roomId)
-            }.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Could not join room."
-            }
-        }
-    }
-
-    fun onDraftChanged(room: ChatRoom?, text: String) {
-        if (room == null) return
-        if (text.isBlank()) {
-            clearTyping(room)
-            return
-        }
-        typingTimeoutJob?.cancel()
-        typingTimeoutJob = viewModelScope.launch {
-            delay(TYPING_IDLE_TIMEOUT_MS)
-            clearTyping(room)
-        }
-        val now = System.currentTimeMillis()
-        if (activeTypingRoom?.id != room.id || now - lastTypingSentTrueAtMs >= TYPING_HEARTBEAT_MS) {
-            lastTypingSentTrueAtMs = now
-            activeTypingRoom = room
-            viewModelScope.launch {
-                repository.setTypingStatus(room, true)
-            }
-        }
-    }
-
-    fun clearTyping(room: ChatRoom? = activeTypingRoom) {
-        typingTimeoutJob?.cancel()
-        typingTimeoutJob = null
-        lastTypingSentTrueAtMs = 0L
-        val target = room ?: return
-        if (activeTypingRoom?.id == target.id || activeTypingRoom == null) {
-            activeTypingRoom = null
-            viewModelScope.launch {
-                repository.setTypingStatus(target, false)
+            repository.togglePinRoom(roomId).onFailure { err ->
+                _actionError.value = err.localizedMessage ?: "Could not update pin status."
             }
         }
     }
 
     fun sendMessage(room: ChatRoom, text: String, onSent: () -> Unit = {}) {
         if (text.isBlank() || _isSendingMessage.value) return
-        clearTyping(room)
         viewModelScope.launch {
             _actionError.value = null
             _isSendingMessage.value = true
@@ -381,23 +260,20 @@ class RoomsViewModel(
 
     fun sendPhotoMessage(
         room: ChatRoom,
-        previewUriString: String,
+        photoUri: Uri,
         caption: String = "",
-        loadJpegBytes: suspend () -> ByteArray,
         onCleanup: () -> Unit = {},
         onSent: () -> Unit = {}
     ) {
         if (_photoUploadProgress.value != null) return
-        clearTyping(room)
         viewModelScope.launch {
             _actionError.value = null
-            _photoUploadPreviewUri.value = previewUriString
-            _photoUploadProgress.value = 0.02f
+            _photoUploadPreviewUri.value = photoUri.toString()
+            _photoUploadProgress.value = 0.1f
             try {
-                val jpegBytes = withContext(Dispatchers.IO) { loadJpegBytes() }
                 val result = repository.sendRoomPhotoMessage(
                     room = room,
-                    jpegBytes = jpegBytes,
+                    photoUri = photoUri,
                     rawCaption = caption,
                     onProgress = { progress ->
                         _photoUploadProgress.value = progress
@@ -406,7 +282,7 @@ class RoomsViewModel(
                 result.onSuccess {
                     onSent()
                 }.onFailure { err ->
-                    _actionError.value = err.localizedMessage ?: "Failed to upload photo."
+                    _actionError.value = err.localizedMessage ?: "Failed to save photo."
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -426,45 +302,43 @@ class RoomsViewModel(
 
     fun toggleReaction(roomId: String, messageId: String, emoji: String) {
         viewModelScope.launch {
-            val result = repository.toggleMessageReaction(roomId, messageId, emoji)
-            result.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Failed to update reaction."
-            }
+            repository.toggleMessageReaction(roomId, messageId, emoji)
+                .onFailure { err ->
+                    _actionError.value = err.localizedMessage ?: "Failed to update reaction."
+                }
         }
     }
 
     fun deleteMessage(roomId: String, messageId: String, storagePath: String? = null) {
         viewModelScope.launch {
-            val result = repository.deleteRoomMessage(roomId, messageId, storagePath)
-            result.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Failed to delete message."
-            }
+            repository.deleteRoomMessage(roomId, messageId, storagePath)
+                .onFailure { err ->
+                    _actionError.value = err.localizedMessage ?: "Failed to delete message."
+                }
         }
     }
 
-    fun leaveOrDeleteRoom(room: ChatRoom) {
-        clearTyping(room)
+    fun deleteRoom(room: ChatRoom) {
         viewModelScope.launch {
             _isBusy.value = true
-            val result = repository.leaveOrDeleteRoom(room)
+            val result = repository.deleteRoom(room)
             _isBusy.value = false
             result.onSuccess {
                 if (_selectedRoomId.value == room.id) {
                     setSelectedRoom(null)
                 }
             }.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Failed to update room membership."
+                _actionError.value = err.localizedMessage ?: "Failed to delete chat."
             }
         }
     }
 
+    fun updateLocalProfile(displayName: String, username: String, bio: String) {
+        repository.updateLocalProfile(displayName, username, bio)
+    }
+
     fun setNotificationsEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            val result = repository.updateNotificationsEnabled(currentUserId, enabled)
-            result.onFailure { err ->
-                _actionError.value = err.localizedMessage ?: "Failed to save notification setting."
-            }
-        }
+        repository.updateNotificationsEnabled(enabled)
     }
 
     fun sendTestNotification(): Boolean {
@@ -473,8 +347,5 @@ class RoomsViewModel(
 
     private companion object {
         const val TAG = "RoomsVM"
-        const val STOP_TIMEOUT_MILLIS = 5000L
-        const val TYPING_HEARTBEAT_MS = 2500L
-        const val TYPING_IDLE_TIMEOUT_MS = 4000L
     }
 }

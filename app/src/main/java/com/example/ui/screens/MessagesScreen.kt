@@ -1,14 +1,7 @@
 package com.example.ui.screens
 
-import android.Manifest
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -21,35 +14,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.EmojiEmotions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,15 +44,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -74,56 +60,43 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.ContextCompat
-import coil.compose.AsyncImage
 import com.example.R
 import com.example.core.UiState
-import com.example.data.media.CameraPhotoHelper
+import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
-import com.example.ui.components.AutoScrollToBottomEffect
-import com.example.ui.components.ChatMessagesLoadingSkeleton
 import com.example.ui.components.ChatSearchBar
-import com.example.ui.components.DateSeparatorChip
-import com.example.ui.components.MessageReactionsRow
-import com.example.ui.components.ReactionPickerStrip
 import com.example.ui.components.RoomsLoadingSkeleton
-import com.example.ui.components.TypingIndicatorBanner
-import com.example.ui.components.UserProfileHeaderInfo
-import com.example.ui.components.UserProfileTopBarAction
+import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.components.buildHighlightedText
-import com.example.ui.components.formatChatDateLabel
-import com.example.ui.components.formatMessageTime
 import com.example.ui.components.formatRelativeThreadTime
-import com.example.ui.components.messageDayKey
-import kotlinx.coroutines.delay
-import java.io.File
+import com.example.ui.theme.telegramColors
+
+enum class ChatFolderFilter(val label: String, val tag: String) {
+    ALL("All Chats", "folder_all"),
+    PINNED("Pinned", "folder_pinned"),
+    GROUPS("Groups", "folder_groups"),
+    CHANNELS("Channels", "folder_channels")
+}
 
 @Composable
 fun MessagesScreen(
     currentUserId: String,
-    userProfileInfo: UserProfileHeaderInfo,
     roomsState: UiState<List<ChatRoom>>,
     selectedRoomId: String?,
     activeRoom: ChatRoom?,
@@ -142,8 +115,8 @@ fun MessagesScreen(
     onSearchQueryChanged: (String) -> Unit = {},
     onOpenSearchResult: (String, String?) -> Unit = { roomId, _ -> onOpenRoom(roomId) },
     onClearHighlight: () -> Unit = {},
-    onCreateRoom: (String, String) -> Unit,
-    onJoinRoom: (String) -> Unit,
+    onCreateRoom: (String, String, ChatKind) -> Unit,
+    onTogglePinRoom: (String) -> Unit = {},
     onDraftChanged: (ChatRoom?, String) -> Unit = { _, _ -> },
     onSendMessage: (ChatRoom, String) -> Unit,
     onSendCapturedPhoto: (ChatRoom, Uri, String, () -> Unit) -> Unit = { _, _, _, cleanup -> cleanup() },
@@ -151,17 +124,14 @@ fun MessagesScreen(
     onToggleReaction: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteMessage: (String, String) -> Unit,
     onDeleteRoomMessage: ((String, RoomMessage) -> Unit)? = null,
-    onLeaveOrDeleteRoom: (ChatRoom) -> Unit,
+    onDeleteRoom: (ChatRoom) -> Unit,
     onClearError: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (selectedRoomId != null) {
         BackHandler { onOpenRoom(null) }
-        RoomDetailView(
+        TelegramChatDetailView(
             currentUserId = currentUserId,
-            userProfileInfo = userProfileInfo,
             room = activeRoom,
             messagesState = activeMessagesState,
             typingUsers = typingUsers,
@@ -173,9 +143,7 @@ fun MessagesScreen(
             onBack = { onOpenRoom(null) },
             onClearHighlight = onClearHighlight,
             onDraftChanged = onDraftChanged,
-            onSendMessage = { text ->
-                activeRoom?.let { onSendMessage(it, text) }
-            },
+            onSendMessage = { text -> activeRoom?.let { onSendMessage(it, text) } },
             onSendCapturedPhoto = { uri, caption, cleanup ->
                 val targetRoom = activeRoom
                 if (targetRoom != null) {
@@ -185,9 +153,7 @@ fun MessagesScreen(
                 }
             },
             onReportError = onReportError,
-            onToggleReaction = { msgId, emoji ->
-                onToggleReaction(selectedRoomId, msgId, emoji)
-            },
+            onToggleReaction = { msgId, emoji -> onToggleReaction(selectedRoomId, msgId, emoji) },
             onDeleteMessage = { msg ->
                 if (onDeleteRoomMessage != null) {
                     onDeleteRoomMessage(selectedRoomId, msg)
@@ -195,17 +161,13 @@ fun MessagesScreen(
                     onDeleteMessage(selectedRoomId, msg.id)
                 }
             },
-            onLeaveOrDeleteRoom = {
-                activeRoom?.let { onLeaveOrDeleteRoom(it) }
-            },
+            onTogglePin = { activeRoom?.let { onTogglePinRoom(it.id) } },
+            onDeleteRoom = { activeRoom?.let { onDeleteRoom(it) } },
             onClearError = onClearError,
-            onOpenSettings = onOpenSettings,
-            onSignOut = onSignOut,
             modifier = modifier
         )
     } else {
-        RoomsListView(
-            userProfileInfo = userProfileInfo,
+        TelegramChatsListView(
             roomsState = roomsState,
             searchQuery = searchQuery,
             matchingMessages = matchingMessages,
@@ -216,10 +178,9 @@ fun MessagesScreen(
             onOpenRoom = onOpenRoom,
             onOpenSearchResult = onOpenSearchResult,
             onCreateRoom = onCreateRoom,
-            onJoinRoom = onJoinRoom,
+            onTogglePinRoom = onTogglePinRoom,
+            onDeleteRoom = onDeleteRoom,
             onClearError = onClearError,
-            onOpenSettings = onOpenSettings,
-            onSignOut = onSignOut,
             modifier = modifier
         )
     }
@@ -227,8 +188,7 @@ fun MessagesScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RoomsListView(
-    userProfileInfo: UserProfileHeaderInfo,
+private fun TelegramChatsListView(
     roomsState: UiState<List<ChatRoom>>,
     searchQuery: String,
     matchingMessages: List<MessageSearchHit>,
@@ -238,69 +198,57 @@ private fun RoomsListView(
     onSearchQueryChanged: (String) -> Unit,
     onOpenRoom: (String) -> Unit,
     onOpenSearchResult: (String, String?) -> Unit,
-    onCreateRoom: (String, String) -> Unit,
-    onJoinRoom: (String) -> Unit,
+    onCreateRoom: (String, String, ChatKind) -> Unit,
+    onTogglePinRoom: (String) -> Unit,
+    onDeleteRoom: (ChatRoom) -> Unit,
     onClearError: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val telegram = MaterialTheme.telegramColors
     var showCreateDialog by remember { mutableStateOf(false) }
-    var showJoinDialog by remember { mutableStateOf(false) }
+    var selectedFolder by rememberSaveable { mutableStateOf(ChatFolderFilter.ALL) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "Messages",
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Text(
-                            text = "REAL-TIME CHANNELS",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                },
-                actions = {
-                    FilledTonalButton(
-                        onClick = { showJoinDialog = true },
-                        modifier = Modifier
-                            .padding(end = 6.dp)
-                            .testTag("join_room_button"),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.GroupAdd,
-                            contentDescription = "Join room by code",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("Join", style = MaterialTheme.typography.labelMedium)
-                    }
-                    UserProfileTopBarAction(
-                        userInfo = userProfileInfo,
-                        onOpenSettings = onOpenSettings,
-                        onSignOut = onSignOut,
-                        showNameChip = true
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = telegram.onTopBar
                     )
                 },
+                actions = {
+                    IconButton(
+                        onClick = { showCreateDialog = true },
+                        modifier = Modifier.testTag("top_bar_new_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "New Chat",
+                            tint = telegram.onTopBar
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = telegram.topBarContainer,
+                    titleContentColor = telegram.onTopBar,
+                    actionIconContentColor = telegram.onTopBar
                 )
             )
         },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showCreateDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = CircleShape,
+                containerColor = telegram.sendFab,
+                contentColor = telegram.onSendFab,
                 modifier = Modifier.testTag("create_room_fab")
             ) {
-                Icon(Icons.Filled.Add, contentDescription = "New room")
+                Icon(Icons.Filled.Edit, contentDescription = "New Chat")
             }
         }
     ) { innerPadding ->
@@ -308,17 +256,18 @@ private fun RoomsListView(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .background(MaterialTheme.colorScheme.surface)
         ) {
             AnimatedVisibility(visible = actionError != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -336,9 +285,7 @@ private fun RoomsListView(
             }
 
             when (roomsState) {
-                is UiState.Loading -> {
-                    RoomsLoadingSkeleton()
-                }
+                is UiState.Loading -> RoomsLoadingSkeleton()
 
                 is UiState.Error -> {
                     Box(
@@ -352,7 +299,7 @@ private fun RoomsListView(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "Could not load rooms",
+                                text = "Could not load chats",
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
@@ -367,14 +314,27 @@ private fun RoomsListView(
                 is UiState.Success -> {
                     val rooms = roomsState.data
                     val trimmedQuery = remember(searchQuery) { searchQuery.trim() }
-                    val filteredRooms = remember(rooms, trimmedQuery) {
-                        if (trimmedQuery.isEmpty()) {
+
+                    val folderFilteredRooms = remember(rooms, selectedFolder, trimmedQuery) {
+                        val base = if (trimmedQuery.isNotEmpty()) {
                             rooms
                         } else {
-                            rooms.filter { room ->
+                            when (selectedFolder) {
+                                ChatFolderFilter.ALL -> rooms
+                                ChatFolderFilter.PINNED -> rooms.filter { it.isPinned }
+                                ChatFolderFilter.GROUPS -> rooms.filter {
+                                    it.chatKind == ChatKind.GROUP || it.chatKind == ChatKind.DIRECT
+                                }
+                                ChatFolderFilter.CHANNELS -> rooms.filter { it.chatKind == ChatKind.CHANNEL }
+                            }
+                        }
+
+                        if (trimmedQuery.isEmpty()) {
+                            base
+                        } else {
+                            base.filter { room ->
                                 room.title.contains(trimmedQuery, ignoreCase = true) ||
                                     room.topic.contains(trimmedQuery, ignoreCase = true) ||
-                                    room.roomCode.contains(trimmedQuery, ignoreCase = true) ||
                                     room.lastMessageText.contains(trimmedQuery, ignoreCase = true) ||
                                     room.lastMessageSenderName.contains(trimmedQuery, ignoreCase = true)
                             }
@@ -387,17 +347,42 @@ private fun RoomsListView(
                             onQueryChange = onSearchQueryChanged,
                             placeholder = stringResource(R.string.search_chats_placeholder),
                             clearContentDescription = stringResource(R.string.search_chats_clear),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                         )
                     }
 
+                    if (trimmedQuery.isEmpty() && rooms.isNotEmpty()) {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(ChatFolderFilter.entries, key = { it.name }) { folder ->
+                                val selected = selectedFolder == folder
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { selectedFolder = folder },
+                                    label = {
+                                        Text(
+                                            text = folder.label,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                    modifier = Modifier.testTag(folder.tag)
+                                )
+                            }
+                        }
+                    }
+
                     if (rooms.isEmpty() && trimmedQuery.isEmpty()) {
-                        EmptyRoomsState(
-                            onCreateClick = { showCreateDialog = true },
-                            onJoinClick = { showJoinDialog = true }
-                        )
+                        EmptyTelegramChatsState(onCreateClick = { showCreateDialog = true })
                     } else if (trimmedQuery.isNotEmpty() &&
-                        filteredRooms.isEmpty() &&
+                        folderFilteredRooms.isEmpty() &&
                         matchingMessages.isEmpty() &&
                         !isSearchingMessages
                     ) {
@@ -405,42 +390,68 @@ private fun RoomsListView(
                             query = trimmedQuery,
                             onClearClick = { onSearchQueryChanged("") }
                         )
+                    } else if (trimmedQuery.isEmpty() && folderFilteredRooms.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "No chats in ${selectedFolder.label}",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                OutlinedButton(onClick = { selectedFolder = ChatFolderFilter.ALL }) {
+                                    Text("Show All Chats")
+                                }
+                            }
+                        }
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(
-                                start = 16.dp,
-                                end = 16.dp,
-                                top = 8.dp,
-                                bottom = 96.dp
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            contentPadding = PaddingValues(bottom = 96.dp)
                         ) {
                             if (trimmedQuery.isEmpty()) {
-                                items(filteredRooms, key = { it.id }) { room ->
-                                    RoomCard(
+                                items(folderFilteredRooms, key = { it.id }) { room ->
+                                    TelegramChatRow(
                                         room = room,
                                         searchQuery = "",
-                                        onClick = { onOpenRoom(room.id) }
+                                        onClick = { onOpenRoom(room.id) },
+                                        onTogglePin = { onTogglePinRoom(room.id) },
+                                        onDelete = { onDeleteRoom(room) }
+                                    )
+                                    HorizontalDivider(
+                                        color = telegram.divider,
+                                        modifier = Modifier.padding(start = 82.dp)
                                     )
                                 }
                             } else {
-                                if (filteredRooms.isNotEmpty()) {
+                                if (folderFilteredRooms.isNotEmpty()) {
                                     item(key = "header_conversations") {
                                         Text(
-                                            text = "${stringResource(R.string.search_results_conversations)} (${filteredRooms.size})",
+                                            text = "${stringResource(R.string.search_results_conversations)} (${folderFilteredRooms.size})",
                                             style = MaterialTheme.typography.labelLarge,
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier
-                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                .padding(horizontal = 16.dp, vertical = 6.dp)
                                                 .testTag("search_conversations_header")
                                         )
                                     }
-                                    items(filteredRooms, key = { "room_${it.id}" }) { room ->
-                                        RoomCard(
+                                    items(folderFilteredRooms, key = { "room_${it.id}" }) { room ->
+                                        TelegramChatRow(
                                             room = room,
                                             searchQuery = trimmedQuery,
-                                            onClick = { onOpenRoom(room.id) }
+                                            onClick = { onOpenRoom(room.id) },
+                                            onTogglePin = { onTogglePinRoom(room.id) },
+                                            onDelete = { onDeleteRoom(room) }
+                                        )
+                                        HorizontalDivider(
+                                            color = telegram.divider,
+                                            modifier = Modifier.padding(start = 82.dp)
                                         )
                                     }
                                 }
@@ -451,7 +462,7 @@ private fun RoomsListView(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             modifier = Modifier
-                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                .padding(horizontal = 16.dp, vertical = 8.dp)
                                                 .testTag("search_messages_header")
                                         ) {
                                             Text(
@@ -491,32 +502,201 @@ private fun RoomsListView(
     }
 
     if (showCreateDialog) {
-        CreateRoomDialog(
+        TelegramCreateChatDialog(
             isBusy = isBusy,
             onDismiss = { showCreateDialog = false },
-            onConfirm = { title, topic ->
-                onCreateRoom(title, topic)
+            onConfirm = { title, topic, kind ->
+                onCreateRoom(title, topic, kind)
                 showCreateDialog = false
-            }
-        )
-    }
-
-    if (showJoinDialog) {
-        JoinRoomDialog(
-            isBusy = isBusy,
-            onDismiss = { showJoinDialog = false },
-            onConfirm = { code ->
-                onJoinRoom(code)
-                showJoinDialog = false
             }
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EmptyRoomsState(
-    onCreateClick: () -> Unit,
-    onJoinClick: () -> Unit
+private fun TelegramChatRow(
+    room: ChatRoom,
+    searchQuery: String,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val telegram = MaterialTheme.telegramColors
+    val highlightBg = MaterialTheme.colorScheme.primaryContainer
+    val highlightFg = MaterialTheme.colorScheme.onPrimaryContainer
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .minimumInteractiveComponentSize()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+                onLongClickLabel = "Chat options"
+            )
+            .testTag("room_card_${room.id}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TelegramAvatarCircle(
+                title = room.title,
+                seedKey = room.id,
+                chatKind = room.chatKind,
+                size = 54.dp
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (room.chatKind == ChatKind.GROUP) {
+                            Icon(
+                                imageVector = Icons.Filled.Group,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else if (room.chatKind == ChatKind.CHANNEL) {
+                            Icon(
+                                imageVector = Icons.Filled.Campaign,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = buildHighlightedText(
+                                text = room.title,
+                                query = searchQuery,
+                                highlightBackground = highlightBg,
+                                highlightTextColor = highlightFg
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (room.lastMessageIsMine) {
+                            Icon(
+                                imageVector = Icons.Filled.DoneAll,
+                                contentDescription = "Delivered",
+                                tint = telegram.checkTint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = formatRelativeThreadTime(
+                                if (room.lastMessageAtMillis > 0L) room.lastMessageAtMillis else room.createdAtMillis
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (room.unreadCount > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(3.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val previewText = when {
+                        room.lastMessageSenderName.isNotBlank() && room.lastMessageText.isNotBlank() ->
+                            "${room.lastMessageSenderName}: ${room.lastMessageText}"
+                        room.lastMessageText.isNotBlank() -> room.lastMessageText
+                        room.topic.isNotBlank() -> room.topic
+                        else -> room.chatKind.label
+                    }
+                    Text(
+                        text = buildHighlightedText(
+                            text = previewText,
+                            query = searchQuery,
+                            highlightBackground = highlightBg,
+                            highlightTextColor = highlightFg
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (room.unreadCount > 0) {
+                            Surface(
+                                color = telegram.unreadBadge,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = room.unreadCount.toString(),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = telegram.onUnreadBadge,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        } else if (room.isPinned) {
+                            Icon(
+                                imageVector = Icons.Filled.PushPin,
+                                contentDescription = "Pinned",
+                                tint = telegram.pinnedTint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (room.isPinned) "Unpin Chat" else "Pin to Top") },
+                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                onClick = {
+                    showMenu = false
+                    onTogglePin()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete Chat") },
+                leadingIcon = { Icon(Icons.Filled.DeleteOutline, contentDescription = null) },
+                onClick = {
+                    showMenu = false
+                    onDelete()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyTelegramChatsState(
+    onCreateClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -525,53 +705,43 @@ private fun EmptyRoomsState(
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 420.dp),
+            modifier = Modifier.widthIn(max = 380.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Box(
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Filled.Forum,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(34.dp)
                 )
             }
             Text(
-                text = "Start a Real-Time Room",
+                text = "No chats yet",
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
-                text = "Create a room and share its 6-character code so others can message with you live and trigger real-time alerts.",
+                text = "Tap the pencil button to start a new chat, group, or channel stored right on your device.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(top = 8.dp)
+            Button(
+                onClick = onCreateClick,
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .testTag("empty_create_room_button")
             ) {
-                Button(
-                    onClick = onCreateClick,
-                    modifier = Modifier.testTag("empty_create_room_button")
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("New Room")
-                }
-                OutlinedButton(
-                    onClick = onJoinClick,
-                    modifier = Modifier.testTag("empty_join_room_button")
-                ) {
-                    Icon(Icons.Filled.Key, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Join Code")
-                }
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("New Chat")
             }
         }
     }
@@ -590,7 +760,7 @@ private fun EmptySearchResultsState(
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 380.dp),
+            modifier = Modifier.widthIn(max = 360.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -641,15 +811,16 @@ private fun MessageSearchResultCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 5.dp)
             .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .testTag("search_message_result_${hit.message.id}"),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(18.dp)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Column(
             modifier = Modifier
@@ -662,22 +833,27 @@ private fun MessageSearchResultCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
+                    TelegramAvatarCircle(
+                        title = hit.room.title,
+                        seedKey = hit.room.id,
+                        chatKind = hit.room.chatKind,
+                        size = 24.dp
+                    )
                     Text(
                         text = hit.room.title,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = formatRelativeThreadTime(hit.message.createdAt),
+                    text = formatRelativeThreadTime(hit.message.createdAtMillis),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -700,1050 +876,4 @@ private fun MessageSearchResultCard(
             )
         }
     }
-}
-
-@Composable
-private fun RoomCard(
-    room: ChatRoom,
-    searchQuery: String = "",
-    onClick: () -> Unit
-) {
-    val highlightBg = MaterialTheme.colorScheme.primaryContainer
-    val highlightFg = MaterialTheme.colorScheme.onPrimaryContainer
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .testTag("room_card_${room.id}"),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = room.title.take(2).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = buildHighlightedText(
-                            text = room.title,
-                            query = searchQuery,
-                            highlightBackground = highlightBg,
-                            highlightTextColor = highlightFg
-                        ),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = formatRelativeThreadTime(room.lastMessageAt ?: room.createdAt),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                val previewText = if (room.lastMessageSenderName.isNotBlank()) {
-                    "${room.lastMessageSenderName}: ${room.lastMessageText}"
-                } else {
-                    room.lastMessageText
-                }
-                Text(
-                    text = buildHighlightedText(
-                        text = previewText,
-                        query = searchQuery,
-                        highlightBackground = highlightBg,
-                        highlightTextColor = highlightFg
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = "CODE ${room.roomCode}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                    Text(
-                        text = "${room.memberUids.size} member${if (room.memberUids.size == 1) "" else "s"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun RoomDetailView(
-    currentUserId: String,
-    userProfileInfo: UserProfileHeaderInfo,
-    room: ChatRoom?,
-    messagesState: UiState<List<RoomMessage>>,
-    typingUsers: List<RoomTypingStatus>,
-    highlightedMessageId: String?,
-    actionError: String?,
-    isSendingMessage: Boolean,
-    photoUploadProgress: Float?,
-    photoUploadPreviewUri: String?,
-    onBack: () -> Unit,
-    onClearHighlight: () -> Unit,
-    onDraftChanged: (ChatRoom?, String) -> Unit,
-    onSendMessage: (String) -> Unit,
-    onSendCapturedPhoto: (Uri, String, () -> Unit) -> Unit,
-    onReportError: (String) -> Unit,
-    onToggleReaction: (String, String) -> Unit,
-    onDeleteMessage: (RoomMessage) -> Unit,
-    onLeaveOrDeleteRoom: () -> Unit,
-    onClearError: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    var draft by remember { mutableStateOf("") }
-    var menuExpanded by remember { mutableStateOf(false) }
-    var codeCopied by remember { mutableStateOf(false) }
-    var showCameraDeniedBanner by remember { mutableStateOf(false) }
-    var activePickerMessageId by remember(room?.id) { mutableStateOf<String?>(null) }
-    var fullScreenPhotoMessage by remember { mutableStateOf<RoomMessage?>(null) }
-    var pendingCaptureUri by remember { mutableStateOf<Uri?>(null) }
-    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
-    val clipboard = LocalClipboardManager.current
-    val listState = rememberLazyListState()
-    val noCameraAppMessage = stringResource(R.string.room_photo_no_camera_app)
-
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val capturedUri = pendingCaptureUri
-        val capturedFile = pendingCaptureFile
-        pendingCaptureUri = null
-        pendingCaptureFile = null
-        if (success && capturedUri != null) {
-            val caption = draft.trim()
-            if (caption.isNotEmpty()) {
-                draft = ""
-            }
-            activePickerMessageId = null
-            onSendCapturedPhoto(capturedUri, caption) {
-                capturedFile?.delete()
-            }
-        } else {
-            capturedFile?.delete()
-        }
-    }
-
-    val launchCameraCapture = {
-        try {
-            val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
-            pendingCaptureUri = uri
-            pendingCaptureFile = file
-            takePictureLauncher.launch(uri)
-        } catch (_: ActivityNotFoundException) {
-            pendingCaptureUri = null
-            pendingCaptureFile?.delete()
-            pendingCaptureFile = null
-            onReportError(noCameraAppMessage)
-        } catch (e: Exception) {
-            pendingCaptureUri = null
-            pendingCaptureFile?.delete()
-            pendingCaptureFile = null
-            onReportError(e.localizedMessage ?: noCameraAppMessage)
-        }
-    }
-
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            showCameraDeniedBanner = false
-            launchCameraCapture()
-        } else {
-            showCameraDeniedBanner = true
-        }
-    }
-
-    val messagesList = (messagesState as? UiState.Success)?.data.orEmpty()
-    val newestMessage = messagesList.lastOrNull()
-    val hasActiveHighlightTarget = highlightedMessageId != null &&
-        messagesList.any { it.id == highlightedMessageId }
-
-    LaunchedEffect(highlightedMessageId, messagesList) {
-        val targetId = highlightedMessageId ?: return@LaunchedEffect
-        val targetIndex = messagesList.indexOfFirst { it.id == targetId }
-        if (targetIndex >= 0) {
-            listState.animateScrollToItem(targetIndex)
-            delay(2600L)
-            onClearHighlight()
-        }
-    }
-
-    if (!hasActiveHighlightTarget) {
-        AutoScrollToBottomEffect(
-            listState = listState,
-            itemCount = messagesList.size,
-            lastItemKey = newestMessage?.id,
-            lastItemContent = "${newestMessage?.text.orEmpty()}|${newestMessage?.imageUrl.orEmpty()}",
-            conversationKey = room?.id,
-            animate = true
-        )
-    }
-
-    val typingLabel = remember(typingUsers) {
-        when (typingUsers.size) {
-            0 -> ""
-            1 -> "${typingUsers[0].displayName} is typing"
-            2 -> "${typingUsers[0].displayName} and ${typingUsers[1].displayName} are typing"
-            else -> "${typingUsers[0].displayName} and ${typingUsers.size - 1} others are typing"
-        }
-    }
-
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.testTag("room_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to rooms"
-                        )
-                    }
-                },
-                title = {
-                    Column {
-                        Text(
-                            text = room?.title ?: "Chat Room",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (room != null) {
-                            Text(
-                                text = "Code: ${room.roomCode} • ${room.memberUids.size} member(s)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    if (room != null) {
-                        IconButton(
-                            onClick = {
-                                clipboard.setText(AnnotatedString(room.roomCode))
-                                codeCopied = true
-                            },
-                            modifier = Modifier.testTag("copy_room_code_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.ContentCopy,
-                                contentDescription = "Copy room code"
-                            )
-                        }
-                        Box {
-                            IconButton(
-                                onClick = { menuExpanded = true },
-                                modifier = Modifier.testTag("room_menu_button")
-                            ) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "Room options")
-                            }
-                            DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (room.ownerId == currentUserId) "Delete Room"
-                                            else "Leave Room"
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.DeleteOutline, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onLeaveOrDeleteRoom()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    UserProfileTopBarAction(
-                        userInfo = userProfileInfo,
-                        onOpenSettings = onOpenSettings,
-                        onSignOut = onSignOut,
-                        showNameChip = false
-                    )
-                }
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            AnimatedVisibility(visible = codeCopied) {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Room code ${room?.roomCode.orEmpty()} copied to clipboard",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        TextButton(onClick = { codeCopied = false }) {
-                            Text("OK")
-                        }
-                    }
-                }
-            }
-
-            AnimatedVisibility(visible = actionError != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = actionError.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = onClearError) { Text("Dismiss") }
-                    }
-                }
-            }
-
-            Box(modifier = Modifier.weight(1f)) {
-                when (messagesState) {
-                    is UiState.Loading -> {
-                        ChatMessagesLoadingSkeleton(label = "Loading room history…")
-                    }
-
-                    is UiState.Error -> {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = messagesState.message,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-
-                    is UiState.Success -> {
-                        if (messagesState.data.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Text(
-                                        text = "No messages yet. Say hello to start the real-time thread!",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        listOf("Hey everyone!", "Ready to chat").forEach { starter ->
-                                            OutlinedButton(
-                                                onClick = { onSendMessage(starter) },
-                                                enabled = room != null && !isSendingMessage
-                                            ) {
-                                                Text(starter)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                itemsIndexed(messagesState.data, key = { _, it -> it.id }) { index, msg ->
-                                    val showDateHeader = index == 0 ||
-                                        messageDayKey(messagesState.data[index - 1].createdAt) != messageDayKey(msg.createdAt)
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        if (showDateHeader) {
-                                            DateSeparatorChip(label = formatChatDateLabel(msg.createdAt))
-                                        }
-                                        RoomMessageBubble(
-                                            message = msg,
-                                            currentUserId = currentUserId,
-                                            isMine = msg.senderId == currentUserId,
-                                            isHighlighted = highlightedMessageId == msg.id,
-                                            showReactionPicker = activePickerMessageId == msg.id,
-                                            onOpenReactionPicker = {
-                                                activePickerMessageId =
-                                                    if (activePickerMessageId == msg.id) null else msg.id
-                                            },
-                                            onToggleReaction = { emoji ->
-                                                activePickerMessageId = null
-                                                onToggleReaction(msg.id, emoji)
-                                            },
-                                            onOpenFullScreenPhoto = { fullScreenPhotoMessage = it },
-                                            onDelete = { onDeleteMessage(msg) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            TypingIndicatorBanner(
-                visible = typingUsers.isNotEmpty(),
-                label = typingLabel,
-                modifier = Modifier.testTag("room_typing_indicator")
-            )
-
-            AnimatedVisibility(visible = showCameraDeniedBanner) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("camera_permission_denied_banner")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.room_camera_permission_denied),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(
-                                onClick = {
-                                    val settingsIntent = Intent(
-                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        Uri.fromParts("package", context.packageName, null)
-                                    )
-                                    context.startActivity(settingsIntent)
-                                }
-                            ) {
-                                Text(stringResource(R.string.live_voice_open_settings))
-                            }
-                            TextButton(onClick = { showCameraDeniedBanner = false }) {
-                                Text("Dismiss")
-                            }
-                        }
-                    }
-                }
-            }
-
-            AnimatedVisibility(visible = photoUploadProgress != null) {
-                val progressValue = (photoUploadProgress ?: 0f).coerceIn(0f, 1f)
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .testTag("photo_upload_progress_banner")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (!photoUploadPreviewUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = photoUploadPreviewUri,
-                                contentDescription = stringResource(R.string.room_uploading_photo),
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PhotoCamera,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.room_uploading_photo),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                                Text(
-                                    text = "${(progressValue * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            LinearProgressIndicator(
-                                progress = { progressValue },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Composer bar
-            Surface(
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilledTonalIconButton(
-                        onClick = {
-                            val granted = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.CAMERA
-                            ) == PackageManager.PERMISSION_GRANTED
-                            if (granted) {
-                                showCameraDeniedBanner = false
-                                launchCameraCapture()
-                            } else {
-                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                            }
-                        },
-                        enabled = room != null && !isSendingMessage && photoUploadProgress == null,
-                        modifier = Modifier
-                            .size(50.dp)
-                            .testTag("room_camera_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.PhotoCamera,
-                            contentDescription = stringResource(R.string.room_camera_capture)
-                        )
-                    }
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = {
-                            if (it.length <= 2000) {
-                                draft = it
-                                onDraftChanged(room, it)
-                            }
-                        },
-                        placeholder = { Text("Message or caption…") },
-                        maxLines = 4,
-                        shape = RoundedCornerShape(22.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("room_message_input")
-                    )
-                    IconButton(
-                        onClick = {
-                            val text = draft.trim()
-                            if (text.isNotEmpty() && room != null && !isSendingMessage) {
-                                onSendMessage(text)
-                                draft = ""
-                                activePickerMessageId = null
-                            }
-                        },
-                        enabled = draft.isNotBlank() && room != null && !isSendingMessage,
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (draft.isNotBlank() && !isSendingMessage) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                            .testTag("room_send_button")
-                    ) {
-                        if (isSendingMessage) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send message",
-                                tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    val previewMessage = fullScreenPhotoMessage
-    val previewImageUrl = previewMessage?.imageUrl
-    if (previewMessage != null && !previewImageUrl.isNullOrBlank()) {
-        FullScreenPhotoDialog(
-            message = previewMessage,
-            imageUrl = previewImageUrl,
-            onDismiss = { fullScreenPhotoMessage = null }
-        )
-    }
-}
-
-@Composable
-private fun FullScreenPhotoDialog(
-    message: RoomMessage,
-    imageUrl: String,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.95f),
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("full_screen_photo_dialog")
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-            ) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = message.text.ifBlank { stringResource(R.string.room_photo_message_label) },
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .align(Alignment.Center)
-                )
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .minimumInteractiveComponentSize()
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
-                        .testTag("close_full_screen_photo_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.room_photo_preview_close),
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .widthIn(max = 540.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = message.senderName,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = formatMessageTime(message.createdAt),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (message.text.isNotBlank()) {
-                            Text(
-                                text = message.text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun RoomMessageBubble(
-    message: RoomMessage,
-    currentUserId: String,
-    isMine: Boolean,
-    isHighlighted: Boolean = false,
-    showReactionPicker: Boolean,
-    onOpenReactionPicker: () -> Unit,
-    onToggleReaction: (String) -> Unit,
-    onOpenFullScreenPhoto: (RoomMessage) -> Unit = {},
-    onDelete: () -> Unit
-) {
-    val mySelectedEmojis = remember(message.reactions, currentUserId) {
-        message.reactions.filterValues { currentUserId in it }.keys
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
-    ) {
-        if (!isMine) {
-            if (!message.senderPhotoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = message.senderPhotoUrl,
-                    contentDescription = message.senderName,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = message.senderName.take(1).uppercase(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-        }
-
-        Column(
-            horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 310.dp)
-        ) {
-            if (!isMine) {
-                Text(
-                    text = message.senderName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-                )
-            }
-
-            AnimatedVisibility(visible = showReactionPicker) {
-                ReactionPickerStrip(
-                    messageId = message.id,
-                    selectedEmojis = mySelectedEmojis,
-                    onSelectEmoji = onToggleReaction,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-            }
-
-            Surface(
-                color = if (isMine) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = if (isMine) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurface,
-                border = if (isHighlighted) {
-                    BorderStroke(2.dp, MaterialTheme.colorScheme.tertiary)
-                } else null,
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp,
-                    bottomStart = if (isMine) 18.dp else 4.dp,
-                    bottomEnd = if (isMine) 4.dp else 18.dp
-                ),
-                modifier = Modifier
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (isMine) 18.dp else 4.dp,
-                            bottomEnd = if (isMine) 4.dp else 18.dp
-                        )
-                    )
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = onOpenReactionPicker,
-                        onLongClickLabel = "React to message"
-                    )
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    val photoUrl = message.imageUrl
-                    if (!photoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = photoUrl,
-                            contentDescription = message.text.ifBlank {
-                                "${message.senderName} ${stringResource(R.string.room_photo_message_label)}"
-                            },
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 140.dp, max = 250.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                .clickable { onOpenFullScreenPhoto(message) }
-                                .testTag("room_message_image_${message.id}")
-                        )
-                        if (message.text.isNotBlank()) {
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-                    if (message.text.isNotBlank()) {
-                        Text(
-                            text = message.text,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = formatMessageTime(message.createdAt),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("room_message_timestamp_${message.id}")
-                        )
-                        Box(
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .clip(CircleShape)
-                                .clickable(
-                                    role = Role.Button,
-                                    onClickLabel = "React to message"
-                                ) { onOpenReactionPicker() }
-                                .testTag("react_button_${message.id}"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.EmojiEmotions,
-                                contentDescription = "Add reaction",
-                                tint = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        if (isMine) {
-                            Box(
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .clip(CircleShape)
-                                    .clickable(
-                                        role = Role.Button,
-                                        onClickLabel = "Delete message"
-                                    ) { onDelete() }
-                                    .testTag("delete_room_message_${message.id}"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.DeleteOutline,
-                                    contentDescription = "Delete message",
-                                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            MessageReactionsRow(
-                messageId = message.id,
-                reactions = message.reactions,
-                currentUserId = currentUserId,
-                onToggleReaction = onToggleReaction,
-                isMine = isMine
-            )
-        }
-    }
-}
-
-@Composable
-private fun CreateRoomDialog(
-    isBusy: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String, String) -> Unit
-) {
-    var title by remember { mutableStateOf("") }
-    var topic by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Real-Time Room") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { if (it.length <= 80) title = it },
-                    label = { Text("Room Name") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("create_room_title_input")
-                )
-                OutlinedTextField(
-                    value = topic,
-                    onValueChange = { if (it.length <= 160) topic = it },
-                    label = { Text("Topic (optional)") },
-                    maxLines = 2,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("create_room_topic_input")
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(title, topic) },
-                enabled = title.isNotBlank() && !isBusy,
-                modifier = Modifier.testTag("confirm_create_room_button")
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@Composable
-private fun JoinRoomDialog(
-    isBusy: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var code by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Join Room by Code") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Enter the 6-character Esosa code shared by the room creator.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { if (it.length <= 16) code = it.uppercase() },
-                    label = { Text("Room Code (e.g. ES4K9P)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("join_room_code_input")
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(code) },
-                enabled = code.trim().length >= 4 && !isBusy,
-                modifier = Modifier.testTag("confirm_join_room_button")
-            ) {
-                Text("Join")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
 }

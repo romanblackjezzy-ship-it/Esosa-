@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.audio.VoiceAudioStreamer
@@ -10,7 +11,6 @@ import com.example.data.model.LiveVoiceMessage
 import com.example.data.model.LiveVoiceThread
 import com.example.data.repository.LiveVoiceRepository
 import com.google.firebase.Firebase
-import com.google.firebase.Timestamp
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.AudioTranscriptionConfig
 import com.google.firebase.ai.type.InlineData
@@ -22,7 +22,6 @@ import com.google.firebase.ai.type.PublicPreviewAPI
 import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.liveGenerationConfig
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -53,19 +52,20 @@ enum class LiveVoiceStatus {
 
 data class LiveTranscriptItem(
     val id: String,
-    val speaker: String, // "You" or "Esosa Live"
+    val speaker: String,
     val text: String,
     val isStreaming: Boolean = false,
-    val createdAt: Timestamp? = null
+    val createdAtMillis: Long = 0L
 )
 
 @OptIn(PublicPreviewAPI::class, ExperimentalCoroutinesApi::class)
 class LiveVoiceViewModel(
     private val audioStreamer: VoiceAudioStreamer,
     private val repository: LiveVoiceRepository? = null,
-    private val currentUserId: String = "",
     private val selectionPreferences: ThreadSelectionPreferences? = null
 ) : ViewModel() {
+
+    private val localUserId = LocalProfilePreferences.LOCAL_USER_ID
 
     private val liveModel by lazy {
         Firebase.ai.liveModel(
@@ -90,15 +90,13 @@ class LiveVoiceViewModel(
     private var playbackJob: Job? = null
     private var playbackChannel: Channel<ByteArray>? = null
 
-    private val _selectedThreadId = MutableStateFlow(
-        if (currentUserId.isNotBlank()) selectionPreferences?.getLastLiveThreadId(currentUserId) else null
-    )
+    private val _selectedThreadId = MutableStateFlow(selectionPreferences?.getLastLiveThreadId(localUserId))
     val selectedThreadId: StateFlow<String?> = _selectedThreadId.asStateFlow()
 
     private val _status = MutableStateFlow(LiveVoiceStatus.IDLE)
     val status: StateFlow<LiveVoiceStatus> = _status.asStateFlow()
 
-    private val _statusMessage = MutableStateFlow("Tap Start Live Conversation to speak with gemini-3.8-live")
+    private val _statusMessage = MutableStateFlow("Tap Start Live Conversation to speak with $LIVE_MODEL_NAME")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
     private val _inProgressTurn = MutableStateFlow<LiveTranscriptItem?>(null)
@@ -111,10 +109,10 @@ class LiveVoiceViewModel(
     val isAecEnabled: StateFlow<Boolean> = audioStreamer.isAecEnabled
 
     val liveThreadsState: StateFlow<UiState<List<LiveVoiceThread>>> =
-        if (repository == null || currentUserId.isBlank()) {
+        if (repository == null) {
             MutableStateFlow(UiState.Success(emptyList()))
         } else {
-            repository.observeThreads(currentUserId)
+            repository.observeThreads()
                 .onEach { threads ->
                     val currentId = _selectedThreadId.value
                     if (currentId == null && threads.isNotEmpty()) {
@@ -125,13 +123,9 @@ class LiveVoiceViewModel(
                 }
                 .map<List<LiveVoiceThread>, UiState<List<LiveVoiceThread>>> { UiState.Success(it) }
                 .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val rootError = firestoreError ?: error
-                    Log.w(TAG, "Error observing live voice threads", rootError)
-                    emit(UiState.Error(rootError.localizedMessage ?: "Failed to load voice sessions"))
+                    if (error is CancellationException) throw error
+                    Log.w(TAG, "Error observing live voice threads", error)
+                    emit(UiState.Error(error.localizedMessage ?: "Failed to load voice sessions"))
                 }
                 .stateIn(
                     scope = viewModelScope,
@@ -141,7 +135,7 @@ class LiveVoiceViewModel(
         }
 
     private val persistedMessagesFlow: StateFlow<List<LiveVoiceMessage>> =
-        if (repository == null || currentUserId.isBlank()) {
+        if (repository == null) {
             MutableStateFlow(emptyList())
         } else {
             _selectedThreadId
@@ -149,13 +143,10 @@ class LiveVoiceViewModel(
                     if (threadId.isNullOrBlank()) {
                         flowOf(emptyList())
                     } else {
-                        repository.observeThreadMessages(currentUserId, threadId)
+                        repository.observeThreadMessages(threadId)
                             .catch { error ->
-                                val firestoreError = generateSequence(error) { it.cause }
-                                    .filterIsInstance<FirebaseFirestoreException>()
-                                    .firstOrNull()
-                                if (firestoreError == null && error is CancellationException) throw error
-                                Log.w(TAG, "Error observing live transcript history", firestoreError ?: error)
+                                if (error is CancellationException) throw error
+                                Log.w(TAG, "Error observing live transcript history", error)
                                 emit(emptyList())
                             }
                     }
@@ -175,7 +166,7 @@ class LiveVoiceViewModel(
                     speaker = msg.speaker,
                     text = msg.text,
                     isStreaming = false,
-                    createdAt = msg.createdAt
+                    createdAtMillis = msg.createdAtMillis
                 )
             }
             if (activeTurn != null && activeTurn.text.isNotBlank()) {
@@ -191,9 +182,7 @@ class LiveVoiceViewModel(
 
     private fun setSelectedThread(threadId: String?) {
         _selectedThreadId.value = threadId
-        if (currentUserId.isNotBlank()) {
-            selectionPreferences?.setLastLiveThreadId(currentUserId, threadId)
-        }
+        selectionPreferences?.setLastLiveThreadId(localUserId, threadId)
     }
 
     fun selectThread(threadId: String) {
@@ -384,10 +373,11 @@ class LiveVoiceViewModel(
         val latest = _inProgressTurn.value
         _inProgressTurn.value = if (latest == null) {
             LiveTranscriptItem(
-                id = "live_streaming_${speaker}",
+                id = "live_streaming_$speaker",
                 speaker = speaker,
                 text = chunk,
-                isStreaming = true
+                isStreaming = true,
+                createdAtMillis = System.currentTimeMillis()
             )
         } else {
             val separator = if (latest.text.endsWith(" ") || chunk.startsWith(" ")) "" else " "
@@ -412,7 +402,7 @@ class LiveVoiceViewModel(
 
     private fun drainPlaybackQueue(queue: Channel<ByteArray>) {
         while (queue.tryReceive().isSuccess) {
-            // Drain stale buffered audio chunks on barge-in interruption
+            // Drain stale buffered audio chunks
         }
     }
 

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.core.ThreadSelectionPreferences
 import com.example.data.model.AiMessage
 import com.example.data.model.AiThread
+import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.LiveVoiceMessage
 import com.example.data.model.LiveVoiceThread
@@ -25,28 +26,28 @@ class ThreadPersistenceTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val writer = ThreadSelectionPreferences(context)
 
-        writer.setLastRoomId("uid_alice", "room_design_42")
-        writer.setLastAiThreadId("uid_alice", "ai_thread_99")
-        writer.setLastLiveThreadId("uid_alice", "live_session_7")
+        writer.setLastRoomId("local_me", "room_design_42")
+        writer.setLastAiThreadId("local_me", "ai_thread_99")
+        writer.setLastLiveThreadId("local_me", "live_session_7")
 
-        writer.setLastRoomId("uid_bob", "room_bob_1")
+        writer.setLastRoomId("other_profile", "room_other_1")
 
         // Simulate fresh app restart by creating a new preferences instance
         val reader = ThreadSelectionPreferences(context)
-        assertEquals("room_design_42", reader.getLastRoomId("uid_alice"))
-        assertEquals("ai_thread_99", reader.getLastAiThreadId("uid_alice"))
-        assertEquals("live_session_7", reader.getLastLiveThreadId("uid_alice"))
+        assertEquals("room_design_42", reader.getLastRoomId("local_me"))
+        assertEquals("ai_thread_99", reader.getLastAiThreadId("local_me"))
+        assertEquals("live_session_7", reader.getLastLiveThreadId("local_me"))
 
-        assertEquals("room_bob_1", reader.getLastRoomId("uid_bob"))
-        assertNull(reader.getLastAiThreadId("uid_bob"))
+        assertEquals("room_other_1", reader.getLastRoomId("other_profile"))
+        assertNull(reader.getLastAiThreadId("other_profile"))
 
         // Clearing selection removes persisted thread safely
-        reader.setLastRoomId("uid_alice", null)
-        assertNull(ThreadSelectionPreferences(context).getLastRoomId("uid_alice"))
+        reader.setLastRoomId("local_me", null)
+        assertNull(ThreadSelectionPreferences(context).getLastRoomId("local_me"))
     }
 
     @Test
-    fun `firestore chat models expose no-arg defaults for safe deserialization`() {
+    fun `chat domain models expose safe no-arg defaults`() {
         val room = ChatRoom()
         val roomMessage = RoomMessage()
         val aiThread = AiThread()
@@ -55,6 +56,7 @@ class ThreadPersistenceTest {
         val liveMessage = LiveVoiceMessage()
 
         assertEquals("", room.id)
+        assertEquals(ChatKind.GROUP, room.chatKind)
         assertEquals("", roomMessage.id)
         assertEquals("", aiThread.id)
         assertEquals("user", aiMessage.role)

@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,11 +48,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -62,14 +65,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.core.LocalProfilePreferences
 import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
@@ -80,22 +86,20 @@ import com.example.ui.components.ChatSearchBar
 import com.example.ui.components.DateSeparatorChip
 import com.example.ui.components.MessageReactionsRow
 import com.example.ui.components.ReactionPickerStrip
+import com.example.ui.components.TelegramWallpaperBackground
 import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.TypingPulseDots
-import com.example.ui.components.UserProfileHeaderInfo
-import com.example.ui.components.UserProfileTopBarAction
 import com.example.ui.components.buildHighlightedText
 import com.example.ui.components.formatChatDateLabel
 import com.example.ui.components.formatMessageTime
 import com.example.ui.components.formatRelativeThreadTime
 import com.example.ui.components.messageDayKey
-import com.google.firebase.Timestamp
+import com.example.ui.theme.telegramColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiChatScreen(
-    currentUserId: String = "",
-    userProfileInfo: UserProfileHeaderInfo,
+    currentUserId: String = LocalProfilePreferences.LOCAL_USER_ID,
     threadsState: UiState<List<AiThread>>,
     selectedThreadId: String?,
     messagesState: UiState<List<AiMessage>>,
@@ -109,10 +113,9 @@ fun AiChatScreen(
     onSendPrompt: (String, AiThread?, List<AiMessage>) -> Unit,
     onToggleReaction: (String, String, String) -> Unit = { _, _, _ -> },
     onClearError: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val telegram = MaterialTheme.telegramColors
     val threads = (threadsState as? UiState.Success)?.data.orEmpty()
     val activeThread = threads.firstOrNull { it.id == selectedThreadId }
     val activePersona = AiPersona.fromId(activeThread?.personaId)
@@ -137,6 +140,7 @@ fun AiChatScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -145,7 +149,7 @@ fun AiChatScreen(
                             painter = painterResource(id = R.drawable.img_esosa_avatar),
                             contentDescription = "Esosa AI",
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(36.dp)
                                 .clip(CircleShape),
                             contentScale = ContentScale.Crop
                         )
@@ -153,14 +157,17 @@ fun AiChatScreen(
                         Column {
                             Text(
                                 text = activeThread?.title ?: activePersona.displayName,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = telegram.onTopBar,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${activePersona.modelName.uppercase()} • MULTI-TURN",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary
+                                text = "${activePersona.modelName} • bot",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = telegram.onTopBarMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -172,7 +179,8 @@ fun AiChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.History,
-                            contentDescription = "Conversation threads"
+                            contentDescription = "Conversation threads",
+                            tint = telegram.onTopBar
                         )
                     }
                     IconButton(
@@ -181,18 +189,15 @@ fun AiChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Add,
-                            contentDescription = "New Gemini thread"
+                            contentDescription = "New AI thread",
+                            tint = telegram.onTopBar
                         )
                     }
-                    UserProfileTopBarAction(
-                        userInfo = userProfileInfo,
-                        onOpenSettings = onOpenSettings,
-                        onSignOut = onSignOut,
-                        showNameChip = false
-                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = telegram.topBarContainer,
+                    titleContentColor = telegram.onTopBar,
+                    actionIconContentColor = telegram.onTopBar
                 )
             )
         }
@@ -201,68 +206,70 @@ fun AiChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .imePadding()
         ) {
-            // Persona / Model Role Selector Bar
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(AiPersona.entries, key = { it.id }) { persona ->
-                    val selected = activePersona == persona
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSwitchPersona(persona) },
-                        label = {
-                            Text(
-                                text = "${persona.displayName} (${persona.badge})",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = when (persona) {
-                                    AiPersona.GENERAL -> Icons.Filled.AutoAwesome
-                                    AiPersona.REASONING -> Icons.Filled.Psychology
-                                    AiPersona.INTERACTIVE -> Icons.Filled.Tune
-                                    AiPersona.FAST -> Icons.Filled.Bolt
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        modifier = Modifier.testTag("persona_chip_${persona.id}")
-                    )
-                }
-                item(key = "system_prompt_chip") {
-                    FilterChip(
-                        selected = false,
-                        onClick = { showSystemInfo = true },
-                        label = {
-                            Text(
-                                text = "System Prompt",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Filled.Tune,
-                                contentDescription = "View system instruction",
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        modifier = Modifier.testTag("ai_system_prompt_button")
-                    )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(AiPersona.entries, key = { it.id }) { persona ->
+                        val selected = activePersona == persona
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSwitchPersona(persona) },
+                            label = {
+                                Text(
+                                    text = "${persona.displayName} (${persona.badge})",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = when (persona) {
+                                        AiPersona.GENERAL -> Icons.Filled.AutoAwesome
+                                        AiPersona.REASONING -> Icons.Filled.Psychology
+                                        AiPersona.INTERACTIVE -> Icons.Filled.Tune
+                                        AiPersona.FAST -> Icons.Filled.Bolt
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("persona_chip_${persona.id}")
+                        )
+                    }
+                    item(key = "system_prompt_chip") {
+                        FilterChip(
+                            selected = false,
+                            onClick = { showSystemInfo = true },
+                            label = {
+                                Text(
+                                    text = "System Prompt",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = "View system instruction",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("ai_system_prompt_button")
+                        )
+                    }
                 }
             }
 
             AnimatedVisibility(visible = errorBanner != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -280,139 +287,153 @@ fun AiChatScreen(
                 }
             }
 
-            // Scrollable Conversation Thread
-            Box(modifier = Modifier.weight(1f)) {
-                val isLoadingThread = messagesState is UiState.Loading ||
-                    (threadsState is UiState.Loading && activeThread == null)
-                if (isLoadingThread) {
-                    ChatMessagesLoadingSkeleton(label = "Restoring Gemini thread…")
-                } else if (messages.isEmpty() && streamingReply == null) {
-                    AiEmptyConversation(
-                        persona = activePersona,
-                        onSuggestionClick = { suggestion ->
-                            onSendPrompt(suggestion, activeThread, emptyList())
-                        }
-                    )
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        itemsIndexed(messages, key = { _, it -> it.id }) { index, msg ->
-                            val showDateHeader = index == 0 ||
-                                messageDayKey(messages[index - 1].createdAt) != messageDayKey(msg.createdAt)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                if (showDateHeader) {
-                                    DateSeparatorChip(label = formatChatDateLabel(msg.createdAt))
+            TelegramWallpaperBackground(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        val isLoadingThread = messagesState is UiState.Loading ||
+                            (threadsState is UiState.Loading && activeThread == null)
+                        if (isLoadingThread) {
+                            ChatMessagesLoadingSkeleton(label = "Loading AI history…")
+                        } else if (messages.isEmpty() && streamingReply == null) {
+                            AiEmptyConversation(
+                                persona = activePersona,
+                                onSuggestionClick = { suggestion ->
+                                    onSendPrompt(suggestion, activeThread, emptyList())
                                 }
-                                AiMessageBubble(
-                                    messageId = msg.id,
-                                    role = msg.role,
-                                    text = msg.text,
-                                    modelName = msg.modelName,
-                                    createdAt = msg.createdAt,
-                                    reactions = msg.reactions,
-                                    currentUserId = currentUserId,
-                                    isStreaming = false,
-                                    showReactionPicker = activePickerMessageId == msg.id,
-                                    onOpenReactionPicker = {
-                                        activePickerMessageId =
-                                            if (activePickerMessageId == msg.id) null else msg.id
-                                    },
-                                    onToggleReaction = { emoji ->
-                                        activePickerMessageId = null
-                                        val threadId = activeThread?.id ?: msg.threadId
-                                        if (threadId.isNotBlank()) {
-                                            onToggleReaction(threadId, msg.id, emoji)
+                            )
+                        } else {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                itemsIndexed(messages, key = { _, it -> it.id }) { index, msg ->
+                                    val showDateHeader = index == 0 ||
+                                        messageDayKey(messages[index - 1].createdAtMillis) !=
+                                        messageDayKey(msg.createdAtMillis)
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (showDateHeader) {
+                                            DateSeparatorChip(label = formatChatDateLabel(msg.createdAtMillis))
                                         }
+                                        AiMessageBubble(
+                                            messageId = msg.id,
+                                            role = msg.role,
+                                            text = msg.text,
+                                            modelName = msg.modelName,
+                                            createdAtMillis = msg.createdAtMillis,
+                                            reactions = msg.reactions,
+                                            currentUserId = currentUserId,
+                                            isStreaming = false,
+                                            showReactionPicker = activePickerMessageId == msg.id,
+                                            onOpenReactionPicker = {
+                                                activePickerMessageId =
+                                                    if (activePickerMessageId == msg.id) null else msg.id
+                                            },
+                                            onToggleReaction = { emoji ->
+                                                activePickerMessageId = null
+                                                val threadId = activeThread?.id ?: msg.threadId
+                                                if (threadId.isNotBlank()) {
+                                                    onToggleReaction(threadId, msg.id, emoji)
+                                                }
+                                            }
+                                        )
                                     }
-                                )
-                            }
-                        }
-                        if (streamingReply != null) {
-                            item(key = "streaming_turn") {
-                                AiMessageBubble(
-                                    messageId = "streaming_turn",
-                                    role = "model",
-                                    text = streamingReply,
-                                    modelName = activePersona.modelName,
-                                    createdAt = null,
-                                    reactions = emptyMap(),
-                                    currentUserId = currentUserId,
-                                    isStreaming = true,
-                                    showReactionPicker = false,
-                                    onOpenReactionPicker = {},
-                                    onToggleReaction = {}
-                                )
+                                }
+                                if (streamingReply != null) {
+                                    item(key = "streaming_turn") {
+                                        AiMessageBubble(
+                                            messageId = "streaming_turn",
+                                            role = "model",
+                                            text = streamingReply,
+                                            modelName = activePersona.modelName,
+                                            createdAtMillis = System.currentTimeMillis(),
+                                            reactions = emptyMap(),
+                                            currentUserId = currentUserId,
+                                            isStreaming = true,
+                                            showReactionPicker = false,
+                                            onOpenReactionPicker = {},
+                                            onToggleReaction = {}
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
 
-            TypingIndicatorBanner(
-                visible = isGenerating,
-                label = "${activePersona.displayName} is typing",
-                modifier = Modifier.testTag("ai_typing_indicator")
-            )
-
-            // Prompt Composer
-            Surface(
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { if (it.length <= 10000) draft = it },
-                        placeholder = {
-                            Text("Ask ${activePersona.displayName}…")
-                        },
-                        maxLines = 4,
-                        shape = RoundedCornerShape(22.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("ai_prompt_input")
+                    TypingIndicatorBanner(
+                        visible = isGenerating,
+                        label = "${activePersona.displayName} is typing",
+                        modifier = Modifier.testTag("ai_typing_indicator")
                     )
-                    IconButton(
-                        onClick = {
-                            val prompt = draft.trim()
-                            if (prompt.isNotEmpty() && !isGenerating) {
-                                draft = ""
-                                onSendPrompt(prompt, activeThread, messages)
-                            }
-                        },
-                        enabled = draft.isNotBlank() && !isGenerating,
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (draft.isNotBlank() && !isGenerating) MaterialTheme.colorScheme.secondary
-                                else MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                            .testTag("ai_send_button")
+
+                    Surface(
+                        color = telegram.composerBar,
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (isGenerating) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send prompt",
-                                tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onSecondary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                color = telegram.composerInput,
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                TextField(
+                                    value = draft,
+                                    onValueChange = { if (it.length <= 10000) draft = it },
+                                    placeholder = { Text("Ask ${activePersona.displayName}…") },
+                                    maxLines = 4,
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        disabledIndicatorColor = Color.Transparent
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("ai_prompt_input")
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val prompt = draft.trim()
+                                    if (prompt.isNotEmpty() && !isGenerating) {
+                                        draft = ""
+                                        onSendPrompt(prompt, activeThread, messages)
+                                    }
+                                },
+                                enabled = draft.isNotBlank() && !isGenerating,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (draft.isNotBlank() && !isGenerating) telegram.sendFab
+                                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                                    )
+                                    .testTag("ai_send_button")
+                            ) {
+                                if (isGenerating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "Send prompt",
+                                        tint = if (draft.isNotBlank()) telegram.onSendFab
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -446,7 +467,7 @@ fun AiChatScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Gemini Conversations", style = MaterialTheme.typography.titleLarge)
+                    Text("AI Conversations", style = MaterialTheme.typography.titleLarge)
                     TextButton(onClick = {
                         onCreateThread(activePersona)
                         showHistorySheet = false
@@ -485,7 +506,7 @@ fun AiChatScreen(
                         val isSelected = thread.id == selectedThreadId
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceContainer
                             ),
                             modifier = Modifier
@@ -514,8 +535,13 @@ fun AiChatScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    val tsMillis = if (thread.updatedAtMillis > 0L) {
+                                        thread.updatedAtMillis
+                                    } else {
+                                        thread.createdAtMillis
+                                    }
                                     Text(
-                                        text = "${thread.modelName} • ${formatRelativeThreadTime(thread.updatedAt ?: thread.createdAt)} • ${thread.lastMessagePreview}",
+                                        text = "${thread.modelName} • ${formatRelativeThreadTime(tsMillis)} • ${thread.lastMessagePreview}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
@@ -566,13 +592,14 @@ private fun AiEmptyConversation(
     persona: AiPersona,
     onSuggestionClick: (String) -> Unit
 ) {
+    val telegram = MaterialTheme.telegramColors
     val suggestions = when (persona) {
         AiPersona.GENERAL -> listOf(
             "Help me plan a clear agenda for a 20-minute product sync",
-            "Draft a thoughtful welcome message for our new team room"
+            "Draft a quick note for my project checklist"
         )
         AiPersona.REASONING -> listOf(
-            "Compare optimistic UI updates vs server-confirmed state in real-time chat",
+            "Compare optimistic UI updates vs local SQLite writes",
             "Break down the trade-offs of CRDTs vs central sequence numbers"
         )
         AiPersona.INTERACTIVE -> listOf(
@@ -580,66 +607,73 @@ private fun AiEmptyConversation(
             "Walk me through structuring a collaborative sprint workshop"
         )
         AiPersona.FAST -> listOf(
-            "Give me 3 crisp icebreakers for a remote chat channel",
-            "Summarize best practices for mobile push notification timing"
+            "Give me 3 crisp icebreakers for a team channel",
+            "Summarize best practices for mobile notification timing"
         )
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(20.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier.widthIn(max = 460.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(22.dp),
+            shadowElevation = 2.dp,
+            modifier = Modifier.widthIn(max = 440.dp)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.img_esosa_avatar),
-                contentDescription = persona.displayName,
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-            Text(
-                text = persona.displayName,
-                style = MaterialTheme.typography.titleLarge
-            )
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = RoundedCornerShape(10.dp)
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = persona.modelName,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-            }
-            Text(
-                text = persona.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-            suggestions.forEach { prompt ->
-                Card(
+                Image(
+                    painter = painterResource(id = R.drawable.img_esosa_avatar),
+                    contentDescription = persona.displayName,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSuggestionClick(prompt) },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    ),
-                    shape = RoundedCornerShape(16.dp)
+                        .size(68.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                Text(
+                    text = persona.displayName,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Surface(
+                    color = telegram.unreadBadge.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Text(
-                        text = prompt,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(14.dp)
+                        text = persona.modelName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
+                }
+                Text(
+                    text = persona.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                suggestions.forEach { prompt ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSuggestionClick(prompt) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            text = prompt,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                 }
             }
         }
@@ -653,7 +687,7 @@ private fun AiMessageBubble(
     role: String,
     text: String,
     modelName: String,
-    createdAt: Timestamp?,
+    createdAtMillis: Long,
     reactions: Map<String, List<String>>,
     currentUserId: String,
     isStreaming: Boolean,
@@ -661,27 +695,29 @@ private fun AiMessageBubble(
     onOpenReactionPicker: () -> Unit,
     onToggleReaction: (String) -> Unit
 ) {
+    val telegram = MaterialTheme.telegramColors
     val isUser = role == "user"
     val mySelectedEmojis = remember(reactions, currentUserId) {
         reactions.filterValues { currentUserId in it }.keys
     }
+    val bubbleShape = RoundedCornerShape(
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = if (isUser) 18.dp else 4.dp,
+        bottomEnd = if (isUser) 4.dp else 18.dp
+    )
+    val bubbleColor = if (isUser) telegram.outgoingBubble else telegram.incomingBubble
+    val textColor = if (isUser) telegram.onOutgoingBubble else telegram.onIncomingBubble
+    val metaColor = if (isUser) telegram.outgoingMeta else telegram.incomingMeta
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         Column(
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 330.dp)
+            modifier = Modifier.widthIn(max = 320.dp)
         ) {
-            if (!isUser) {
-                Text(
-                    text = if (isStreaming) "$modelName • streaming" else modelName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 3.dp)
-                )
-            }
-
             AnimatedVisibility(visible = !isStreaming && showReactionPicker) {
                 ReactionPickerStrip(
                     messageId = messageId,
@@ -692,25 +728,12 @@ private fun AiMessageBubble(
             }
 
             Surface(
-                color = if (isUser) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp,
-                    bottomStart = if (isUser) 18.dp else 4.dp,
-                    bottomEnd = if (isUser) 4.dp else 18.dp
-                ),
+                color = bubbleColor,
+                contentColor = textColor,
+                shadowElevation = 1.dp,
+                shape = bubbleShape,
                 modifier = Modifier
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (isUser) 18.dp else 4.dp,
-                            bottomEnd = if (isUser) 4.dp else 18.dp
-                        )
-                    )
+                    .clip(bubbleShape)
                     .combinedClickable(
                         enabled = !isStreaming,
                         onClick = {},
@@ -721,26 +744,28 @@ private fun AiMessageBubble(
                 if (!isUser && isStreaming && text.isBlank()) {
                     TypingPulseDots(
                         label = "Esosa is thinking",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                     )
                 } else {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        if (!isUser) {
+                            Text(
+                                text = if (isStreaming) "$modelName • streaming" else modelName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                        }
                         Text(
                             text = text,
                             style = MaterialTheme.typography.bodyLarge
                         )
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(3.dp))
                         Row(
+                            modifier = Modifier.align(Alignment.End),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = if (isStreaming) "Streaming…" else formatMessageTime(createdAt),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.testTag("ai_message_timestamp_$messageId")
-                            )
                             if (!isStreaming) {
                                 Box(
                                     modifier = Modifier
@@ -756,12 +781,17 @@ private fun AiMessageBubble(
                                     Icon(
                                         imageVector = Icons.Outlined.EmojiEmotions,
                                         contentDescription = "Add reaction",
-                                        tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = metaColor,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
+                            Text(
+                                text = if (isStreaming) "Streaming…" else formatMessageTime(createdAtMillis),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = metaColor,
+                                modifier = Modifier.testTag("ai_message_timestamp_$messageId")
+                            )
                         }
                     }
                 }

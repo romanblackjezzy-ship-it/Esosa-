@@ -9,6 +9,8 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
 
 object CameraPhotoHelper {
 
@@ -23,6 +25,40 @@ object CameraPhotoHelper {
             file
         )
         return uri to file
+    }
+
+    fun saveUriToLocalChatPhotos(
+        context: Context,
+        uri: Uri,
+        maxDimension: Int = 1600,
+        quality: Int = 84
+    ): File {
+        val jpegBytes = compressUriToJpegBytes(
+            context = context,
+            uri = uri,
+            maxDimension = maxDimension,
+            quality = quality
+        )
+        val dir = File(context.filesDir, "chat_photos").apply {
+            if (!exists()) mkdirs()
+        }
+        val destFile = File(dir, "photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.jpg")
+        FileOutputStream(destFile).use { out ->
+            out.write(jpegBytes)
+            out.flush()
+        }
+        return destFile
+    }
+
+    fun deleteLocalPhotoIfOwned(context: Context, storagePath: String?) {
+        if (storagePath.isNullOrBlank()) return
+        runCatching {
+            val file = File(storagePath)
+            val ownedDir = File(context.filesDir, "chat_photos").canonicalPath
+            if (file.canonicalPath.startsWith(ownedDir) && file.exists()) {
+                file.delete()
+            }
+        }
     }
 
     fun compressUriToJpegBytes(

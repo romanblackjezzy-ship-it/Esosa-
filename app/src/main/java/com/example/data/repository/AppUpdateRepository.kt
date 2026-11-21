@@ -3,14 +3,9 @@ package com.example.data.repository
 import android.content.Context
 import android.util.Log
 import com.example.BuildConfig
-import com.example.core.OperationType
-import com.example.core.handleFirestoreError
 import com.example.data.model.AppUpdateInfo
-import com.example.data.model.FirestoreAppRelease
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -55,42 +50,22 @@ class AppUpdatePreferences(context: Context) {
     }
 }
 
-class AppUpdateRepository(
-    private val db: FirebaseFirestore
-) {
+class AppUpdateRepository {
     suspend fun checkLatestUpdate(
         currentVersionCode: Long,
         currentVersionName: String,
-        githubRepository: String,
-        includeFirestore: Boolean
+        githubRepository: String
     ): AppUpdateInfo? {
-        val candidates = mutableListOf<AppUpdateInfo>()
-
-        if (isValidGitHubRepoSlug(githubRepository)) {
-            fetchLatestGitHubRelease(githubRepository.trim())?.let { candidates.add(it) }
+        if (!isValidGitHubRepoSlug(githubRepository)) return null
+        val candidate = fetchLatestGitHubRelease(githubRepository.trim()) ?: return null
+        return candidate.takeIf {
+            isNewerRelease(
+                candidateVersionCode = it.versionCode,
+                candidateVersionName = it.versionName,
+                currentVersionCode = currentVersionCode,
+                currentVersionName = currentVersionName
+            )
         }
-
-        if (includeFirestore) {
-            fetchFirestoreRelease()?.let { candidates.add(it) }
-        }
-
-        return candidates
-            .filter { candidate ->
-                isNewerRelease(
-                    candidateVersionCode = candidate.versionCode,
-                    candidateVersionName = candidate.versionName,
-                    currentVersionCode = currentVersionCode,
-                    currentVersionName = currentVersionName
-                )
-            }
-            .maxWithOrNull { a, b ->
-                compareReleaseVersions(
-                    aCode = a.versionCode,
-                    aName = a.versionName,
-                    bCode = b.versionCode,
-                    bName = b.versionName
-                )
-            }
     }
 
     private suspend fun fetchLatestGitHubRelease(repoSlug: String): AppUpdateInfo? {
@@ -118,33 +93,6 @@ class AppUpdateRepository(
             } finally {
                 connection?.disconnect()
             }
-        }
-    }
-
-    private suspend fun fetchFirestoreRelease(): AppUpdateInfo? {
-        val path = "app_config/release"
-        return try {
-            val snap = db.collection("app_config").document("release").get().await()
-            if (!snap.exists()) return null
-            val release = snap.toObject(FirestoreAppRelease::class.java) ?: return null
-            val cleanUrl = release.downloadUrl.trim()
-            if (!cleanUrl.startsWith("https://")) return null
-            val versionName = release.latestVersionName.trim().ifBlank {
-                if (release.latestVersionCode > 0L) "build ${release.latestVersionCode}" else return null
-            }
-            AppUpdateInfo(
-                versionCode = release.latestVersionCode,
-                versionName = versionName,
-                releaseNotes = release.releaseNotes.trim(),
-                downloadUrl = cleanUrl,
-                sourceLabel = "Firebase Release Feed",
-                isMandatory = release.isMandatory
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.GET, path)
-            null
         }
     }
 
@@ -231,17 +179,6 @@ class AppUpdateRepository(
                 if (va != vb) return va.compareTo(vb)
             }
             return 0
-        }
-
-        fun compareReleaseVersions(
-            aCode: Long,
-            aName: String,
-            bCode: Long,
-            bName: String
-        ): Int {
-            val semCmp = compareSemanticVersions(aName, bName)
-            if (semCmp != 0) return semCmp
-            return aCode.compareTo(bCode)
         }
 
         fun isNewerRelease(

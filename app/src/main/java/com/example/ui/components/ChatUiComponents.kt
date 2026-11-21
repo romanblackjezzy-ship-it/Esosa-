@@ -8,11 +8,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -31,15 +31,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -54,12 +53,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -68,24 +68,30 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
+import com.example.data.model.ChatKind
 import com.example.data.model.EsosaReactions
-import com.google.firebase.Timestamp
+import com.example.ui.theme.TelegramAvatarPairs
+import com.example.ui.theme.TelegramAzure
+import com.example.ui.theme.TelegramAzureDeep
+import com.example.ui.theme.telegramColors
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
-fun formatMessageTime(ts: Timestamp?): String {
-    val date = ts?.toDate() ?: return "Just now"
-    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+fun formatMessageTime(millis: Long): String {
+    if (millis <= 0L) return "Just now"
+    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(millis))
 }
 
-fun formatRelativeThreadTime(ts: Timestamp?): String {
-    val date = ts?.toDate() ?: return "Just now"
+fun formatRelativeThreadTime(millis: Long): String {
+    if (millis <= 0L) return "Just now"
+    val date = Date(millis)
     val nowCal = Calendar.getInstance()
     val targetCal = Calendar.getInstance().apply { time = date }
     return when {
@@ -97,13 +103,14 @@ fun formatRelativeThreadTime(ts: Timestamp?): String {
     }
 }
 
-fun messageDayKey(ts: Timestamp?): String {
-    val date = ts?.toDate() ?: return "today"
-    return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date)
+fun messageDayKey(millis: Long): String {
+    if (millis <= 0L) return "today"
+    return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
 }
 
-fun formatChatDateLabel(ts: Timestamp?): String {
-    val date = ts?.toDate() ?: return "Today"
+fun formatChatDateLabel(millis: Long): String {
+    if (millis <= 0L) return "Today"
+    val date = Date(millis)
     val nowCal = Calendar.getInstance()
     val targetCal = Calendar.getInstance().apply { time = date }
     return when {
@@ -122,6 +129,115 @@ private fun isSameDay(a: Calendar, b: Calendar): Boolean =
 private fun isYesterday(now: Calendar, target: Calendar): Boolean {
     val yesterday = (now.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
     return isSameDay(yesterday, target)
+}
+
+@Composable
+fun TelegramAvatarCircle(
+    title: String,
+    seedKey: String = title,
+    chatKind: ChatKind = ChatKind.GROUP,
+    size: Dp = 52.dp,
+    modifier: Modifier = Modifier
+) {
+    if (chatKind == ChatKind.SAVED) {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(listOf(TelegramAzure, TelegramAzureDeep))
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Bookmark,
+                contentDescription = title,
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.48f)
+            )
+        }
+        return
+    }
+
+    val colorPair = TelegramAvatarPairs[abs(seedKey.hashCode()) % TelegramAvatarPairs.size]
+    val initials = title
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotEmpty() }
+        .take(2)
+        .joinToString("") { it.first().uppercaseChar().toString() }
+        .ifEmpty { "E" }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.verticalGradient(listOf(colorPair.first, colorPair.second))),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = initials,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = (size.value * 0.36f).sp
+        )
+    }
+}
+
+@Composable
+fun TelegramWallpaperBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val telegram = MaterialTheme.telegramColors
+    val patternColor = telegram.patternTint.copy(alpha = if (telegram.isDark) 0.42f else 0.55f)
+    Box(
+        modifier = modifier
+            .background(telegram.chatCanvas)
+            .drawBehind {
+                val step = 52.dp.toPx()
+                val cols = (size.width / step).toInt() + 2
+                val rows = (size.height / step).toInt() + 2
+                val stroke = Stroke(width = 1.2.dp.toPx())
+                for (r in 0..rows) {
+                    val y = r * step
+                    val xShift = if (r % 2 == 0) 0f else step * 0.5f
+                    for (c in 0..cols) {
+                        val x = c * step + xShift
+                        val glyph = (r * 3 + c) % 4
+                        when (glyph) {
+                            0 -> drawCircle(
+                                color = patternColor,
+                                radius = 5.dp.toPx(),
+                                center = Offset(x, y),
+                                style = stroke
+                            )
+                            1 -> drawCircle(
+                                color = patternColor,
+                                radius = 2.dp.toPx(),
+                                center = Offset(x + 6.dp.toPx(), y - 4.dp.toPx())
+                            )
+                            2 -> drawLine(
+                                color = patternColor,
+                                start = Offset(x - 4.dp.toPx(), y + 4.dp.toPx()),
+                                end = Offset(x + 4.dp.toPx(), y - 4.dp.toPx()),
+                                strokeWidth = 1.2.dp.toPx()
+                            )
+                            else -> drawArc(
+                                color = patternColor,
+                                startAngle = 15f,
+                                sweepAngle = 150f,
+                                useCenter = false,
+                                topLeft = Offset(x - 6.dp.toPx(), y - 6.dp.toPx()),
+                                size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 12.dp.toPx()),
+                                style = stroke
+                            )
+                        }
+                    }
+                }
+            },
+        content = content
+    )
 }
 
 @Composable
@@ -168,14 +284,11 @@ fun ChatSearchBar(
 ) {
     val focusManager = LocalFocusManager.current
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(22.dp),
-        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(24.dp),
         border = if (query.isNotBlank()) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-        } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-        },
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+        } else null,
         modifier = modifier.fillMaxWidth()
     ) {
         TextField(
@@ -264,6 +377,7 @@ fun DateSeparatorChip(
     label: String,
     modifier: Modifier = Modifier
 ) {
+    val telegram = MaterialTheme.telegramColors
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -271,13 +385,13 @@ fun DateSeparatorChip(
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
-            shape = RoundedCornerShape(12.dp)
+            color = telegram.datePillContainer,
+            shape = RoundedCornerShape(14.dp)
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = telegram.onDatePill,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
         }
@@ -290,22 +404,23 @@ fun TypingIndicatorBanner(
     label: String,
     modifier: Modifier = Modifier
 ) {
+    val telegram = MaterialTheme.telegramColors
     AnimatedVisibility(visible = visible) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.Start
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = telegram.incomingBubble,
                 shape = RoundedCornerShape(
                     topStart = 18.dp,
                     topEnd = 18.dp,
                     bottomStart = 4.dp,
                     bottomEnd = 18.dp
                 ),
-                tonalElevation = 2.dp
+                shadowElevation = 1.dp
             ) {
                 TypingPulseDots(
                     label = label,
@@ -362,7 +477,7 @@ fun MessageReactionsRow(
             ) {
                 Surface(
                     color = if (reactedByMe) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    else MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                     contentColor = if (reactedByMe) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     border = if (reactedByMe) {
@@ -398,7 +513,7 @@ fun ReactionPickerStrip(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(24.dp),
         tonalElevation = 6.dp,
         shadowElevation = 4.dp,
@@ -417,7 +532,7 @@ fun ReactionPickerStrip(
                         .clip(CircleShape)
                         .background(
                             if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                            else androidx.compose.ui.graphics.Color.Transparent
+                            else Color.Transparent
                         )
                         .clickable(
                             role = Role.Button,
@@ -435,157 +550,86 @@ fun ReactionPickerStrip(
 }
 
 @Composable
-fun AuthSessionLoadingView(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "auth_loading_pulse")
-    val pulseAlpha by transition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "auth_logo_alpha"
-    )
-
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        modifier = modifier
-            .fillMaxSize()
-            .testTag("auth_loading_state")
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_esosa_avatar),
-                    contentDescription = stringResource(R.string.app_name),
-                    modifier = Modifier
-                        .size(84.dp)
-                        .alpha(pulseAlpha)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.4.dp
-                    )
-                    Text(
-                        text = stringResource(R.string.auth_checking_session),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun RoomsLoadingSkeleton(
-    label: String = "Syncing real-time rooms…",
+    label: String = "Loading chats…",
     modifier: Modifier = Modifier
 ) {
     val shimmerAlpha = rememberShimmerAlpha()
+    val telegram = MaterialTheme.telegramColors
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("rooms_loading_state"),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .background(MaterialTheme.colorScheme.surface)
+            .testTag("rooms_loading_state")
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-            shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
-        repeat(4) { index ->
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = shimmerAlpha)
-                ),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth()
+        repeat(5) { index ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha))
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .fillMaxWidth(if (index % 2 == 0) 0.52f else 0.68f)
+                            .height(15.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha))
                     )
-                    Spacer(Modifier.width(14.dp))
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(if (index % 2 == 0) 0.55f else 0.7f)
-                                .height(16.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.88f)
-                                .height(12.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.75f))
-                        )
-                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.86f)
+                            .height(12.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = shimmerAlpha))
+                    )
                 }
             }
+            HorizontalDivider(
+                color = telegram.divider,
+                modifier = Modifier.padding(start = 82.dp)
+            )
         }
     }
 }
 
 @Composable
 fun ChatMessagesLoadingSkeleton(
-    label: String = "Loading conversation history…",
+    label: String = "Loading messages…",
     modifier: Modifier = Modifier
 ) {
     val shimmerAlpha = rememberShimmerAlpha()
+    val telegram = MaterialTheme.telegramColors
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 14.dp)
             .testTag("chat_messages_loading_state"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -601,7 +645,7 @@ fun ChatMessagesLoadingSkeleton(
             )
         }
 
-        listOf(false to 0.74f, true to 0.58f, false to 0.82f, true to 0.64f).forEach { (isRight, widthFraction) ->
+        listOf(false to 0.72f, true to 0.58f, false to 0.80f, true to 0.62f).forEach { (isRight, widthFraction) ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = if (isRight) Arrangement.End else Arrangement.Start
@@ -610,7 +654,7 @@ fun ChatMessagesLoadingSkeleton(
                     modifier = Modifier
                         .fillMaxWidth(widthFraction)
                         .widthIn(max = 310.dp)
-                        .height(54.dp)
+                        .height(50.dp)
                         .clip(
                             RoundedCornerShape(
                                 topStart = 18.dp,
@@ -620,8 +664,7 @@ fun ChatMessagesLoadingSkeleton(
                             )
                         )
                         .background(
-                            (if (isRight) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceContainerHigh).copy(alpha = shimmerAlpha)
+                            (if (isRight) telegram.outgoingBubble else telegram.incomingBubble).copy(alpha = shimmerAlpha)
                         )
                 )
             }
@@ -631,7 +674,7 @@ fun ChatMessagesLoadingSkeleton(
 
 @Composable
 fun TypingPulseDots(
-    label: String = "Thinking",
+    label: String = "typing",
     modifier: Modifier = Modifier
 ) {
     val transition = rememberInfiniteTransition(label = "typing_dots")
@@ -670,7 +713,7 @@ fun TypingPulseDots(
                     .size(6.dp)
                     .alpha(alpha)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.secondary)
+                    .background(MaterialTheme.colorScheme.primary)
             )
         }
     }

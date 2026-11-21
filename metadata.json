@@ -1,6 +1,6 @@
 {
   "name": "Esosa",
-  "description": "Real-time messaging, Google authentication, push notifications, multi-turn Gemini AI assistant, and live voice conversations.",
+  "description": "Telegram-style chat app with local Room messaging, camera photos, AI Bot, live voice, and update alerts without requiring login.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,59 +1,58 @@
 package com.example.data.model
 
-import androidx.annotation.Keep
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
-import com.google.firebase.firestore.IgnoreExtraProperties
-import com.google.firebase.firestore.ServerTimestamp
+enum class ChatKind(val id: String, val label: String) {
+    SAVED("saved", "Saved Messages"),
+    DIRECT("direct", "Direct Chat"),
+    GROUP("group", "Group"),
+    CHANNEL("channel", "Channel");
 
-@Keep
-@IgnoreExtraProperties
+    companion object {
+        fun fromId(raw: String?): ChatKind = entries.firstOrNull { it.id == raw } ?: GROUP
+    }
+}
+
 data class UserProfile(
-    @DocumentId val id: String = "",
-    val userId: String = "",
-    val displayName: String = "",
-    val email: String = "",
-    val photoUrl: String? = null,
-    val notificationsEnabled: Boolean = true,
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val id: String = "local_me",
+    val userId: String = "local_me",
+    val displayName: String = "Esosa User",
+    val username: String = "esosa_chat",
+    val bio: String = "Fast Telegram-style messaging",
+    val notificationsEnabled: Boolean = true
 )
 
-@Keep
-@IgnoreExtraProperties
 data class ChatRoom(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val title: String = "",
     val topic: String = "",
+    val chatKind: ChatKind = ChatKind.GROUP,
     val roomCode: String = "",
-    val ownerId: String = "",
-    val memberUids: List<String> = emptyList(),
+    val memberCount: Int = 1,
+    val isPinned: Boolean = false,
+    val unreadCount: Int = 0,
     val lastMessageText: String = "",
     val lastMessageSenderName: String = "",
-    @ServerTimestamp val lastMessageAt: Timestamp? = null,
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val lastMessageIsMine: Boolean = false,
+    val lastMessageAtMillis: Long = 0L,
+    val createdAtMillis: Long = 0L,
+    val updatedAtMillis: Long = 0L
 )
 
 object EsosaReactions {
     val ALLOWED = listOf("👍", "❤️", "😂", "😮", "🔥", "👏")
 }
 
-@Keep
-@IgnoreExtraProperties
 data class RoomMessage(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val roomId: String = "",
     val senderId: String = "",
     val senderName: String = "",
-    val senderPhotoUrl: String? = null,
     val text: String = "",
     val imageUrl: String? = null,
     val storagePath: String? = null,
     val messageType: String = "text",
-    val memberUids: List<String> = emptyList(),
     val reactions: Map<String, List<String>> = emptyMap(),
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val isRead: Boolean = true,
+    val createdAtMillis: Long = 0L
 )
 
 data class MessageSearchHit(
@@ -61,16 +60,12 @@ data class MessageSearchHit(
     val message: RoomMessage
 )
 
-@Keep
-@IgnoreExtraProperties
 data class RoomTypingStatus(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
     val roomId: String = "",
     val displayName: String = "",
-    val typing: Boolean = false,
-    val memberUids: List<String> = emptyList(),
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val typing: Boolean = false
 )
 
 enum class AiPersona(
@@ -120,52 +115,44 @@ enum class AiPersona(
     }
 }
 
-@Keep
-@IgnoreExtraProperties
 data class AiThread(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    val id: String = "",
+    val userId: String = "local_me",
     val title: String = "",
     val personaId: String = AiPersona.GENERAL.id,
     val modelName: String = AiPersona.GENERAL.modelName,
     val systemInstruction: String = AiPersona.GENERAL.systemInstruction,
     val lastMessagePreview: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdAtMillis: Long = 0L,
+    val updatedAtMillis: Long = 0L
 )
 
-@Keep
-@IgnoreExtraProperties
 data class AiMessage(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    val id: String = "",
+    val userId: String = "local_me",
     val threadId: String = "",
     val role: String = "user",
     val text: String = "",
     val modelName: String = AiPersona.GENERAL.modelName,
     val reactions: Map<String, List<String>> = emptyMap(),
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAtMillis: Long = 0L
 )
 
-@Keep
-@IgnoreExtraProperties
 data class LiveVoiceThread(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    val id: String = "",
+    val userId: String = "local_me",
     val title: String = "",
     val modelName: String = "gemini-3.8-live",
     val lastTranscriptPreview: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdAtMillis: Long = 0L,
+    val updatedAtMillis: Long = 0L
 )
 
-@Keep
-@IgnoreExtraProperties
 data class LiveVoiceMessage(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    val id: String = "",
+    val userId: String = "local_me",
     val threadId: String = "",
     val speaker: String = "You",
     val text: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAtMillis: Long = 0L
 )
