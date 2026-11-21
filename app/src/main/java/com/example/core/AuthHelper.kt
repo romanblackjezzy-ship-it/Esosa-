@@ -77,6 +77,10 @@ fun attemptAutoSignIn(
         onUnauthenticated()
         return
     }
+    if (isPlaceholderClientId(clientId)) {
+        onUnauthenticated()
+        return
+    }
     val googleIdOption = GetGoogleIdOption.Builder()
         .setFilterByAuthorizedAccounts(true)
         .setServerClientId(clientId)
@@ -118,6 +122,12 @@ fun onGoogleSignInClicked(
         context.getString(R.string.default_web_client_id)
     } catch (_: Exception) {
         onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
+        return
+    }
+    if (isPlaceholderClientId(clientId)) {
+        onAuthError(
+            "Firebase is not configured in this APK build. Add app/google-services.json or the GOOGLE_SERVICES_JSON GitHub secret and rebuild."
+        )
         return
     }
     val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
@@ -184,12 +194,25 @@ fun signInWithGoogleProvider(
     }
 }
 
+private fun isPlaceholderClientId(clientId: String): Boolean {
+    return clientId.isBlank() ||
+        clientId.endsWith(".invalid", ignoreCase = true) ||
+        clientId.contains("ci-placeholder", ignoreCase = true)
+}
+
 private suspend fun launchGoogleOAuthProvider(
     context: Context,
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     onAuthCancelled: () -> Unit
 ) {
+    val clientId = runCatching { context.getString(R.string.default_web_client_id) }.getOrDefault("")
+    if (isPlaceholderClientId(clientId)) {
+        onAuthError(
+            "Firebase is not configured in this APK build. Add app/google-services.json or the GOOGLE_SERVICES_JSON GitHub secret and rebuild."
+        )
+        return
+    }
     try {
         val activity = context as? Activity
             ?: throw IllegalStateException("Activity context required for Google OAuth provider")

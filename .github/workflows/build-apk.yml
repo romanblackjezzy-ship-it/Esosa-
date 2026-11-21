@@ -62,12 +62,16 @@ jobs:
           gradle-version: 9.3.1
           cache-disabled: true
 
-      - name: Prepare versioning, signing keystore, and environment file
+      - name: Prepare versioning, signing keystore, and Firebase config
+        env:
+          GOOGLE_SERVICES_JSON_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          GOOGLE_SERVICES_JSON_B64_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           NEXT_CODE=$((GITHUB_RUN_NUMBER + 1))
           NEXT_NAME="1.0.${GITHUB_RUN_NUMBER}"
           echo "ESOSA_VERSION_CODE=${NEXT_CODE}" >> "$GITHUB_ENV"
           echo "ESOSA_VERSION_NAME=${NEXT_NAME}" >> "$GITHUB_ENV"
+
           if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           fi
@@ -78,6 +82,7 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
           if [ ! -f .env.example ]; then
             touch .env.example
           fi
@@ -85,6 +90,71 @@ jobs:
             cp .env.example .env
           fi
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
+
+          mkdir -p app
+          FIREBASE_CONFIG_MODE="repo"
+          FIREBASE_CONFIG_NOTE=""
+          if [ -s app/google-services.json ]; then
+            echo "Found committed app/google-services.json in repository."
+          elif [ -n "${GOOGLE_SERVICES_JSON_SECRET}" ]; then
+            printf '%s\n' "${GOOGLE_SERVICES_JSON_SECRET}" > app/google-services.json
+            python3 -m json.tool app/google-services.json >/dev/null
+            FIREBASE_CONFIG_MODE="secret"
+            echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON secret."
+          elif [ -n "${GOOGLE_SERVICES_JSON_B64_SECRET}" ]; then
+            printf '%s' "${GOOGLE_SERVICES_JSON_B64_SECRET}" | base64 -d > app/google-services.json
+            python3 -m json.tool app/google-services.json >/dev/null
+            FIREBASE_CONFIG_MODE="secret_base64"
+            echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
+          else
+            FIREBASE_CONFIG_MODE="placeholder"
+            FIREBASE_CONFIG_NOTE="Note: app/google-services.json was missing from this repository checkout, so this APK was compiled with a structural CI placeholder. Add app/google-services.json or set the GOOGLE_SERVICES_JSON GitHub Actions secret and re-run to enable live Firebase Sign-In and Firestore sync."
+            cat > app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "esosa-ci-placeholder",
+              "storage_bucket": "esosa-ci-placeholder.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.esosachat.xkmqzp"
+                  }
+                },
+                "oauth_client": [
+                  {
+                    "client_id": "000000000000-ci-placeholder.invalid",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [
+                  {
+                    "current_key": "CI_PLACEHOLDER_KEY"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "000000000000-ci-placeholder.invalid",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+            echo "::warning title=Missing app/google-services.json::app/google-services.json was not found in the GitHub repository checkout or GOOGLE_SERVICES_JSON secret. Generated a CI placeholder so the APK compiles cleanly; add app/google-services.json or the GOOGLE_SERVICES_JSON secret for live Firebase Auth & Firestore."
+          fi
+
+          echo "FIREBASE_CONFIG_MODE=${FIREBASE_CONFIG_MODE}" >> "$GITHUB_ENV"
+          echo "FIREBASE_CONFIG_NOTE=${FIREBASE_CONFIG_NOTE}" >> "$GITHUB_ENV"
           ls -la app/google-services.json app/src/main/res/values/firebase_applet_config.xml debug.keystore .env .env.example || true
 
       - name: Build Debug APK
@@ -157,7 +227,9 @@ jobs:
           tag_name: v${{ env.ESOSA_VERSION_NAME }}
           name: Esosa v${{ env.ESOSA_VERSION_NAME }}
           body: |
-            Automated build of **Esosa v${{ env.ESOSA_VERSION_NAME }}** (build `${{ env.ESOSA_VERSION_CODE }}`, `${{ github.repository }}`).
+            Automated build of **Esosa v${{ env.ESOSA_VERSION_NAME }}** (build `${{ env.ESOSA_VERSION_CODE }}`, `${{ github.repository }}`, Firebase config: `${{ env.FIREBASE_CONFIG_MODE }}`).
             Download the `.apk` asset below to update your Android device.
+
+            ${{ env.FIREBASE_CONFIG_NOTE }}
           files: Esosa-v*.apk
           make_latest: true
