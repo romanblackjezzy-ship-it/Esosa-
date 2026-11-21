@@ -196,9 +196,90 @@ test("Rooms, Invites, and Real-Time Messages: aligned queries, join by invite, a
       createdAt: new Date(Date.now() - 500),
     })
   );
+
+  // Alice and Bob (room members) can update reactions on Bob's message without modifying immutable fields
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      reactions: { "👍": [ALICE_UID] },
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      reactions: { "👍": [ALICE_UID, BOB_UID], "🔥": [BOB_UID] },
+    })
+  );
+
+  // Tampering with message text or sender during reaction update fails; non-member reaction update fails
+  await assertFails(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      text: "Edited message",
+      reactions: { "👍": [ALICE_UID] },
+    })
+  );
+  await assertFails(
+    charlieDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      reactions: { "😂": [CHARLIE_UID] },
+    })
+  );
+
+  // Typing indicators: Bob sets typing=true; Alice lists typing statuses; Charlie denied; spoofed userId denied
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("room_1").collection("typing").doc(BOB_UID).set({
+      userId: BOB_UID,
+      roomId: "room_1",
+      displayName: "Bob",
+      typing: true,
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("room_1").collection("typing").doc(BOB_UID).update({
+      displayName: "Bob",
+      typing: false,
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("room_1").collection("typing")
+      .where("memberUids", "array-contains", ALICE_UID)
+      .get()
+  );
+  await assertFails(
+    aliceDb.collection("rooms").doc("room_1").collection("typing").doc(BOB_UID).set({
+      userId: BOB_UID,
+      roomId: "room_1",
+      displayName: "Bob",
+      typing: true,
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+  await assertFails(
+    charlieDb.collection("rooms").doc("room_1").collection("typing").get()
+  );
+  await assertFails(
+    charlieDb.collection("rooms").doc("room_1").collection("typing")
+      .where("memberUids", "array-contains", ALICE_UID)
+      .get()
+  );
+  await assertFails(
+    charlieDb.collection("rooms").doc("room_1").collection("typing").doc(BOB_UID).get()
+  );
+  await assertFails(
+    charlieDb.collection("rooms").doc("room_1").collection("typing").doc(CHARLIE_UID).set({
+      userId: CHARLIE_UID,
+      roomId: "room_1",
+      displayName: "Charlie",
+      typing: true,
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
 });
 
-test("User-scoped Gemini AI threads & messages: owner succeeds, cross-user fails, invalid model fails", async () => {
+test("User-scoped Gemini AI threads & messages: owner succeeds, reactions allowed, cross-user fails, invalid model fails", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const now = new Date(Date.now() - 2000);
@@ -230,6 +311,24 @@ test("User-scoped Gemini AI threads & messages: owner succeeds, cross-user fails
   // List AI threads & messages succeeds for Alice
   await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("ai_threads").get());
   await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("ai_threads").doc("thread_1").collection("messages").get());
+
+  // Alice can react to AI message; tampering with text or cross-user reaction fails
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("ai_threads").doc("thread_1").collection("messages").doc("m_1").update({
+      reactions: { "❤️": [ALICE_UID] },
+    })
+  );
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("ai_threads").doc("thread_1").collection("messages").doc("m_1").update({
+      text: "Tampered",
+      reactions: { "❤️": [ALICE_UID] },
+    })
+  );
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("ai_threads").doc("thread_1").collection("messages").doc("m_1").update({
+      reactions: { "👍": [BOB_UID] },
+    })
+  );
 
   // Cross-user read denied
   await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("ai_threads").get());

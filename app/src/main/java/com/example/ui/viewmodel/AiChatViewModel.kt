@@ -156,6 +156,15 @@ class AiChatViewModel(
         }
     }
 
+    fun toggleReaction(threadId: String, messageId: String, emoji: String) {
+        viewModelScope.launch {
+            repository.toggleMessageReaction(threadId, messageId, emoji)
+                .onFailure { err ->
+                    _errorBanner.value = err.localizedMessage ?: "Failed to update reaction."
+                }
+        }
+    }
+
     fun sendPrompt(rawPrompt: String, activeThread: AiThread?, currentMessages: List<AiMessage>) {
         val prompt = rawPrompt.trim()
         if (prompt.isEmpty() || _isGenerating.value) return

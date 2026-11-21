@@ -63,7 +63,18 @@ service cloud.firestore {
              data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
              data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 25 &&
              data.memberUids[0] is string &&
+             (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 10)) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidRoomTypingStatus(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.roomId) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+             data.typing is bool &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 25 &&
+             data.memberUids[0] is string &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
     function isValidAiThread(data) {
@@ -83,6 +94,7 @@ service cloud.firestore {
              data.role in ['user', 'model'] &&
              data.text is string && data.text.size() >= 1 && data.text.size() <= 20000 &&
              data.modelName is string && data.modelName.size() >= 1 && data.modelName.size() <= 80 &&
+             (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 10)) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
@@ -164,10 +176,22 @@ service cloud.firestore {
                            incoming().userId == request.auth.uid &&
                            incoming().threadId == threadId &&
                            incoming().keys().hasAll(['userId', 'threadId', 'role', 'text', 'modelName', 'createdAt']) &&
-                           incoming().keys().hasOnly(['userId', 'threadId', 'role', 'text', 'modelName', 'createdAt']) &&
+                           incoming().keys().hasOnly(['userId', 'threadId', 'role', 'text', 'modelName', 'reactions', 'createdAt']) &&
                            isValidAiMessage(incoming());
 
-          allow update: if false;
+          allow update: if isSignedIn() &&
+                           isValidId(userId) &&
+                           isValidId(threadId) &&
+                           isValidId(messageId) &&
+                           request.auth.uid == userId &&
+                           isValidAiMessage(incoming()) &&
+                           incoming().userId == existing().userId &&
+                           incoming().threadId == existing().threadId &&
+                           incoming().role == existing().role &&
+                           incoming().text == existing().text &&
+                           incoming().modelName == existing().modelName &&
+                           incoming().createdAt == existing().createdAt &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
           allow delete: if isSignedIn() && isValidId(userId) && isValidId(threadId) && isValidId(messageId) && request.auth.uid == userId;
         }
       }
@@ -280,13 +304,60 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().memberUids) &&
                          incoming().keys().hasAll(['roomId', 'senderId', 'senderName', 'text', 'memberUids', 'createdAt']) &&
-                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'memberUids', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'memberUids', 'reactions', 'createdAt']) &&
                          exists(/databases/$(database)/documents/rooms/$(roomId)) &&
                          (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids) &&
                          incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
 
-        allow update: if false;
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isValidRoomMessage(incoming()) &&
+                         (request.auth.uid in existing().memberUids) &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().senderName == existing().senderName &&
+                         incoming().text == existing().text &&
+                         incoming().memberUids == existing().memberUids &&
+                         incoming().createdAt == existing().createdAt &&
+                         (!('senderPhotoUrl' in existing()) ? !('senderPhotoUrl' in incoming()) : incoming().senderPhotoUrl == existing().senderPhotoUrl) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
+
         allow delete: if isSignedIn() && isValidId(roomId) && isValidId(messageId) && existing().senderId == request.auth.uid;
+      }
+
+      // 5. Real-Time Room Typing Status (per-user document, denormalized memberUids)
+      match /typing/{userId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(userId) && (request.auth.uid in existing().memberUids);
+        allow list: if isSignedIn() && (request.auth.uid in existing().memberUids);
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(userId) &&
+                         request.auth.uid == userId &&
+                         isValidRoomTypingStatus(incoming()) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().roomId == roomId &&
+                         (request.auth.uid in incoming().memberUids) &&
+                         incoming().keys().hasAll(['userId', 'roomId', 'displayName', 'typing', 'memberUids', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'roomId', 'displayName', 'typing', 'memberUids', 'updatedAt']) &&
+                         exists(/databases/$(database)/documents/rooms/$(roomId)) &&
+                         (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids) &&
+                         incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(userId) &&
+                         request.auth.uid == userId &&
+                         isValidRoomTypingStatus(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'typing', 'memberUids', 'updatedAt']) &&
+                         exists(/databases/$(database)/documents/rooms/$(roomId)) &&
+                         (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids) &&
+                         incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(userId) && request.auth.uid == userId;
       }
     }
 

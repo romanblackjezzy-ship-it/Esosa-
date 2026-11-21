@@ -6,7 +6,9 @@ import com.example.core.EsosaFirestore
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.ChatRoom
+import com.example.data.model.EsosaReactions
 import com.example.data.model.RoomMessage
+import com.example.data.model.RoomTypingStatus
 import com.example.data.model.UserProfile
 import com.google.firebase.Firebase
 import com.google.firebase.Timestamp
@@ -210,6 +212,102 @@ class ChatRepository(
         )
     }
 
+    fun observeTypingStatuses(roomId: String, userId: String): Flow<List<RoomTypingStatus>> = flow {
+        require(roomId.isNotBlank() && userId.isNotBlank())
+        val path = "rooms/$roomId/typing"
+        emitAll(
+            db.collection("rooms").document(roomId).collection("typing")
+                .whereArrayContains("memberUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        RoomTypingStatus::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == userId) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun setTypingStatus(room: ChatRoom, typing: Boolean): Result<Unit> {
+        val currentPath = "rooms/${room.id}/typing"
+        return try {
+            val user = auth.currentUser ?: return Result.failure(IllegalStateException("Not authenticated"))
+            val uid = user.uid
+            if (room.id.isBlank() || room.memberUids.isEmpty() || uid !in room.memberUids) {
+                return Result.success(Unit)
+            }
+            val typingRef = db.collection("rooms").document(room.id)
+                .collection("typing").document(uid)
+            val displayName = user.displayName?.takeIf { it.isNotBlank() }?.take(80) ?: "Member"
+            val payload = mapOf(
+                "userId" to uid,
+                "roomId" to room.id,
+                "displayName" to displayName,
+                "typing" to typing,
+                "memberUids" to room.memberUids,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            typingRef.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, currentPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleMessageReaction(roomId: String, messageId: String, rawEmoji: String): Result<Unit> {
+        val msgRef = db.collection("rooms").document(roomId).collection("messages").document(messageId)
+        return try {
+            val uid = requireUserId()
+            val emoji = rawEmoji.trim()
+            require(emoji in EsosaReactions.ALLOWED) { "Unsupported reaction emoji" }
+
+            db.runTransaction { tx ->
+                val snap = tx.get(msgRef)
+                if (!snap.exists()) {
+                    throw IllegalStateException("Message no longer exists")
+                }
+                val rawReactions = snap.get("reactions") as? Map<*, *>
+                val nextReactions = linkedMapOf<String, List<String>>()
+                rawReactions?.forEach { (key, value) ->
+                    val k = key as? String
+                    val uids = (value as? List<*>)?.filterIsInstance<String>()?.distinct()
+                    if (!k.isNullOrBlank() && !uids.isNullOrEmpty()) {
+                        nextReactions[k] = uids
+                    }
+                }
+                val currentForEmoji = nextReactions[emoji].orEmpty()
+                if (uid in currentForEmoji) {
+                    val remaining = currentForEmoji.filterNot { it == uid }
+                    if (remaining.isEmpty()) nextReactions.remove(emoji) else nextReactions[emoji] = remaining
+                } else {
+                    nextReactions[emoji] = (currentForEmoji + uid).distinct()
+                }
+                tx.update(msgRef, mapOf("reactions" to nextReactions))
+                null
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, msgRef.path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun createRoom(title: String, topic: String): Result<String> {
         var currentPath = "rooms"
         return try {
@@ -376,6 +474,10 @@ class ChatRepository(
         val roomRef = db.collection("rooms").document(room.id)
         return try {
             val uid = requireUserId()
+            try {
+                roomRef.collection("typing").document(uid).delete().await()
+            } catch (_: Exception) {
+            }
             if (room.ownerId == uid) {
                 if (room.roomCode.isNotBlank()) {
                     try {

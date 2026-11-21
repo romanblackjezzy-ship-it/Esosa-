@@ -35,6 +35,10 @@ data class ChatRoom(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+object EsosaReactions {
+    val ALLOWED = listOf("👍", "❤️", "😂", "😮", "🔥", "👏")
+}
+
 @Keep
 @IgnoreExtraProperties
 data class RoomMessage(
@@ -45,7 +49,20 @@ data class RoomMessage(
     val senderPhotoUrl: String? = null,
     val text: String = "",
     val memberUids: List<String> = emptyList(),
+    val reactions: Map<String, List<String>> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class RoomTypingStatus(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val roomId: String = "",
+    val displayName: String = "",
+    val typing: Boolean = false,
+    val memberUids: List<String> = emptyList(),
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
 enum class AiPersona(
@@ -118,6 +135,7 @@ data class AiMessage(
     val role: String = "user",
     val text: String = "",
     val modelName: String = AiPersona.GENERAL.modelName,
+    val reactions: Map<String, List<String>> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null
 )
 

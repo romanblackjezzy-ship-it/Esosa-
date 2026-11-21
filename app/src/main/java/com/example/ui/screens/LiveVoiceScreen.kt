@@ -16,6 +16,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,8 +90,13 @@ import com.example.R
 import com.example.core.UiState
 import com.example.data.model.LiveVoiceThread
 import com.example.ui.components.AutoScrollToBottomEffect
+import com.example.ui.components.DateSeparatorChip
+import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
+import com.example.ui.components.formatChatDateLabel
+import com.example.ui.components.formatMessageTime
+import com.example.ui.components.messageDayKey
 import com.example.ui.viewmodel.LiveTranscriptItem
 import com.example.ui.viewmodel.LiveVoiceStatus
 import com.example.ui.viewmodel.LiveVoiceViewModel
@@ -221,97 +228,166 @@ fun LiveVoiceScreen(
             )
         }
     ) { innerPadding ->
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(8.dp))
+            val isCompactHeight = maxHeight < 580.dp
 
-            // Animated Voice Orb & Audio Streaming Card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ),
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 20.dp, horizontal = 18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    VoicePulseOrb(
-                        isActive = status == LiveVoiceStatus.ACTIVE,
-                        isConnecting = status == LiveVoiceStatus.CONNECTING,
-                        isModelSpeaking = isModelSpeaking,
-                        isMuted = isMuted,
-                        micLevel = micLevel
-                    )
+                Spacer(Modifier.height(if (isCompactHeight) 4.dp else 8.dp))
 
-                    Surface(
-                        color = when (status) {
-                            LiveVoiceStatus.ACTIVE -> MaterialTheme.colorScheme.tertiaryContainer
-                            LiveVoiceStatus.CONNECTING -> MaterialTheme.colorScheme.secondaryContainer
-                            LiveVoiceStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
-                            LiveVoiceStatus.IDLE -> MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                        shape = RoundedCornerShape(12.dp)
+                // Animated Voice Orb & Audio Streaming Card
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    shape = RoundedCornerShape(if (isCompactHeight) 22.dp else 28.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                vertical = if (isCompactHeight) 10.dp else 20.dp,
+                                horizontal = if (isCompactHeight) 14.dp else 18.dp
+                            ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(if (isCompactHeight) 8.dp else 12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.GraphicEq,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                        if (isCompactHeight) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                VoicePulseOrb(
+                                    isActive = status == LiveVoiceStatus.ACTIVE,
+                                    isConnecting = status == LiveVoiceStatus.CONNECTING,
+                                    isModelSpeaking = isModelSpeaking,
+                                    isMuted = isMuted,
+                                    micLevel = micLevel,
+                                    orbSize = 68.dp
+                                )
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Surface(
+                                        color = when (status) {
+                                            LiveVoiceStatus.ACTIVE -> MaterialTheme.colorScheme.tertiaryContainer
+                                            LiveVoiceStatus.CONNECTING -> MaterialTheme.colorScheme.secondaryContainer
+                                            LiveVoiceStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
+                                            LiveVoiceStatus.IDLE -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                        },
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.GraphicEq,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text(
+                                                text = statusMessage,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = if (status == LiveVoiceStatus.ACTIVE && isAecEnabled) {
+                                            stringResource(R.string.live_voice_audio_pipeline_badge)
+                                        } else {
+                                            "16kHz PCM Capture • 24kHz Live Stream"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        } else {
+                            VoicePulseOrb(
+                                isActive = status == LiveVoiceStatus.ACTIVE,
+                                isConnecting = status == LiveVoiceStatus.CONNECTING,
+                                isModelSpeaking = isModelSpeaking,
+                                isMuted = isMuted,
+                                micLevel = micLevel
                             )
+
+                            Surface(
+                                color = when (status) {
+                                    LiveVoiceStatus.ACTIVE -> MaterialTheme.colorScheme.tertiaryContainer
+                                    LiveVoiceStatus.CONNECTING -> MaterialTheme.colorScheme.secondaryContainer
+                                    LiveVoiceStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
+                                    LiveVoiceStatus.IDLE -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.GraphicEq,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = statusMessage,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+
+                            // Audio pipeline telemetry indicator
                             Text(
-                                text = statusMessage,
-                                style = MaterialTheme.typography.bodySmall
+                                text = if (status == LiveVoiceStatus.ACTIVE && isAecEnabled) {
+                                    stringResource(R.string.live_voice_audio_pipeline_badge)
+                                } else {
+                                    "16kHz PCM Capture • 24kHz Live Stream"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
 
-                    // Audio pipeline telemetry indicator
-                    Text(
-                        text = if (status == LiveVoiceStatus.ACTIVE && isAecEnabled) {
-                            stringResource(R.string.live_voice_audio_pipeline_badge)
-                        } else {
-                            "16kHz PCM Capture • 24kHz Live Stream"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (status == LiveVoiceStatus.ACTIVE) {
-                        val animatedMeter by animateFloatAsState(
-                            targetValue = if (isMuted) 0f else micLevel,
-                            animationSpec = tween(durationMillis = 80),
-                            label = "mic_rms_meter"
-                        )
-                        LinearProgressIndicator(
-                            progress = { animatedMeter },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .widthIn(max = 260.dp)
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .testTag("live_mic_level_meter"),
-                            color = if (isMuted) {
-                                MaterialTheme.colorScheme.outline
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                        )
-                    }
+                        if (status == LiveVoiceStatus.ACTIVE) {
+                            val animatedMeter by animateFloatAsState(
+                                targetValue = if (isMuted) 0f else micLevel,
+                                animationSpec = tween(durationMillis = 80),
+                                label = "mic_rms_meter"
+                            )
+                            LinearProgressIndicator(
+                                progress = { animatedMeter },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 260.dp)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .testTag("live_mic_level_meter"),
+                                color = if (isMuted) {
+                                    MaterialTheme.colorScheme.outline
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                            )
+                        }
 
                     if (showRationale) {
                         Surface(
@@ -437,92 +513,178 @@ fun LiveVoiceScreen(
                         }
 
                         LiveVoiceStatus.ACTIVE -> {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = 360.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                FilledTonalButton(
-                                    onClick = onToggleMute,
-                                    shape = RoundedCornerShape(16.dp),
+                            if (isCompactHeight) {
+                                Row(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("toggle_mute_button")
+                                        .fillMaxWidth()
+                                        .widthIn(max = 360.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                                        contentDescription = if (isMuted) {
-                                            stringResource(R.string.live_voice_unmute)
-                                        } else {
-                                            stringResource(R.string.live_voice_mute)
-                                        },
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = if (isMuted) "Unmute" else "Mute",
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
+                                    FilledTonalButton(
+                                        onClick = onToggleMute,
+                                        shape = RoundedCornerShape(14.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("toggle_mute_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                                            contentDescription = if (isMuted) {
+                                                stringResource(R.string.live_voice_unmute)
+                                            } else {
+                                                stringResource(R.string.live_voice_mute)
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isMuted) "Unmute" else "Mute",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    FilledTonalButton(
+                                        onClick = onToggleSpeaker,
+                                        shape = RoundedCornerShape(14.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("toggle_speaker_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSpeakerOn) {
+                                                Icons.AutoMirrored.Filled.VolumeUp
+                                            } else {
+                                                Icons.Filled.PhoneInTalk
+                                            },
+                                            contentDescription = if (isSpeakerOn) {
+                                                stringResource(R.string.live_voice_speaker_on)
+                                            } else {
+                                                stringResource(R.string.live_voice_speaker_off)
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isSpeakerOn) "Speaker" else "Earpiece",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = onStopConversation,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        ),
+                                        shape = RoundedCornerShape(14.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier
+                                            .height(48.dp)
+                                            .testTag("stop_live_voice_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.CallEnd,
+                                            contentDescription = "End live voice session",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("End", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .widthIn(max = 360.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    FilledTonalButton(
+                                        onClick = onToggleMute,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("toggle_mute_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                                            contentDescription = if (isMuted) {
+                                                stringResource(R.string.live_voice_unmute)
+                                            } else {
+                                                stringResource(R.string.live_voice_mute)
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isMuted) "Unmute" else "Mute",
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+
+                                    FilledTonalButton(
+                                        onClick = onToggleSpeaker,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("toggle_speaker_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSpeakerOn) {
+                                                Icons.AutoMirrored.Filled.VolumeUp
+                                            } else {
+                                                Icons.Filled.PhoneInTalk
+                                            },
+                                            contentDescription = if (isSpeakerOn) {
+                                                stringResource(R.string.live_voice_speaker_on)
+                                            } else {
+                                                stringResource(R.string.live_voice_speaker_off)
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isSpeakerOn) "Speaker" else "Earpiece",
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
                                 }
 
-                                FilledTonalButton(
-                                    onClick = onToggleSpeaker,
-                                    shape = RoundedCornerShape(16.dp),
+                                Button(
+                                    onClick = onStopConversation,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    ),
+                                    shape = RoundedCornerShape(18.dp),
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("toggle_speaker_button")
+                                        .fillMaxWidth()
+                                        .widthIn(max = 360.dp)
+                                        .height(52.dp)
+                                        .testTag("stop_live_voice_button")
                                 ) {
                                     Icon(
-                                        imageVector = if (isSpeakerOn) {
-                                            Icons.AutoMirrored.Filled.VolumeUp
-                                        } else {
-                                            Icons.Filled.PhoneInTalk
-                                        },
-                                        contentDescription = if (isSpeakerOn) {
-                                            stringResource(R.string.live_voice_speaker_on)
-                                        } else {
-                                            stringResource(R.string.live_voice_speaker_off)
-                                        },
-                                        modifier = Modifier.size(18.dp)
+                                        imageVector = Icons.Filled.CallEnd,
+                                        contentDescription = "End live voice session",
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = if (isSpeakerOn) "Speaker" else "Earpiece",
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("End Live Session", style = MaterialTheme.typography.labelLarge)
                                 }
-                            }
-
-                            Button(
-                                onClick = onStopConversation,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError
-                                ),
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = 360.dp)
-                                    .height(52.dp)
-                                    .testTag("stop_live_voice_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.CallEnd,
-                                    contentDescription = "End live voice session",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("End Live Session", style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(if (isCompactHeight) 6.dp else 14.dp))
 
             // Live Transcript Stream
             Row(
@@ -542,7 +704,7 @@ fun LiveVoiceScreen(
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(if (isCompactHeight) 4.dp else 8.dp))
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (transcripts.isEmpty()) {
@@ -563,32 +725,58 @@ fun LiveVoiceScreen(
                         contentPadding = PaddingValues(vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(transcripts, key = { it.id }) { item ->
+                        itemsIndexed(transcripts, key = { _, it -> it.id }) { index, item ->
                             val isUser = item.speaker == "You"
-                            Surface(
-                                color = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        text = item.speaker,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(Modifier.height(3.dp))
-                                    Text(
-                                        text = item.text,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                            val showDateHeader = index == 0 ||
+                                messageDayKey(transcripts[index - 1].createdAt) != messageDayKey(item.createdAt)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (showDateHeader) {
+                                    DateSeparatorChip(label = formatChatDateLabel(item.createdAt))
+                                }
+                                Surface(
+                                    color = if (isUser) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = item.speaker,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
+                                                else MaterialTheme.colorScheme.secondary
+                                            )
+                                            Text(
+                                                text = if (item.isStreaming) "Live now"
+                                                else formatMessageTime(item.createdAt),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.testTag("live_transcript_timestamp_${item.id}")
+                                            )
+                                        }
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            text = item.text,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+
+            TypingIndicatorBanner(
+                visible = status == LiveVoiceStatus.ACTIVE && (isModelSpeaking || transcripts.any { it.isStreaming }),
+                label = if (isModelSpeaking) "Esosa Live is speaking" else "Transcribing live audio",
+                modifier = Modifier.testTag("live_typing_indicator")
+            )
 
             if (status == LiveVoiceStatus.ACTIVE) {
                 Row(
@@ -630,6 +818,7 @@ fun LiveVoiceScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -723,7 +912,8 @@ private fun VoicePulseOrb(
     isConnecting: Boolean,
     isModelSpeaking: Boolean,
     isMuted: Boolean,
-    micLevel: Float
+    micLevel: Float,
+    orbSize: androidx.compose.ui.unit.Dp = 138.dp
 ) {
     val transition = rememberInfiniteTransition(label = "voice_pulse")
     val idlePulse by transition.animateFloat(
@@ -746,7 +936,7 @@ private fun VoicePulseOrb(
     val mutedColor = MaterialTheme.colorScheme.outline
 
     Box(
-        modifier = Modifier.size(138.dp),
+        modifier = Modifier.size(orbSize),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -784,7 +974,7 @@ private fun VoicePulseOrb(
             painter = painterResource(id = R.drawable.img_esosa_avatar),
             contentDescription = "Esosa Live Orb",
             modifier = Modifier
-                .size(88.dp)
+                .size(orbSize * 0.64f)
                 .clip(CircleShape),
             contentScale = ContentScale.Crop
         )

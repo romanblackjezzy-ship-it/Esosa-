@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
@@ -69,13 +75,23 @@ import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
 import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.DateSeparatorChip
+import com.example.ui.components.MessageReactionsRow
+import com.example.ui.components.ReactionPickerStrip
+import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.TypingPulseDots
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
+import com.example.ui.components.formatChatDateLabel
+import com.example.ui.components.formatMessageTime
+import com.example.ui.components.formatRelativeThreadTime
+import com.example.ui.components.messageDayKey
+import com.google.firebase.Timestamp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiChatScreen(
+    currentUserId: String = "",
     userProfileInfo: UserProfileHeaderInfo,
     threadsState: UiState<List<AiThread>>,
     selectedThreadId: String?,
@@ -88,6 +104,7 @@ fun AiChatScreen(
     onSwitchPersona: (AiPersona) -> Unit,
     onDeleteThread: (String) -> Unit,
     onSendPrompt: (String, AiThread?, List<AiMessage>) -> Unit,
+    onToggleReaction: (String, String, String) -> Unit = { _, _, _ -> },
     onClearError: () -> Unit,
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
@@ -101,6 +118,7 @@ fun AiChatScreen(
     var draft by remember { mutableStateOf("") }
     var showHistorySheet by remember { mutableStateOf(false) }
     var showSystemInfo by remember { mutableStateOf(false) }
+    var activePickerMessageId by remember(selectedThreadId) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     val totalItems = messages.size + if (streamingReply != null) 1 else 0
@@ -279,27 +297,63 @@ fun AiChatScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(messages, key = { it.id }) { msg ->
-                            AiMessageBubble(
-                                role = msg.role,
-                                text = msg.text,
-                                modelName = msg.modelName,
-                                isStreaming = false
-                            )
+                        itemsIndexed(messages, key = { _, it -> it.id }) { index, msg ->
+                            val showDateHeader = index == 0 ||
+                                messageDayKey(messages[index - 1].createdAt) != messageDayKey(msg.createdAt)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (showDateHeader) {
+                                    DateSeparatorChip(label = formatChatDateLabel(msg.createdAt))
+                                }
+                                AiMessageBubble(
+                                    messageId = msg.id,
+                                    role = msg.role,
+                                    text = msg.text,
+                                    modelName = msg.modelName,
+                                    createdAt = msg.createdAt,
+                                    reactions = msg.reactions,
+                                    currentUserId = currentUserId,
+                                    isStreaming = false,
+                                    showReactionPicker = activePickerMessageId == msg.id,
+                                    onOpenReactionPicker = {
+                                        activePickerMessageId =
+                                            if (activePickerMessageId == msg.id) null else msg.id
+                                    },
+                                    onToggleReaction = { emoji ->
+                                        activePickerMessageId = null
+                                        val threadId = activeThread?.id ?: msg.threadId
+                                        if (threadId.isNotBlank()) {
+                                            onToggleReaction(threadId, msg.id, emoji)
+                                        }
+                                    }
+                                )
+                            }
                         }
                         if (streamingReply != null) {
                             item(key = "streaming_turn") {
                                 AiMessageBubble(
+                                    messageId = "streaming_turn",
                                     role = "model",
                                     text = streamingReply,
                                     modelName = activePersona.modelName,
-                                    isStreaming = true
+                                    createdAt = null,
+                                    reactions = emptyMap(),
+                                    currentUserId = currentUserId,
+                                    isStreaming = true,
+                                    showReactionPicker = false,
+                                    onOpenReactionPicker = {},
+                                    onToggleReaction = {}
                                 )
                             }
                         }
                     }
                 }
             }
+
+            TypingIndicatorBanner(
+                visible = isGenerating,
+                label = "${activePersona.displayName} is typing",
+                modifier = Modifier.testTag("ai_typing_indicator")
+            )
 
             // Prompt Composer
             Surface(
@@ -421,7 +475,7 @@ fun AiChatScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${thread.modelName} • ${thread.lastMessagePreview}",
+                                        text = "${thread.modelName} • ${formatRelativeThreadTime(thread.updatedAt ?: thread.createdAt)} • ${thread.lastMessagePreview}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
@@ -552,14 +606,25 @@ private fun AiEmptyConversation(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AiMessageBubble(
+    messageId: String,
     role: String,
     text: String,
     modelName: String,
-    isStreaming: Boolean
+    createdAt: Timestamp?,
+    reactions: Map<String, List<String>>,
+    currentUserId: String,
+    isStreaming: Boolean,
+    showReactionPicker: Boolean,
+    onOpenReactionPicker: () -> Unit,
+    onToggleReaction: (String) -> Unit
 ) {
     val isUser = role == "user"
+    val mySelectedEmojis = remember(reactions, currentUserId) {
+        reactions.filterValues { currentUserId in it }.keys
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
@@ -576,6 +641,16 @@ private fun AiMessageBubble(
                     modifier = Modifier.padding(start = 4.dp, bottom = 3.dp)
                 )
             }
+
+            AnimatedVisibility(visible = !isStreaming && showReactionPicker) {
+                ReactionPickerStrip(
+                    messageId = messageId,
+                    selectedEmojis = mySelectedEmojis,
+                    onSelectEmoji = onToggleReaction,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+
             Surface(
                 color = if (isUser) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -586,7 +661,22 @@ private fun AiMessageBubble(
                     topEnd = 18.dp,
                     bottomStart = if (isUser) 18.dp else 4.dp,
                     bottomEnd = if (isUser) 4.dp else 18.dp
-                )
+                ),
+                modifier = Modifier
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
+                            bottomStart = if (isUser) 18.dp else 4.dp,
+                            bottomEnd = if (isUser) 4.dp else 18.dp
+                        )
+                    )
+                    .combinedClickable(
+                        enabled = !isStreaming,
+                        onClick = {},
+                        onLongClick = onOpenReactionPicker,
+                        onLongClickLabel = "React to AI message"
+                    )
             ) {
                 if (!isUser && isStreaming && text.isBlank()) {
                     TypingPulseDots(
@@ -594,12 +684,57 @@ private fun AiMessageBubble(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
                     )
                 } else {
-                    Text(
-                        text = text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (isStreaming) "Streaming…" else formatMessageTime(createdAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("ai_message_timestamp_$messageId")
+                            )
+                            if (!isStreaming) {
+                                Box(
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .clip(CircleShape)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "React to message"
+                                        ) { onOpenReactionPicker() }
+                                        .testTag("ai_react_button_$messageId"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.EmojiEmotions,
+                                        contentDescription = "Add reaction",
+                                        tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            if (!isStreaming) {
+                MessageReactionsRow(
+                    messageId = messageId,
+                    reactions = reactions,
+                    currentUserId = currentUserId,
+                    onToggleReaction = onToggleReaction,
+                    isMine = isUser
+                )
             }
         }
     }

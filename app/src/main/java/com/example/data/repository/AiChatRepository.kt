@@ -9,6 +9,7 @@ import com.example.core.handleFirestoreError
 import com.example.data.model.AiMessage
 import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
+import com.example.data.model.EsosaReactions
 import com.google.firebase.Firebase
 import com.google.firebase.Timestamp
 import com.google.firebase.ai.GenerativeModel
@@ -244,6 +245,51 @@ class AiChatRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, currentPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleMessageReaction(threadId: String, messageId: String, rawEmoji: String): Result<Unit> {
+        var currentPath = "users/unknown/ai_threads/$threadId/messages/$messageId"
+        return try {
+            val uid = requireUserId()
+            val emoji = rawEmoji.trim()
+            require(emoji in EsosaReactions.ALLOWED) { "Unsupported reaction emoji" }
+
+            val msgRef = db.collection("users").document(uid)
+                .collection("ai_threads").document(threadId)
+                .collection("messages").document(messageId)
+            currentPath = msgRef.path
+
+            db.runTransaction { tx ->
+                val snap = tx.get(msgRef)
+                if (!snap.exists()) {
+                    throw IllegalStateException("Message no longer exists")
+                }
+                val rawReactions = snap.get("reactions") as? Map<*, *>
+                val nextReactions = linkedMapOf<String, List<String>>()
+                rawReactions?.forEach { (key, value) ->
+                    val k = key as? String
+                    val uids = (value as? List<*>)?.filterIsInstance<String>()?.distinct()
+                    if (!k.isNullOrBlank() && !uids.isNullOrEmpty()) {
+                        nextReactions[k] = uids
+                    }
+                }
+                val currentForEmoji = nextReactions[emoji].orEmpty()
+                if (uid in currentForEmoji) {
+                    val remaining = currentForEmoji.filterNot { it == uid }
+                    if (remaining.isEmpty()) nextReactions.remove(emoji) else nextReactions[emoji] = remaining
+                } else {
+                    nextReactions[emoji] = (currentForEmoji + uid).distinct()
+                }
+                tx.update(msgRef, mapOf("reactions" to nextReactions))
+                null
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, currentPath)
             Result.failure(e)
         }
     }

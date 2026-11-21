@@ -61,6 +61,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 9.3.1
+          cache-disabled: true
 
       - name: Prepare versioning, signing keystore, and environment file
         run: |
@@ -78,25 +79,49 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          if [ ! -f .env.example ]; then
+            touch .env.example
+          fi
           if [ ! -f .env ]; then
             touch .env
           fi
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          ls -la app/google-services.json app/src/main/res/values/firebase_applet_config.xml debug.keystore .env .env.example || true
 
       - name: Build Debug APK
+        env:
+          GRADLE_OPTS: "-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           echo "Java: $(java -version 2>&1 | head -n 1)"
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "Version: ${ESOSA_VERSION_NAME} (${ESOSA_VERSION_CODE}) Repo: ${GITHUB_REPOSITORY}"
-          gradle :app:assembleDebug \
+          if ! gradle :app:assembleDebug \
             --no-daemon \
             --no-configuration-cache \
+            --no-build-cache \
             --max-workers=1 \
             --stacktrace \
             --console=plain \
             -Dorg.gradle.parallel=false \
-            -Dorg.gradle.jvmargs="-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
-            2>&1 | tee ci-build.log
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
+            2>&1 | tee ci-build.log; then
+            echo "=== LAST 80 LINES OF CI BUILD LOG ==="
+            tail -n 80 ci-build.log || true
+            ERROR_LINE="$(grep -E '^e: |FAILURE:|BUILD FAILED|\* What went wrong:' ci-build.log | tail -n 5 | tr '\n' ' ' | sed 's/%/%25/g; s/\r//g')"
+            echo "::error title=Build Debug APK failed::${ERROR_LINE:-See ci-build.log in job summary/artifacts}"
+            exit 1
+          fi
+
+      - name: Summarize CI build failure
+        if: failure() && hashFiles('ci-build.log') != ''
+        run: |
+          {
+            echo "### Build Debug APK Failure Log (tail)"
+            echo '```text'
+            tail -n 120 ci-build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload CI build log on failure
         if: failure()

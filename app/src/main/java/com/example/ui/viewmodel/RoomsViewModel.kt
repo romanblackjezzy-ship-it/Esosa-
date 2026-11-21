@@ -7,6 +7,7 @@ import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
+import com.example.data.model.RoomTypingStatus
 import com.example.data.model.UserProfile
 import com.example.data.repository.ChatRepository
 import com.example.notifications.EsosaNotificationManager
@@ -16,6 +17,8 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +54,9 @@ class RoomsViewModel(
 
     private val knownRoomTimestamps = mutableMapOf<String, Timestamp>()
     private var initialRoomsLoaded = false
+    private var typingTimeoutJob: Job? = null
+    private var lastTypingSentTrueAtMs = 0L
+    private var activeTypingRoom: ChatRoom? = null
 
     val userProfile: StateFlow<UserProfile?> = repository.observeUserProfile(currentUserId)
         .catch { error ->
@@ -134,6 +140,31 @@ class RoomsViewModel(
             initialValue = UiState.Loading
         )
 
+    val typingUsers: StateFlow<List<RoomTypingStatus>> = _selectedRoomId
+        .flatMapLatest { roomId ->
+            if (roomId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                repository.observeTypingStatuses(roomId, currentUserId)
+                    .map { statuses ->
+                        statuses.filter { it.typing && it.userId != currentUserId }
+                    }
+                    .catch { error ->
+                        val firestoreError = generateSequence(error) { it.cause }
+                            .filterIsInstance<FirebaseFirestoreException>()
+                            .firstOrNull()
+                        if (firestoreError == null && error is CancellationException) throw error
+                        Log.w(TAG, "Error observing typing statuses", firestoreError ?: error)
+                        emit(emptyList())
+                    }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
     init {
         viewModelScope.launch {
             repository.ensureUserProfile()
@@ -141,6 +172,9 @@ class RoomsViewModel(
     }
 
     private fun setSelectedRoom(roomId: String?) {
+        if (_selectedRoomId.value != roomId) {
+            clearTyping(activeTypingRoom)
+        }
         _selectedRoomId.value = roomId
         selectionPreferences?.setLastRoomId(currentUserId, roomId)
     }
@@ -222,8 +256,43 @@ class RoomsViewModel(
         }
     }
 
+    fun onDraftChanged(room: ChatRoom?, text: String) {
+        if (room == null) return
+        if (text.isBlank()) {
+            clearTyping(room)
+            return
+        }
+        typingTimeoutJob?.cancel()
+        typingTimeoutJob = viewModelScope.launch {
+            delay(TYPING_IDLE_TIMEOUT_MS)
+            clearTyping(room)
+        }
+        val now = System.currentTimeMillis()
+        if (activeTypingRoom?.id != room.id || now - lastTypingSentTrueAtMs >= TYPING_HEARTBEAT_MS) {
+            lastTypingSentTrueAtMs = now
+            activeTypingRoom = room
+            viewModelScope.launch {
+                repository.setTypingStatus(room, true)
+            }
+        }
+    }
+
+    fun clearTyping(room: ChatRoom? = activeTypingRoom) {
+        typingTimeoutJob?.cancel()
+        typingTimeoutJob = null
+        lastTypingSentTrueAtMs = 0L
+        val target = room ?: return
+        if (activeTypingRoom?.id == target.id || activeTypingRoom == null) {
+            activeTypingRoom = null
+            viewModelScope.launch {
+                repository.setTypingStatus(target, false)
+            }
+        }
+    }
+
     fun sendMessage(room: ChatRoom, text: String, onSent: () -> Unit = {}) {
         if (text.isBlank() || _isSendingMessage.value) return
+        clearTyping(room)
         viewModelScope.launch {
             _actionError.value = null
             _isSendingMessage.value = true
@@ -240,6 +309,15 @@ class RoomsViewModel(
         }
     }
 
+    fun toggleReaction(roomId: String, messageId: String, emoji: String) {
+        viewModelScope.launch {
+            val result = repository.toggleMessageReaction(roomId, messageId, emoji)
+            result.onFailure { err ->
+                _actionError.value = err.localizedMessage ?: "Failed to update reaction."
+            }
+        }
+    }
+
     fun deleteMessage(roomId: String, messageId: String) {
         viewModelScope.launch {
             val result = repository.deleteRoomMessage(roomId, messageId)
@@ -250,6 +328,7 @@ class RoomsViewModel(
     }
 
     fun leaveOrDeleteRoom(room: ChatRoom) {
+        clearTyping(room)
         viewModelScope.launch {
             _isBusy.value = true
             val result = repository.leaveOrDeleteRoom(room)
@@ -280,5 +359,7 @@ class RoomsViewModel(
     private companion object {
         const val TAG = "RoomsVM"
         const val STOP_TIMEOUT_MILLIS = 5000L
+        const val TYPING_HEARTBEAT_MS = 2500L
+        const val TYPING_IDLE_TIMEOUT_MS = 4000L
     }
 }

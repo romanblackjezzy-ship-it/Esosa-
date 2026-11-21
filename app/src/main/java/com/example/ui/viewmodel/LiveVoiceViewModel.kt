@@ -10,6 +10,7 @@ import com.example.data.model.LiveVoiceMessage
 import com.example.data.model.LiveVoiceThread
 import com.example.data.repository.LiveVoiceRepository
 import com.google.firebase.Firebase
+import com.google.firebase.Timestamp
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.AudioTranscriptionConfig
 import com.google.firebase.ai.type.InlineData
@@ -54,7 +55,8 @@ data class LiveTranscriptItem(
     val id: String,
     val speaker: String, // "You" or "Esosa Live"
     val text: String,
-    val isStreaming: Boolean = false
+    val isStreaming: Boolean = false,
+    val createdAt: Timestamp? = null
 )
 
 @OptIn(PublicPreviewAPI::class, ExperimentalCoroutinesApi::class)
@@ -172,7 +174,8 @@ class LiveVoiceViewModel(
                     id = msg.id,
                     speaker = msg.speaker,
                     text = msg.text,
-                    isStreaming = false
+                    isStreaming = false,
+                    createdAt = msg.createdAt
                 )
             }
             if (activeTurn != null && activeTurn.text.isNotBlank()) {

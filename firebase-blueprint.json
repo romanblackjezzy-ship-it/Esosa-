@@ -56,9 +56,24 @@
         "senderPhotoUrl": { "type": "string", "description": "Optional sender photo URL" },
         "text": { "type": "string", "description": "Message text content" },
         "memberUids": { "type": "array", "description": "Denormalized member UIDs from parent room" },
+        "reactions": { "type": "object", "description": "Optional map of emoji to list of reacting UIDs" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["roomId", "senderId", "senderName", "text", "memberUids", "createdAt"]
+    },
+    "RoomTypingStatus": {
+      "title": "RoomTypingStatus",
+      "description": "Ephemeral typing indicator for a member in a chat room.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Typing user Firebase Auth UID" },
+        "roomId": { "type": "string", "description": "Parent room ID" },
+        "displayName": { "type": "string", "description": "Display name of the typing member" },
+        "typing": { "type": "boolean", "description": "Whether the user is currently typing" },
+        "memberUids": { "type": "array", "description": "Denormalized member UIDs from parent room" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "roomId", "displayName", "typing", "memberUids", "updatedAt"]
     },
     "AiThread": {
       "title": "AiThread",
@@ -86,6 +101,7 @@
         "role": { "type": "string", "enum": ["user", "model"], "description": "Message speaker role" },
         "text": { "type": "string", "description": "Message content" },
         "modelName": { "type": "string", "description": "Model used for this turn" },
+        "reactions": { "type": "object", "description": "Optional map of emoji to list of reacting UIDs" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["userId", "threadId", "role", "text", "modelName", "createdAt"]
@@ -148,6 +164,10 @@
     "/rooms/{roomId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/RoomMessage" },
       "description": "Real-time chat messages inside a room."
+    },
+    "/rooms/{roomId}/typing/{userId}": {
+      "schema": { "$ref": "#/entities/RoomTypingStatus" },
+      "description": "Real-time typing indicator status per member in a room."
     },
     "/users/{userId}/ai_threads/{threadId}": {
       "schema": { "$ref": "#/entities/AiThread" },

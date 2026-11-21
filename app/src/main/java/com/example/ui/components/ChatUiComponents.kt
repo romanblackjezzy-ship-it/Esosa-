@@ -1,16 +1,21 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,9 +49,65 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.EsosaReactions
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.first
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+fun formatMessageTime(ts: Timestamp?): String {
+    val date = ts?.toDate() ?: return "Just now"
+    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+}
+
+fun formatRelativeThreadTime(ts: Timestamp?): String {
+    val date = ts?.toDate() ?: return "Just now"
+    val nowCal = Calendar.getInstance()
+    val targetCal = Calendar.getInstance().apply { time = date }
+    return when {
+        isSameDay(nowCal, targetCal) -> SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+        isYesterday(nowCal, targetCal) -> "Yesterday"
+        nowCal.get(Calendar.YEAR) == targetCal.get(Calendar.YEAR) ->
+            SimpleDateFormat("MMM d", Locale.getDefault()).format(date)
+        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
+    }
+}
+
+fun messageDayKey(ts: Timestamp?): String {
+    val date = ts?.toDate() ?: return "today"
+    return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date)
+}
+
+fun formatChatDateLabel(ts: Timestamp?): String {
+    val date = ts?.toDate() ?: return "Today"
+    val nowCal = Calendar.getInstance()
+    val targetCal = Calendar.getInstance().apply { time = date }
+    return when {
+        isSameDay(nowCal, targetCal) -> "Today"
+        isYesterday(nowCal, targetCal) -> "Yesterday"
+        nowCal.get(Calendar.YEAR) == targetCal.get(Calendar.YEAR) ->
+            SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(date)
+        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
+    }
+}
+
+private fun isSameDay(a: Calendar, b: Calendar): Boolean =
+    a.get(Calendar.YEAR) == b.get(Calendar.YEAR) &&
+        a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
+
+private fun isYesterday(now: Calendar, target: Calendar): Boolean {
+    val yesterday = (now.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+    return isSameDay(yesterday, target)
+}
 
 @Composable
 fun AutoScrollToBottomEffect(
@@ -75,6 +137,181 @@ fun AutoScrollToBottomEffect(
                 index = targetIndex,
                 scrollOffset = lastVisible.size - viewportHeight
             )
+        }
+    }
+}
+
+@Composable
+fun DateSeparatorChip(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun TypingIndicatorBanner(
+    visible: Boolean,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(visible = visible) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomStart = 4.dp,
+                    bottomEnd = 18.dp
+                ),
+                tonalElevation = 2.dp
+            ) {
+                TypingPulseDots(
+                    label = label,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MessageReactionsRow(
+    messageId: String,
+    reactions: Map<String, List<String>>,
+    currentUserId: String,
+    onToggleReaction: (String) -> Unit,
+    isMine: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val activeEntries = reactions.entries.filter { it.value.isNotEmpty() }
+    if (activeEntries.isEmpty()) return
+
+    val orderedEntries = buildList {
+        EsosaReactions.ALLOWED.forEach { emoji ->
+            val users = reactions[emoji]
+            if (!users.isNullOrEmpty()) add(emoji to users)
+        }
+        activeEntries.filter { it.key !in EsosaReactions.ALLOWED }.forEach {
+            add(it.key to it.value)
+        }
+    }
+
+    FlowRow(
+        modifier = modifier.padding(top = 4.dp),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        orderedEntries.forEach { (emoji, users) ->
+            val reactedByMe = currentUserId in users
+            Box(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = "Toggle $emoji reaction"
+                    ) { onToggleReaction(emoji) }
+                    .semantics {
+                        contentDescription = "$emoji reaction, ${users.size} ${if (users.size == 1) "person" else "people"}"
+                    }
+                    .testTag("reaction_chip_${messageId}_$emoji"),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    color = if (reactedByMe) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = if (reactedByMe) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = if (reactedByMe) {
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+                    } else null,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(text = emoji, fontSize = 13.sp)
+                        Text(
+                            text = users.size.toString(),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (reactedByMe) FontWeight.Bold else FontWeight.Medium
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReactionPickerStrip(
+    messageId: String,
+    selectedEmojis: Set<String>,
+    onSelectEmoji: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 4.dp,
+        modifier = modifier.testTag("reaction_picker_$messageId")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            EsosaReactions.ALLOWED.forEach { emoji ->
+                val isSelected = emoji in selectedEmojis
+                Box(
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .clip(CircleShape)
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else androidx.compose.ui.graphics.Color.Transparent
+                        )
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = "React with $emoji"
+                        ) { onSelectEmoji(emoji) }
+                        .semantics { contentDescription = "React with $emoji" }
+                        .testTag("reaction_option_${messageId}_$emoji"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = emoji, fontSize = 18.sp)
+                }
+            }
         }
     }
 }

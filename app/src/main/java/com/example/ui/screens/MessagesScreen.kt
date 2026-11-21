@@ -2,8 +2,10 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,14 +77,20 @@ import coil.compose.AsyncImage
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
+import com.example.data.model.RoomTypingStatus
 import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.DateSeparatorChip
+import com.example.ui.components.MessageReactionsRow
+import com.example.ui.components.ReactionPickerStrip
 import com.example.ui.components.RoomsLoadingSkeleton
+import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
-import com.google.firebase.Timestamp
-import java.text.SimpleDateFormat
-import java.util.Locale
+import com.example.ui.components.formatChatDateLabel
+import com.example.ui.components.formatMessageTime
+import com.example.ui.components.formatRelativeThreadTime
+import com.example.ui.components.messageDayKey
 
 @Composable
 fun MessagesScreen(
@@ -89,13 +100,16 @@ fun MessagesScreen(
     selectedRoomId: String?,
     activeRoom: ChatRoom?,
     activeMessagesState: UiState<List<RoomMessage>>,
+    typingUsers: List<RoomTypingStatus> = emptyList(),
     actionError: String?,
     isBusy: Boolean,
     isSendingMessage: Boolean = false,
     onOpenRoom: (String?) -> Unit,
     onCreateRoom: (String, String) -> Unit,
     onJoinRoom: (String) -> Unit,
+    onDraftChanged: (ChatRoom?, String) -> Unit = { _, _ -> },
     onSendMessage: (ChatRoom, String) -> Unit,
+    onToggleReaction: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteMessage: (String, String) -> Unit,
     onLeaveOrDeleteRoom: (ChatRoom) -> Unit,
     onClearError: () -> Unit,
@@ -110,11 +124,16 @@ fun MessagesScreen(
             userProfileInfo = userProfileInfo,
             room = activeRoom,
             messagesState = activeMessagesState,
+            typingUsers = typingUsers,
             actionError = actionError,
             isSendingMessage = isSendingMessage,
             onBack = { onOpenRoom(null) },
+            onDraftChanged = onDraftChanged,
             onSendMessage = { text ->
                 activeRoom?.let { onSendMessage(it, text) }
+            },
+            onToggleReaction = { msgId, emoji ->
+                onToggleReaction(selectedRoomId, msgId, emoji)
             },
             onDeleteMessage = { msgId ->
                 onDeleteMessage(selectedRoomId, msgId)
@@ -448,7 +467,7 @@ private fun RoomCard(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = formatShortTime(room.lastMessageAt ?: room.createdAt),
+                        text = formatRelativeThreadTime(room.lastMessageAt ?: room.createdAt),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -499,10 +518,13 @@ private fun RoomDetailView(
     userProfileInfo: UserProfileHeaderInfo,
     room: ChatRoom?,
     messagesState: UiState<List<RoomMessage>>,
+    typingUsers: List<RoomTypingStatus>,
     actionError: String?,
     isSendingMessage: Boolean,
     onBack: () -> Unit,
+    onDraftChanged: (ChatRoom?, String) -> Unit,
     onSendMessage: (String) -> Unit,
+    onToggleReaction: (String, String) -> Unit,
     onDeleteMessage: (String) -> Unit,
     onLeaveOrDeleteRoom: () -> Unit,
     onClearError: () -> Unit,
@@ -513,6 +535,7 @@ private fun RoomDetailView(
     var draft by remember { mutableStateOf("") }
     var menuExpanded by remember { mutableStateOf(false) }
     var codeCopied by remember { mutableStateOf(false) }
+    var activePickerMessageId by remember(room?.id) { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
 
@@ -526,6 +549,15 @@ private fun RoomDetailView(
         conversationKey = room?.id,
         animate = true
     )
+
+    val typingLabel = remember(typingUsers) {
+        when (typingUsers.size) {
+            0 -> ""
+            1 -> "${typingUsers[0].displayName} is typing"
+            2 -> "${typingUsers[0].displayName} and ${typingUsers[1].displayName} are typing"
+            else -> "${typingUsers[0].displayName} and ${typingUsers.size - 1} others are typing"
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -716,18 +748,41 @@ private fun RoomDetailView(
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(messagesState.data, key = { it.id }) { msg ->
-                                    RoomMessageBubble(
-                                        message = msg,
-                                        isMine = msg.senderId == currentUserId,
-                                        onDelete = { onDeleteMessage(msg.id) }
-                                    )
+                                itemsIndexed(messagesState.data, key = { _, it -> it.id }) { index, msg ->
+                                    val showDateHeader = index == 0 ||
+                                        messageDayKey(messagesState.data[index - 1].createdAt) != messageDayKey(msg.createdAt)
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (showDateHeader) {
+                                            DateSeparatorChip(label = formatChatDateLabel(msg.createdAt))
+                                        }
+                                        RoomMessageBubble(
+                                            message = msg,
+                                            currentUserId = currentUserId,
+                                            isMine = msg.senderId == currentUserId,
+                                            showReactionPicker = activePickerMessageId == msg.id,
+                                            onOpenReactionPicker = {
+                                                activePickerMessageId =
+                                                    if (activePickerMessageId == msg.id) null else msg.id
+                                            },
+                                            onToggleReaction = { emoji ->
+                                                activePickerMessageId = null
+                                                onToggleReaction(msg.id, emoji)
+                                            },
+                                            onDelete = { onDeleteMessage(msg.id) }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+
+            TypingIndicatorBanner(
+                visible = typingUsers.isNotEmpty(),
+                label = typingLabel,
+                modifier = Modifier.testTag("room_typing_indicator")
+            )
 
             // Composer bar
             Surface(
@@ -744,7 +799,12 @@ private fun RoomDetailView(
                 ) {
                     OutlinedTextField(
                         value = draft,
-                        onValueChange = { if (it.length <= 2000) draft = it },
+                        onValueChange = {
+                            if (it.length <= 2000) {
+                                draft = it
+                                onDraftChanged(room, it)
+                            }
+                        },
                         placeholder = { Text("Message room…") },
                         maxLines = 4,
                         shape = RoundedCornerShape(22.dp),
@@ -758,6 +818,7 @@ private fun RoomDetailView(
                             if (text.isNotEmpty() && room != null && !isSendingMessage) {
                                 onSendMessage(text)
                                 draft = ""
+                                activePickerMessageId = null
                             }
                         },
                         enabled = draft.isNotBlank() && room != null && !isSendingMessage,
@@ -790,12 +851,21 @@ private fun RoomDetailView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RoomMessageBubble(
     message: RoomMessage,
+    currentUserId: String,
     isMine: Boolean,
+    showReactionPicker: Boolean,
+    onOpenReactionPicker: () -> Unit,
+    onToggleReaction: (String) -> Unit,
     onDelete: () -> Unit
 ) {
+    val mySelectedEmojis = remember(message.reactions, currentUserId) {
+        message.reactions.filterValues { currentUserId in it }.keys
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
@@ -841,6 +911,16 @@ private fun RoomMessageBubble(
                     modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
                 )
             }
+
+            AnimatedVisibility(visible = showReactionPicker) {
+                ReactionPickerStrip(
+                    messageId = message.id,
+                    selectedEmojis = mySelectedEmojis,
+                    onSelectEmoji = onToggleReaction,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+
             Surface(
                 color = if (isMine) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -851,7 +931,21 @@ private fun RoomMessageBubble(
                     topEnd = 18.dp,
                     bottomStart = if (isMine) 18.dp else 4.dp,
                     bottomEnd = if (isMine) 4.dp else 18.dp
-                )
+                ),
+                modifier = Modifier
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
+                            bottomStart = if (isMine) 18.dp else 4.dp,
+                            bottomEnd = if (isMine) 4.dp else 18.dp
+                        )
+                    )
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = onOpenReactionPicker,
+                        onLongClickLabel = "React to message"
+                    )
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(
@@ -861,27 +955,65 @@ private fun RoomMessageBubble(
                     Spacer(Modifier.height(4.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = formatShortTime(message.createdAt),
+                            text = formatMessageTime(message.createdAt),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("room_message_timestamp_${message.id}")
                         )
-                        if (isMine) {
+                        Box(
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .clip(CircleShape)
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = "React to message"
+                                ) { onOpenReactionPicker() }
+                                .testTag("react_button_${message.id}"),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
-                                imageVector = Icons.Filled.DeleteOutline,
-                                contentDescription = "Delete message",
-                                tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f),
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .clickable(onClick = onDelete)
+                                imageVector = Icons.Outlined.EmojiEmotions,
+                                contentDescription = "Add reaction",
+                                tint = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
                             )
+                        }
+                        if (isMine) {
+                            Box(
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .clip(CircleShape)
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = "Delete message"
+                                    ) { onDelete() }
+                                    .testTag("delete_room_message_${message.id}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.DeleteOutline,
+                                    contentDescription = "Delete message",
+                                    tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
+
+            MessageReactionsRow(
+                messageId = message.id,
+                reactions = message.reactions,
+                currentUserId = currentUserId,
+                onToggleReaction = onToggleReaction,
+                isMine = isMine
+            )
         }
     }
 }
@@ -977,9 +1109,4 @@ private fun JoinRoomDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
-}
-
-private fun formatShortTime(ts: Timestamp?): String {
-    val date = ts?.toDate() ?: return "now"
-    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
 }

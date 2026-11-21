@@ -274,6 +274,7 @@ private fun AuthenticatedEsosaShell(
     val selectedRoomId by roomsViewModel.selectedRoomId.collectAsStateWithLifecycle()
     val activeRoom by roomsViewModel.activeRoom.collectAsStateWithLifecycle()
     val activeMessagesState by roomsViewModel.activeMessagesState.collectAsStateWithLifecycle()
+    val roomTypingUsers by roomsViewModel.typingUsers.collectAsStateWithLifecycle()
     val roomActionError by roomsViewModel.actionError.collectAsStateWithLifecycle()
     val isRoomBusy by roomsViewModel.isBusy.collectAsStateWithLifecycle()
     val isSendingMessage by roomsViewModel.isSendingMessage.collectAsStateWithLifecycle()
@@ -432,13 +433,18 @@ private fun AuthenticatedEsosaShell(
                             selectedRoomId = selectedRoomId,
                             activeRoom = activeRoom,
                             activeMessagesState = activeMessagesState,
+                            typingUsers = roomTypingUsers,
                             actionError = roomActionError,
                             isBusy = isRoomBusy,
                             isSendingMessage = isSendingMessage,
                             onOpenRoom = { roomsViewModel.openRoom(it) },
                             onCreateRoom = { title, topic -> roomsViewModel.createRoom(title, topic) },
                             onJoinRoom = { code -> roomsViewModel.joinRoomByCode(code) },
+                            onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
                             onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
+                            onToggleReaction = { roomId, msgId, emoji ->
+                                roomsViewModel.toggleReaction(roomId, msgId, emoji)
+                            },
                             onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
                             onLeaveOrDeleteRoom = { room -> roomsViewModel.leaveOrDeleteRoom(room) },
                             onClearError = { roomsViewModel.clearActionError() },
@@ -448,6 +454,7 @@ private fun AuthenticatedEsosaShell(
                         )
 
                         EsosaTab.AI_CHAT -> AiChatScreen(
+                            currentUserId = currentUserId,
                             userProfileInfo = topBarUserInfo,
                             threadsState = aiThreadsState,
                             selectedThreadId = selectedAiThreadId,
@@ -461,6 +468,9 @@ private fun AuthenticatedEsosaShell(
                             onDeleteThread = { aiChatViewModel.deleteThread(it) },
                             onSendPrompt = { prompt, thread, msgs ->
                                 aiChatViewModel.sendPrompt(prompt, thread, msgs)
+                            },
+                            onToggleReaction = { threadId, msgId, emoji ->
+                                aiChatViewModel.toggleReaction(threadId, msgId, emoji)
                             },
                             onClearError = { aiChatViewModel.clearError() },
                             onOpenSettings = { selectedTab = EsosaTab.SETTINGS },
