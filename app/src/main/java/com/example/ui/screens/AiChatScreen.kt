@@ -65,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +76,7 @@ import com.example.data.model.AiPersona
 import com.example.data.model.AiThread
 import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.ChatSearchBar
 import com.example.ui.components.DateSeparatorChip
 import com.example.ui.components.MessageReactionsRow
 import com.example.ui.components.ReactionPickerStrip
@@ -82,6 +84,7 @@ import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.TypingPulseDots
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
+import com.example.ui.components.buildHighlightedText
 import com.example.ui.components.formatChatDateLabel
 import com.example.ui.components.formatMessageTime
 import com.example.ui.components.formatRelativeThreadTime
@@ -418,6 +421,19 @@ fun AiChatScreen(
     }
 
     if (showHistorySheet) {
+        var threadSearchQuery by remember(showHistorySheet) { mutableStateOf("") }
+        val trimmedThreadQuery = threadSearchQuery.trim()
+        val filteredThreads = remember(threads, trimmedThreadQuery) {
+            if (trimmedThreadQuery.isEmpty()) threads
+            else threads.filter { thread ->
+                thread.title.contains(trimmedThreadQuery, ignoreCase = true) ||
+                    thread.lastMessagePreview.contains(trimmedThreadQuery, ignoreCase = true) ||
+                    thread.modelName.contains(trimmedThreadQuery, ignoreCase = true)
+            }
+        }
+        val highlightBg = MaterialTheme.colorScheme.primaryContainer
+        val highlightFg = MaterialTheme.colorScheme.onPrimaryContainer
+
         ModalBottomSheet(onDismissRequest = { showHistorySheet = false }) {
             Column(
                 modifier = Modifier
@@ -439,6 +455,17 @@ fun AiChatScreen(
                     }
                 }
 
+                if (threads.isNotEmpty() || threadSearchQuery.isNotEmpty()) {
+                    ChatSearchBar(
+                        query = threadSearchQuery,
+                        onQueryChange = { threadSearchQuery = it },
+                        placeholder = stringResource(R.string.search_ai_threads_placeholder),
+                        clearContentDescription = stringResource(R.string.search_chats_clear),
+                        inputTestTag = "ai_threads_search_bar",
+                        clearTestTag = "clear_ai_search_button"
+                    )
+                }
+
                 if (threads.isEmpty()) {
                     Text(
                         text = "No saved AI threads yet. Send a message to begin!",
@@ -446,8 +473,15 @@ fun AiChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 20.dp)
                     )
+                } else if (filteredThreads.isEmpty()) {
+                    Text(
+                        text = "No AI conversations match \"$trimmedThreadQuery\".",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 20.dp)
+                    )
                 } else {
-                    threads.forEach { thread ->
+                    filteredThreads.forEach { thread ->
                         val isSelected = thread.id == selectedThreadId
                         Card(
                             colors = CardDefaults.cardColors(
@@ -460,6 +494,7 @@ fun AiChatScreen(
                                     onSelectThread(thread.id)
                                     showHistorySheet = false
                                 }
+                                .testTag("ai_thread_card_${thread.id}")
                         ) {
                             Row(
                                 modifier = Modifier
@@ -469,7 +504,12 @@ fun AiChatScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = thread.title,
+                                        text = buildHighlightedText(
+                                            text = thread.title,
+                                            query = trimmedThreadQuery,
+                                            highlightBackground = highlightBg,
+                                            highlightTextColor = highlightFg
+                                        ),
                                         style = MaterialTheme.typography.titleSmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis

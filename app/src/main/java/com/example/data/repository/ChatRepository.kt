@@ -7,6 +7,7 @@ import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.ChatRoom
 import com.example.data.model.EsosaReactions
+import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.data.model.UserProfile
@@ -20,6 +21,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
@@ -516,6 +520,50 @@ class ChatRepository(
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, roomRef.path)
             Result.failure(e)
+        }
+    }
+
+    suspend fun searchRoomMessages(
+        rooms: List<ChatRoom>,
+        userId: String,
+        rawQuery: String
+    ): List<MessageSearchHit> {
+        val query = rawQuery.trim()
+        if (query.isEmpty() || userId.isBlank() || rooms.isEmpty()) return emptyList()
+
+        return coroutineScope {
+            rooms.take(25).map { room ->
+                async {
+                    try {
+                        val snap = db.collection("rooms")
+                            .document(room.id)
+                            .collection("messages")
+                            .whereArrayContains("memberUids", userId)
+                            .get()
+                            .await()
+                        snap.toObjects(
+                            RoomMessage::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        ).filter { msg ->
+                            msg.text.contains(query, ignoreCase = true) ||
+                                msg.senderName.contains(query, ignoreCase = true)
+                        }.map { msg ->
+                            MessageSearchHit(room = room, message = msg)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+                .flatten()
+                .sortedWith(
+                    compareByDescending<MessageSearchHit> {
+                        it.message.createdAt ?: Timestamp(0, 0)
+                    }.thenBy { it.message.id }
+                )
+                .take(40)
         }
     }
 

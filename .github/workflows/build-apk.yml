@@ -90,7 +90,7 @@ jobs:
 
       - name: Build Debug APK
         env:
-          GRADLE_OPTS: "-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Xmx512m -Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           echo "Java: $(java -version 2>&1 | head -n 1)"
@@ -106,8 +106,8 @@ jobs:
             -Dorg.gradle.parallel=false \
             -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
             2>&1 | tee ci-build.log; then
-            echo "=== LAST 80 LINES OF CI BUILD LOG ==="
-            tail -n 80 ci-build.log || true
+            echo "=== LAST 80 LINES OF CI BUILD LOG ===" >&2
+            tail -n 80 ci-build.log >&2 || true
             ERROR_LINE="$(grep -E '^e: |FAILURE:|BUILD FAILED|\* What went wrong:' ci-build.log | tail -n 5 | tr '\n' ' ' | sed 's/%/%25/g; s/\r//g')"
             echo "::error title=Build Debug APK failed::${ERROR_LINE:-See ci-build.log in job summary/artifacts}"
             exit 1

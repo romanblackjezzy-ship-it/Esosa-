@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +61,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,17 +72,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.R
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
+import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.ui.components.AutoScrollToBottomEffect
 import com.example.ui.components.ChatMessagesLoadingSkeleton
+import com.example.ui.components.ChatSearchBar
 import com.example.ui.components.DateSeparatorChip
 import com.example.ui.components.MessageReactionsRow
 import com.example.ui.components.ReactionPickerStrip
@@ -87,10 +94,12 @@ import com.example.ui.components.RoomsLoadingSkeleton
 import com.example.ui.components.TypingIndicatorBanner
 import com.example.ui.components.UserProfileHeaderInfo
 import com.example.ui.components.UserProfileTopBarAction
+import com.example.ui.components.buildHighlightedText
 import com.example.ui.components.formatChatDateLabel
 import com.example.ui.components.formatMessageTime
 import com.example.ui.components.formatRelativeThreadTime
 import com.example.ui.components.messageDayKey
+import kotlinx.coroutines.delay
 
 @Composable
 fun MessagesScreen(
@@ -101,10 +110,17 @@ fun MessagesScreen(
     activeRoom: ChatRoom?,
     activeMessagesState: UiState<List<RoomMessage>>,
     typingUsers: List<RoomTypingStatus> = emptyList(),
+    searchQuery: String = "",
+    matchingMessages: List<MessageSearchHit> = emptyList(),
+    isSearchingMessages: Boolean = false,
+    highlightedMessageId: String? = null,
     actionError: String?,
     isBusy: Boolean,
     isSendingMessage: Boolean = false,
     onOpenRoom: (String?) -> Unit,
+    onSearchQueryChanged: (String) -> Unit = {},
+    onOpenSearchResult: (String, String?) -> Unit = { roomId, _ -> onOpenRoom(roomId) },
+    onClearHighlight: () -> Unit = {},
     onCreateRoom: (String, String) -> Unit,
     onJoinRoom: (String) -> Unit,
     onDraftChanged: (ChatRoom?, String) -> Unit = { _, _ -> },
@@ -125,9 +141,11 @@ fun MessagesScreen(
             room = activeRoom,
             messagesState = activeMessagesState,
             typingUsers = typingUsers,
+            highlightedMessageId = highlightedMessageId,
             actionError = actionError,
             isSendingMessage = isSendingMessage,
             onBack = { onOpenRoom(null) },
+            onClearHighlight = onClearHighlight,
             onDraftChanged = onDraftChanged,
             onSendMessage = { text ->
                 activeRoom?.let { onSendMessage(it, text) }
@@ -150,9 +168,14 @@ fun MessagesScreen(
         RoomsListView(
             userProfileInfo = userProfileInfo,
             roomsState = roomsState,
+            searchQuery = searchQuery,
+            matchingMessages = matchingMessages,
+            isSearchingMessages = isSearchingMessages,
             actionError = actionError,
             isBusy = isBusy,
+            onSearchQueryChanged = onSearchQueryChanged,
             onOpenRoom = onOpenRoom,
+            onOpenSearchResult = onOpenSearchResult,
             onCreateRoom = onCreateRoom,
             onJoinRoom = onJoinRoom,
             onClearError = onClearError,
@@ -168,9 +191,14 @@ fun MessagesScreen(
 private fun RoomsListView(
     userProfileInfo: UserProfileHeaderInfo,
     roomsState: UiState<List<ChatRoom>>,
+    searchQuery: String,
+    matchingMessages: List<MessageSearchHit>,
+    isSearchingMessages: Boolean,
     actionError: String?,
     isBusy: Boolean,
+    onSearchQueryChanged: (String) -> Unit,
     onOpenRoom: (String) -> Unit,
+    onOpenSearchResult: (String, String?) -> Unit,
     onCreateRoom: (String, String) -> Unit,
     onJoinRoom: (String) -> Unit,
     onClearError: () -> Unit,
@@ -299,10 +327,44 @@ private fun RoomsListView(
 
                 is UiState.Success -> {
                     val rooms = roomsState.data
-                    if (rooms.isEmpty()) {
+                    val trimmedQuery = remember(searchQuery) { searchQuery.trim() }
+                    val filteredRooms = remember(rooms, trimmedQuery) {
+                        if (trimmedQuery.isEmpty()) {
+                            rooms
+                        } else {
+                            rooms.filter { room ->
+                                room.title.contains(trimmedQuery, ignoreCase = true) ||
+                                    room.topic.contains(trimmedQuery, ignoreCase = true) ||
+                                    room.roomCode.contains(trimmedQuery, ignoreCase = true) ||
+                                    room.lastMessageText.contains(trimmedQuery, ignoreCase = true) ||
+                                    room.lastMessageSenderName.contains(trimmedQuery, ignoreCase = true)
+                            }
+                        }
+                    }
+
+                    if (rooms.isNotEmpty() || searchQuery.isNotEmpty()) {
+                        ChatSearchBar(
+                            query = searchQuery,
+                            onQueryChange = onSearchQueryChanged,
+                            placeholder = stringResource(R.string.search_chats_placeholder),
+                            clearContentDescription = stringResource(R.string.search_chats_clear),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                    }
+
+                    if (rooms.isEmpty() && trimmedQuery.isEmpty()) {
                         EmptyRoomsState(
                             onCreateClick = { showCreateDialog = true },
                             onJoinClick = { showJoinDialog = true }
+                        )
+                    } else if (trimmedQuery.isNotEmpty() &&
+                        filteredRooms.isEmpty() &&
+                        matchingMessages.isEmpty() &&
+                        !isSearchingMessages
+                    ) {
+                        EmptySearchResultsState(
+                            query = trimmedQuery,
+                            onClearClick = { onSearchQueryChanged("") }
                         )
                     } else {
                         LazyColumn(
@@ -315,11 +377,72 @@ private fun RoomsListView(
                             ),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(rooms, key = { it.id }) { room ->
-                                RoomCard(
-                                    room = room,
-                                    onClick = { onOpenRoom(room.id) }
-                                )
+                            if (trimmedQuery.isEmpty()) {
+                                items(filteredRooms, key = { it.id }) { room ->
+                                    RoomCard(
+                                        room = room,
+                                        searchQuery = "",
+                                        onClick = { onOpenRoom(room.id) }
+                                    )
+                                }
+                            } else {
+                                if (filteredRooms.isNotEmpty()) {
+                                    item(key = "header_conversations") {
+                                        Text(
+                                            text = "${stringResource(R.string.search_results_conversations)} (${filteredRooms.size})",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                .testTag("search_conversations_header")
+                                        )
+                                    }
+                                    items(filteredRooms, key = { "room_${it.id}" }) { room ->
+                                        RoomCard(
+                                            room = room,
+                                            searchQuery = trimmedQuery,
+                                            onClick = { onOpenRoom(room.id) }
+                                        )
+                                    }
+                                }
+
+                                if (isSearchingMessages || matchingMessages.isNotEmpty()) {
+                                    item(key = "header_messages") {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                .testTag("search_messages_header")
+                                        ) {
+                                            Text(
+                                                text = if (matchingMessages.isNotEmpty()) {
+                                                    "${stringResource(R.string.search_results_messages)} (${matchingMessages.size})"
+                                                } else {
+                                                    stringResource(R.string.search_results_messages)
+                                                },
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                            if (isSearchingMessages) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            }
+                                        }
+                                    }
+                                    items(
+                                        items = matchingMessages,
+                                        key = { "msg_${it.room.id}_${it.message.id}" }
+                                    ) { hit ->
+                                        MessageSearchResultCard(
+                                            hit = hit,
+                                            searchQuery = trimmedQuery,
+                                            onClick = { onOpenSearchResult(hit.room.id, hit.message.id) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -416,10 +539,133 @@ private fun EmptyRoomsState(
 }
 
 @Composable
-private fun RoomCard(
-    room: ChatRoom,
+private fun EmptySearchResultsState(
+    query: String,
+    onClearClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(28.dp)
+            .testTag("search_no_results_state"),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.widthIn(max = 380.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Text(
+                text = stringResource(R.string.search_no_results_title),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "Nothing matched \"$query\". ${stringResource(R.string.search_no_results_subtitle)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = onClearClick,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .minimumInteractiveComponentSize()
+                    .testTag("empty_search_clear_button")
+            ) {
+                Text(stringResource(R.string.search_chats_clear))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageSearchResultCard(
+    hit: MessageSearchHit,
+    searchQuery: String,
     onClick: () -> Unit
 ) {
+    val highlightBg = MaterialTheme.colorScheme.primaryContainer
+    val highlightFg = MaterialTheme.colorScheme.onPrimaryContainer
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .testTag("search_message_result_${hit.message.id}"),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = hit.room.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = formatRelativeThreadTime(hit.message.createdAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = buildHighlightedText(
+                    text = "${hit.message.senderName}: ${hit.message.text}",
+                    query = searchQuery,
+                    highlightBackground = highlightBg,
+                    highlightTextColor = highlightFg
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoomCard(
+    room: ChatRoom,
+    searchQuery: String = "",
+    onClick: () -> Unit
+) {
+    val highlightBg = MaterialTheme.colorScheme.primaryContainer
+    val highlightFg = MaterialTheme.colorScheme.onPrimaryContainer
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -459,7 +705,12 @@ private fun RoomCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = room.title,
+                        text = buildHighlightedText(
+                            text = room.title,
+                            query = searchQuery,
+                            highlightBackground = highlightBg,
+                            highlightTextColor = highlightFg
+                        ),
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -473,12 +724,18 @@ private fun RoomCard(
                     )
                 }
                 Spacer(Modifier.height(4.dp))
+                val previewText = if (room.lastMessageSenderName.isNotBlank()) {
+                    "${room.lastMessageSenderName}: ${room.lastMessageText}"
+                } else {
+                    room.lastMessageText
+                }
                 Text(
-                    text = if (room.lastMessageSenderName.isNotBlank()) {
-                        "${room.lastMessageSenderName}: ${room.lastMessageText}"
-                    } else {
-                        room.lastMessageText
-                    },
+                    text = buildHighlightedText(
+                        text = previewText,
+                        query = searchQuery,
+                        highlightBackground = highlightBg,
+                        highlightTextColor = highlightFg
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -519,9 +776,11 @@ private fun RoomDetailView(
     room: ChatRoom?,
     messagesState: UiState<List<RoomMessage>>,
     typingUsers: List<RoomTypingStatus>,
+    highlightedMessageId: String?,
     actionError: String?,
     isSendingMessage: Boolean,
     onBack: () -> Unit,
+    onClearHighlight: () -> Unit,
     onDraftChanged: (ChatRoom?, String) -> Unit,
     onSendMessage: (String) -> Unit,
     onToggleReaction: (String, String) -> Unit,
@@ -541,14 +800,29 @@ private fun RoomDetailView(
 
     val messagesList = (messagesState as? UiState.Success)?.data.orEmpty()
     val newestMessage = messagesList.lastOrNull()
-    AutoScrollToBottomEffect(
-        listState = listState,
-        itemCount = messagesList.size,
-        lastItemKey = newestMessage?.id,
-        lastItemContent = newestMessage?.text,
-        conversationKey = room?.id,
-        animate = true
-    )
+    val hasActiveHighlightTarget = highlightedMessageId != null &&
+        messagesList.any { it.id == highlightedMessageId }
+
+    LaunchedEffect(highlightedMessageId, messagesList) {
+        val targetId = highlightedMessageId ?: return@LaunchedEffect
+        val targetIndex = messagesList.indexOfFirst { it.id == targetId }
+        if (targetIndex >= 0) {
+            listState.animateScrollToItem(targetIndex)
+            delay(2600L)
+            onClearHighlight()
+        }
+    }
+
+    if (!hasActiveHighlightTarget) {
+        AutoScrollToBottomEffect(
+            listState = listState,
+            itemCount = messagesList.size,
+            lastItemKey = newestMessage?.id,
+            lastItemContent = newestMessage?.text,
+            conversationKey = room?.id,
+            animate = true
+        )
+    }
 
     val typingLabel = remember(typingUsers) {
         when (typingUsers.size) {
@@ -759,6 +1033,7 @@ private fun RoomDetailView(
                                             message = msg,
                                             currentUserId = currentUserId,
                                             isMine = msg.senderId == currentUserId,
+                                            isHighlighted = highlightedMessageId == msg.id,
                                             showReactionPicker = activePickerMessageId == msg.id,
                                             onOpenReactionPicker = {
                                                 activePickerMessageId =
@@ -857,6 +1132,7 @@ private fun RoomMessageBubble(
     message: RoomMessage,
     currentUserId: String,
     isMine: Boolean,
+    isHighlighted: Boolean = false,
     showReactionPicker: Boolean,
     onOpenReactionPicker: () -> Unit,
     onToggleReaction: (String) -> Unit,
@@ -926,6 +1202,9 @@ private fun RoomMessageBubble(
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = if (isMine) MaterialTheme.colorScheme.onPrimary
                 else MaterialTheme.colorScheme.onSurface,
+                border = if (isHighlighted) {
+                    BorderStroke(2.dp, MaterialTheme.colorScheme.tertiary)
+                } else null,
                 shape = RoundedCornerShape(
                     topStart = 18.dp,
                     topEnd = 18.dp,

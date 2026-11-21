@@ -28,13 +28,22 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,14 +54,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
@@ -137,6 +152,109 @@ fun AutoScrollToBottomEffect(
                 index = targetIndex,
                 scrollOffset = lastVisible.size - viewportHeight
             )
+        }
+    }
+}
+
+@Composable
+fun ChatSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+    clearContentDescription: String,
+    inputTestTag: String = "chat_list_search_bar",
+    clearTestTag: String = "clear_chat_search_button",
+    modifier: Modifier = Modifier
+) {
+    val focusManager = LocalFocusManager.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 2.dp,
+        border = if (query.isNotBlank()) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+        },
+        modifier = modifier.fillMaxWidth()
+    ) {
+        TextField(
+            value = query,
+            onValueChange = { if (it.length <= 120) onQueryChange(it) },
+            placeholder = {
+                Text(
+                    text = placeholder,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = if (query.isNotBlank()) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onQueryChange("") },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag(clearTestTag)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = clearContentDescription,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                disabledContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(inputTestTag)
+        )
+    }
+}
+
+fun buildHighlightedText(
+    text: String,
+    query: String,
+    highlightBackground: Color,
+    highlightTextColor: Color
+): AnnotatedString {
+    val cleanQuery = query.trim()
+    if (cleanQuery.isEmpty()) return AnnotatedString(text)
+    return buildAnnotatedString {
+        append(text)
+        var startIndex = 0
+        while (startIndex < text.length) {
+            val matchIndex = text.indexOf(cleanQuery, startIndex = startIndex, ignoreCase = true)
+            if (matchIndex < 0) break
+            addStyle(
+                style = SpanStyle(
+                    background = highlightBackground,
+                    color = highlightTextColor,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                start = matchIndex,
+                end = matchIndex + cleanQuery.length
+            )
+            startIndex = matchIndex + cleanQuery.length
         }
     }
 }

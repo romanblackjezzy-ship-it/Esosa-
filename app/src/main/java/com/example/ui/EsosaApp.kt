@@ -275,6 +275,10 @@ private fun AuthenticatedEsosaShell(
     val activeRoom by roomsViewModel.activeRoom.collectAsStateWithLifecycle()
     val activeMessagesState by roomsViewModel.activeMessagesState.collectAsStateWithLifecycle()
     val roomTypingUsers by roomsViewModel.typingUsers.collectAsStateWithLifecycle()
+    val roomSearchQuery by roomsViewModel.searchQuery.collectAsStateWithLifecycle()
+    val matchingMessages by roomsViewModel.matchingMessages.collectAsStateWithLifecycle()
+    val isSearchingMessages by roomsViewModel.isSearchingMessages.collectAsStateWithLifecycle()
+    val highlightedMessageId by roomsViewModel.highlightedMessageId.collectAsStateWithLifecycle()
     val roomActionError by roomsViewModel.actionError.collectAsStateWithLifecycle()
     val isRoomBusy by roomsViewModel.isBusy.collectAsStateWithLifecycle()
     val isSendingMessage by roomsViewModel.isSendingMessage.collectAsStateWithLifecycle()
@@ -434,10 +438,19 @@ private fun AuthenticatedEsosaShell(
                             activeRoom = activeRoom,
                             activeMessagesState = activeMessagesState,
                             typingUsers = roomTypingUsers,
+                            searchQuery = roomSearchQuery,
+                            matchingMessages = matchingMessages,
+                            isSearchingMessages = isSearchingMessages,
+                            highlightedMessageId = highlightedMessageId,
                             actionError = roomActionError,
                             isBusy = isRoomBusy,
                             isSendingMessage = isSendingMessage,
                             onOpenRoom = { roomsViewModel.openRoom(it) },
+                            onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
+                            onOpenSearchResult = { roomId, msgId ->
+                                roomsViewModel.openSearchResult(roomId, msgId)
+                            },
+                            onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
                             onCreateRoom = { title, topic -> roomsViewModel.createRoom(title, topic) },
                             onJoinRoom = { code -> roomsViewModel.joinRoomByCode(code) },
                             onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },

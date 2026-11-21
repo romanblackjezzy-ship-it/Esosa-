@@ -1,15 +1,21 @@
 package com.example
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.example.core.UiState
 import com.example.data.model.AiMessage
 import com.example.data.model.AiThread
 import com.example.data.model.ChatRoom
+import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.ui.components.UserProfileHeaderInfo
@@ -226,5 +232,161 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("live_transcript_timestamp_lv_1").assertIsDisplayed()
         composeTestRule.onNodeWithTag("live_typing_indicator").assertIsDisplayed()
         composeTestRule.onNodeWithText("Esosa Live is speaking").assertIsDisplayed()
+    }
+
+    @Test
+    fun `chat list search bar filters conversations, shows message matches, and opens target message`() {
+        val now = Timestamp(Date())
+        val designRoom = ChatRoom(
+            id = "room_design",
+            title = "Design Lounge",
+            roomCode = "ES1001",
+            ownerId = "u1",
+            memberUids = listOf("u1", "u2"),
+            lastMessageSenderName = "Alice",
+            lastMessageText = "Updated Figma tokens",
+            lastMessageAt = now
+        )
+        val travelRoom = ChatRoom(
+            id = "room_travel",
+            title = "Weekend Trip",
+            roomCode = "ES2002",
+            ownerId = "u1",
+            memberUids = listOf("u1", "u2"),
+            lastMessageSenderName = "Bob",
+            lastMessageText = "Booked the cabin",
+            lastMessageAt = now
+        )
+        val pastMessage = RoomMessage(
+            id = "msg_old_9",
+            roomId = "room_travel",
+            senderId = "u2",
+            senderName = "Bob",
+            text = "Don't forget the release checklist before Friday",
+            memberUids = listOf("u1", "u2"),
+            createdAt = now
+        )
+        var openedSearchHit: Pair<String, String?>? = null
+
+        composeTestRule.setContent {
+            var query by remember { mutableStateOf("") }
+            val hits = remember(query) {
+                if (query.contains("checklist", ignoreCase = true)) {
+                    listOf(MessageSearchHit(room = travelRoom, message = pastMessage))
+                } else {
+                    emptyList()
+                }
+            }
+            EsosaTheme {
+                MessagesScreen(
+                    currentUserId = "u1",
+                    userProfileInfo = profile,
+                    roomsState = UiState.Success(listOf(designRoom, travelRoom)),
+                    selectedRoomId = null,
+                    activeRoom = null,
+                    activeMessagesState = UiState.Success(emptyList()),
+                    searchQuery = query,
+                    matchingMessages = hits,
+                    actionError = null,
+                    isBusy = false,
+                    onOpenRoom = {},
+                    onSearchQueryChanged = { query = it },
+                    onOpenSearchResult = { rId, mId -> openedSearchHit = rId to mId },
+                    onCreateRoom = { _, _ -> },
+                    onJoinRoom = {},
+                    onSendMessage = { _, _ -> },
+                    onDeleteMessage = { _, _ -> },
+                    onLeaveOrDeleteRoom = {},
+                    onClearError = {},
+                    onOpenSettings = {},
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("chat_list_search_bar").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_design").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_travel").assertIsDisplayed()
+
+        // Search by conversation title
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("Design")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("search_conversations_header").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_design").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_travel").assertDoesNotExist()
+
+        // Clear search using the X button
+        composeTestRule.onNodeWithTag("clear_chat_search_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("room_card_room_travel").assertIsDisplayed()
+
+        // Search for a past message inside a room
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("checklist")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("search_messages_header").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("search_message_result_msg_old_9").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("search_message_result_msg_old_9").performClick()
+
+        assertEquals("room_travel" to "msg_old_9", openedSearchHit)
+
+        // Search with no results shows empty search state
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextClearance()
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("zzzz_nomatch")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("search_no_results_state").assertIsDisplayed()
+    }
+
+    @Test
+    fun `ai history sheet includes search bar to filter past conversations`() {
+        val now = Timestamp(Date())
+        val threadOne = AiThread(
+            id = "ai_t1",
+            userId = "u1",
+            title = "Android Release Plan",
+            lastMessagePreview = "APK signing steps",
+            updatedAt = now
+        )
+        val threadTwo = AiThread(
+            id = "ai_t2",
+            userId = "u1",
+            title = "Grocery Recipes",
+            lastMessagePreview = "Pasta sauce ideas",
+            updatedAt = now
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                AiChatScreen(
+                    currentUserId = "u1",
+                    userProfileInfo = profile,
+                    threadsState = UiState.Success(listOf(threadOne, threadTwo)),
+                    selectedThreadId = threadOne.id,
+                    messagesState = UiState.Success(emptyList()),
+                    streamingReply = null,
+                    isGenerating = false,
+                    errorBanner = null,
+                    onSelectThread = {},
+                    onCreateThread = {},
+                    onSwitchPersona = {},
+                    onDeleteThread = {},
+                    onSendPrompt = { _, _, _ -> },
+                    onClearError = {},
+                    onOpenSettings = {},
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("ai_history_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("ai_threads_search_bar").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ai_threads_search_bar").performTextInput("Grocery")
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("ai_thread_card_ai_t2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ai_thread_card_ai_t1").assertDoesNotExist()
     }
 }

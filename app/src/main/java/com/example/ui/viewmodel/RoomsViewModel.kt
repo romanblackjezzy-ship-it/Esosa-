@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.model.ChatRoom
+import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.data.model.UserProfile
@@ -52,9 +53,22 @@ class RoomsViewModel(
     private val _isSendingMessage = MutableStateFlow(false)
     val isSendingMessage: StateFlow<Boolean> = _isSendingMessage.asStateFlow()
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _matchingMessages = MutableStateFlow<List<MessageSearchHit>>(emptyList())
+    val matchingMessages: StateFlow<List<MessageSearchHit>> = _matchingMessages.asStateFlow()
+
+    private val _isSearchingMessages = MutableStateFlow(false)
+    val isSearchingMessages: StateFlow<Boolean> = _isSearchingMessages.asStateFlow()
+
+    private val _highlightedMessageId = MutableStateFlow<String?>(null)
+    val highlightedMessageId: StateFlow<String?> = _highlightedMessageId.asStateFlow()
+
     private val knownRoomTimestamps = mutableMapOf<String, Timestamp>()
     private var initialRoomsLoaded = false
     private var typingTimeoutJob: Job? = null
+    private var searchJob: Job? = null
     private var lastTypingSentTrueAtMs = 0L
     private var activeTypingRoom: ChatRoom? = null
 
@@ -219,7 +233,55 @@ class RoomsViewModel(
     }
 
     fun openRoom(roomId: String?) {
+        _highlightedMessageId.value = null
         setSelectedRoom(roomId)
+    }
+
+    fun openSearchResult(roomId: String, messageId: String?) {
+        _highlightedMessageId.value = messageId
+        setSelectedRoom(roomId)
+    }
+
+    fun clearHighlightedMessage() {
+        _highlightedMessageId.value = null
+    }
+
+    fun onSearchQueryChanged(query: String) {
+        _searchQuery.value = query
+        searchJob?.cancel()
+        val trimmed = query.trim()
+        if (trimmed.length < 2) {
+            _matchingMessages.value = emptyList()
+            _isSearchingMessages.value = false
+            return
+        }
+        val rooms = (roomsState.value as? UiState.Success)?.data.orEmpty()
+        if (rooms.isEmpty()) {
+            _matchingMessages.value = emptyList()
+            _isSearchingMessages.value = false
+            return
+        }
+        searchJob = viewModelScope.launch {
+            _isSearchingMessages.value = true
+            try {
+                delay(220)
+                val hits = repository.searchRoomMessages(rooms, currentUserId, trimmed)
+                if (_searchQuery.value.trim() == trimmed) {
+                    _matchingMessages.value = hits
+                }
+            } finally {
+                if (_searchQuery.value.trim() == trimmed) {
+                    _isSearchingMessages.value = false
+                }
+            }
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        _searchQuery.value = ""
+        _matchingMessages.value = emptyList()
+        _isSearchingMessages.value = false
     }
 
     fun clearActionError() {

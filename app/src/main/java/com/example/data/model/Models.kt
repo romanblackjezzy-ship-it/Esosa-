@@ -53,6 +53,11 @@ data class RoomMessage(
     @ServerTimestamp val createdAt: Timestamp? = null
 )
 
+data class MessageSearchHit(
+    val room: ChatRoom,
+    val message: RoomMessage
+)
+
 @Keep
 @IgnoreExtraProperties
 data class RoomTypingStatus(
