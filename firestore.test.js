@@ -222,6 +222,55 @@ test("Rooms, Invites, and Real-Time Messages: aligned queries, join by invite, a
     })
   );
 
+  // Photo messages with Firebase Storage HTTPS URL succeed (even with empty caption) and allow reactions
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_photo_1").set({
+      roomId: "room_1",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      text: "",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/rooms%2Froom_1%2Fphotos%2Fmsg_photo_1.jpg?alt=media",
+      storagePath: "rooms/room_1/photos/msg_photo_1.jpg",
+      messageType: "image",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdAt: new Date(Date.now() - 800),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("room_1").collection("messages").doc("msg_photo_1").update({
+      reactions: { "🔥": [BOB_UID] },
+    })
+  );
+  // Reject non-HTTPS imageUrl, tampering with imageUrl, and empty text with no imageUrl
+  await assertFails(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_photo_bad_url").set({
+      roomId: "room_1",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      text: "",
+      imageUrl: "http://insecure.example/photo.jpg",
+      messageType: "image",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdAt: new Date(Date.now() - 750),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_empty").set({
+      roomId: "room_1",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      text: "",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdAt: new Date(Date.now() - 700),
+    })
+  );
+  await assertFails(
+    bobDb.collection("rooms").doc("room_1").collection("messages").doc("msg_photo_1").update({
+      imageUrl: "https://evil.example/other.jpg",
+      reactions: { "🔥": [BOB_UID] },
+    })
+  );
+
   // Typing indicators: Bob sets typing=true; Alice lists typing statuses; Charlie denied; spoofed userId denied
   await assertSucceeds(
     bobDb.collection("rooms").doc("room_1").collection("typing").doc(BOB_UID).set({

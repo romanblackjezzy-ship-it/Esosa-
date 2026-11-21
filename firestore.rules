@@ -60,7 +60,11 @@ service cloud.firestore {
              data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
              (!('senderPhotoUrl' in data) || (data.senderPhotoUrl is string && data.senderPhotoUrl.size() <= 500)) &&
-             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
+             (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
+             (!('messageType' in data) || data.messageType in ['text', 'image']) &&
+             data.text is string && data.text.size() <= 2000 &&
+             (data.text.size() >= 1 || ('imageUrl' in data)) &&
              data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 25 &&
              data.memberUids[0] is string &&
              (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 10)) &&
@@ -304,7 +308,7 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().memberUids) &&
                          incoming().keys().hasAll(['roomId', 'senderId', 'senderName', 'text', 'memberUids', 'createdAt']) &&
-                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'memberUids', 'reactions', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'imageUrl', 'storagePath', 'messageType', 'memberUids', 'reactions', 'createdAt']) &&
                          exists(/databases/$(database)/documents/rooms/$(roomId)) &&
                          (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids) &&
                          incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
@@ -321,6 +325,9 @@ service cloud.firestore {
                          incoming().memberUids == existing().memberUids &&
                          incoming().createdAt == existing().createdAt &&
                          (!('senderPhotoUrl' in existing()) ? !('senderPhotoUrl' in incoming()) : incoming().senderPhotoUrl == existing().senderPhotoUrl) &&
+                         (!('imageUrl' in existing()) ? !('imageUrl' in incoming()) : incoming().imageUrl == existing().imageUrl) &&
+                         (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
+                         (!('messageType' in existing()) ? !('messageType' in incoming()) : incoming().messageType == existing().messageType) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
 
         allow delete: if isSignedIn() && isValidId(roomId) && isValidId(messageId) && existing().senderId == request.auth.uid;

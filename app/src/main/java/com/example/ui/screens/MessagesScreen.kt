@@ -1,6 +1,14 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -16,6 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,12 +39,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.AlertDialog
@@ -47,9 +58,11 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -71,15 +84,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.core.UiState
+import com.example.data.media.CameraPhotoHelper
 import com.example.data.model.ChatRoom
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
@@ -100,6 +118,7 @@ import com.example.ui.components.formatMessageTime
 import com.example.ui.components.formatRelativeThreadTime
 import com.example.ui.components.messageDayKey
 import kotlinx.coroutines.delay
+import java.io.File
 
 @Composable
 fun MessagesScreen(
@@ -117,6 +136,8 @@ fun MessagesScreen(
     actionError: String?,
     isBusy: Boolean,
     isSendingMessage: Boolean = false,
+    photoUploadProgress: Float? = null,
+    photoUploadPreviewUri: String? = null,
     onOpenRoom: (String?) -> Unit,
     onSearchQueryChanged: (String) -> Unit = {},
     onOpenSearchResult: (String, String?) -> Unit = { roomId, _ -> onOpenRoom(roomId) },
@@ -125,8 +146,11 @@ fun MessagesScreen(
     onJoinRoom: (String) -> Unit,
     onDraftChanged: (ChatRoom?, String) -> Unit = { _, _ -> },
     onSendMessage: (ChatRoom, String) -> Unit,
+    onSendCapturedPhoto: (ChatRoom, Uri, String, () -> Unit) -> Unit = { _, _, _, cleanup -> cleanup() },
+    onReportError: (String) -> Unit = {},
     onToggleReaction: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteMessage: (String, String) -> Unit,
+    onDeleteRoomMessage: ((String, RoomMessage) -> Unit)? = null,
     onLeaveOrDeleteRoom: (ChatRoom) -> Unit,
     onClearError: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -144,17 +168,32 @@ fun MessagesScreen(
             highlightedMessageId = highlightedMessageId,
             actionError = actionError,
             isSendingMessage = isSendingMessage,
+            photoUploadProgress = photoUploadProgress,
+            photoUploadPreviewUri = photoUploadPreviewUri,
             onBack = { onOpenRoom(null) },
             onClearHighlight = onClearHighlight,
             onDraftChanged = onDraftChanged,
             onSendMessage = { text ->
                 activeRoom?.let { onSendMessage(it, text) }
             },
+            onSendCapturedPhoto = { uri, caption, cleanup ->
+                val targetRoom = activeRoom
+                if (targetRoom != null) {
+                    onSendCapturedPhoto(targetRoom, uri, caption, cleanup)
+                } else {
+                    cleanup()
+                }
+            },
+            onReportError = onReportError,
             onToggleReaction = { msgId, emoji ->
                 onToggleReaction(selectedRoomId, msgId, emoji)
             },
-            onDeleteMessage = { msgId ->
-                onDeleteMessage(selectedRoomId, msgId)
+            onDeleteMessage = { msg ->
+                if (onDeleteRoomMessage != null) {
+                    onDeleteRoomMessage(selectedRoomId, msg)
+                } else {
+                    onDeleteMessage(selectedRoomId, msg.id)
+                }
             },
             onLeaveOrDeleteRoom = {
                 activeRoom?.let { onLeaveOrDeleteRoom(it) }
@@ -643,9 +682,14 @@ private fun MessageSearchResultCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val hitSnippet = when {
+                hit.message.text.isNotBlank() -> hit.message.text
+                !hit.message.imageUrl.isNullOrBlank() -> "📷 ${stringResource(R.string.room_photo_message_label)}"
+                else -> ""
+            }
             Text(
                 text = buildHighlightedText(
-                    text = "${hit.message.senderName}: ${hit.message.text}",
+                    text = "${hit.message.senderName}: $hitSnippet",
                     query = searchQuery,
                     highlightBackground = highlightBg,
                     highlightTextColor = highlightFg
@@ -779,24 +823,85 @@ private fun RoomDetailView(
     highlightedMessageId: String?,
     actionError: String?,
     isSendingMessage: Boolean,
+    photoUploadProgress: Float?,
+    photoUploadPreviewUri: String?,
     onBack: () -> Unit,
     onClearHighlight: () -> Unit,
     onDraftChanged: (ChatRoom?, String) -> Unit,
     onSendMessage: (String) -> Unit,
+    onSendCapturedPhoto: (Uri, String, () -> Unit) -> Unit,
+    onReportError: (String) -> Unit,
     onToggleReaction: (String, String) -> Unit,
-    onDeleteMessage: (String) -> Unit,
+    onDeleteMessage: (RoomMessage) -> Unit,
     onLeaveOrDeleteRoom: () -> Unit,
     onClearError: () -> Unit,
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var draft by remember { mutableStateOf("") }
     var menuExpanded by remember { mutableStateOf(false) }
     var codeCopied by remember { mutableStateOf(false) }
+    var showCameraDeniedBanner by remember { mutableStateOf(false) }
     var activePickerMessageId by remember(room?.id) { mutableStateOf<String?>(null) }
+    var fullScreenPhotoMessage by remember { mutableStateOf<RoomMessage?>(null) }
+    var pendingCaptureUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
+    val noCameraAppMessage = stringResource(R.string.room_photo_no_camera_app)
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val capturedUri = pendingCaptureUri
+        val capturedFile = pendingCaptureFile
+        pendingCaptureUri = null
+        pendingCaptureFile = null
+        if (success && capturedUri != null) {
+            val caption = draft.trim()
+            if (caption.isNotEmpty()) {
+                draft = ""
+            }
+            activePickerMessageId = null
+            onSendCapturedPhoto(capturedUri, caption) {
+                capturedFile?.delete()
+            }
+        } else {
+            capturedFile?.delete()
+        }
+    }
+
+    val launchCameraCapture = {
+        try {
+            val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
+            pendingCaptureUri = uri
+            pendingCaptureFile = file
+            takePictureLauncher.launch(uri)
+        } catch (_: ActivityNotFoundException) {
+            pendingCaptureUri = null
+            pendingCaptureFile?.delete()
+            pendingCaptureFile = null
+            onReportError(noCameraAppMessage)
+        } catch (e: Exception) {
+            pendingCaptureUri = null
+            pendingCaptureFile?.delete()
+            pendingCaptureFile = null
+            onReportError(e.localizedMessage ?: noCameraAppMessage)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            showCameraDeniedBanner = false
+            launchCameraCapture()
+        } else {
+            showCameraDeniedBanner = true
+        }
+    }
 
     val messagesList = (messagesState as? UiState.Success)?.data.orEmpty()
     val newestMessage = messagesList.lastOrNull()
@@ -818,7 +923,7 @@ private fun RoomDetailView(
             listState = listState,
             itemCount = messagesList.size,
             lastItemKey = newestMessage?.id,
-            lastItemContent = newestMessage?.text,
+            lastItemContent = "${newestMessage?.text.orEmpty()}|${newestMessage?.imageUrl.orEmpty()}",
             conversationKey = room?.id,
             animate = true
         )
@@ -1043,7 +1148,8 @@ private fun RoomDetailView(
                                                 activePickerMessageId = null
                                                 onToggleReaction(msg.id, emoji)
                                             },
-                                            onDelete = { onDeleteMessage(msg.id) }
+                                            onOpenFullScreenPhoto = { fullScreenPhotoMessage = it },
+                                            onDelete = { onDeleteMessage(msg) }
                                         )
                                     }
                                 }
@@ -1059,6 +1165,116 @@ private fun RoomDetailView(
                 modifier = Modifier.testTag("room_typing_indicator")
             )
 
+            AnimatedVisibility(visible = showCameraDeniedBanner) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("camera_permission_denied_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.room_camera_permission_denied),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(
+                                onClick = {
+                                    val settingsIntent = Intent(
+                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", context.packageName, null)
+                                    )
+                                    context.startActivity(settingsIntent)
+                                }
+                            ) {
+                                Text(stringResource(R.string.live_voice_open_settings))
+                            }
+                            TextButton(onClick = { showCameraDeniedBanner = false }) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = photoUploadProgress != null) {
+                val progressValue = (photoUploadProgress ?: 0f).coerceIn(0f, 1f)
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("photo_upload_progress_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (!photoUploadPreviewUri.isNullOrBlank()) {
+                            AsyncImage(
+                                model = photoUploadPreviewUri,
+                                contentDescription = stringResource(R.string.room_uploading_photo),
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PhotoCamera,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.room_uploading_photo),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                                Text(
+                                    text = "${(progressValue * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { progressValue },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                            )
+                        }
+                    }
+                }
+            }
+
             // Composer bar
             Surface(
                 tonalElevation = 4.dp,
@@ -1072,6 +1288,29 @@ private fun RoomDetailView(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    FilledTonalIconButton(
+                        onClick = {
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                showCameraDeniedBanner = false
+                                launchCameraCapture()
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        enabled = room != null && !isSendingMessage && photoUploadProgress == null,
+                        modifier = Modifier
+                            .size(50.dp)
+                            .testTag("room_camera_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PhotoCamera,
+                            contentDescription = stringResource(R.string.room_camera_capture)
+                        )
+                    }
                     OutlinedTextField(
                         value = draft,
                         onValueChange = {
@@ -1080,7 +1319,7 @@ private fun RoomDetailView(
                                 onDraftChanged(room, it)
                             }
                         },
-                        placeholder = { Text("Message room…") },
+                        placeholder = { Text("Message or caption…") },
                         maxLines = 4,
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier
@@ -1124,6 +1363,102 @@ private fun RoomDetailView(
             }
         }
     }
+
+    val previewMessage = fullScreenPhotoMessage
+    val previewImageUrl = previewMessage?.imageUrl
+    if (previewMessage != null && !previewImageUrl.isNullOrBlank()) {
+        FullScreenPhotoDialog(
+            message = previewMessage,
+            imageUrl = previewImageUrl,
+            onDismiss = { fullScreenPhotoMessage = null }
+        )
+    }
+}
+
+@Composable
+private fun FullScreenPhotoDialog(
+    message: RoomMessage,
+    imageUrl: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.95f),
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("full_screen_photo_dialog")
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = message.text.ifBlank { stringResource(R.string.room_photo_message_label) },
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .align(Alignment.Center)
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .minimumInteractiveComponentSize()
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
+                        .testTag("close_full_screen_photo_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = stringResource(R.string.room_photo_preview_close),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .widthIn(max = 540.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = message.senderName,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = formatMessageTime(message.createdAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (message.text.isNotBlank()) {
+                            Text(
+                                text = message.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1136,6 +1471,7 @@ private fun RoomMessageBubble(
     showReactionPicker: Boolean,
     onOpenReactionPicker: () -> Unit,
     onToggleReaction: (String) -> Unit,
+    onOpenFullScreenPhoto: (RoomMessage) -> Unit = {},
     onDelete: () -> Unit
 ) {
     val mySelectedEmojis = remember(message.reactions, currentUserId) {
@@ -1227,10 +1563,32 @@ private fun RoomMessageBubble(
                     )
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                    val photoUrl = message.imageUrl
+                    if (!photoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = photoUrl,
+                            contentDescription = message.text.ifBlank {
+                                "${message.senderName} ${stringResource(R.string.room_photo_message_label)}"
+                            },
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 140.dp, max = 250.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .clickable { onOpenFullScreenPhoto(message) }
+                                .testTag("room_message_image_${message.id}")
+                        )
+                        if (message.text.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                    if (message.text.isNotBlank()) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

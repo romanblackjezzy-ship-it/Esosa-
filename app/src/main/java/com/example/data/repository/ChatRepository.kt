@@ -20,6 +20,10 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageException
+import com.google.firebase.storage.storage
+import com.google.firebase.storage.storageMetadata
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,7 +38,8 @@ import kotlin.random.Random
 
 class ChatRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val storageProvider: () -> FirebaseStorage = { Firebase.storage }
 ) {
     constructor(context: Context) : this(EsosaFirestore.getInstance(context))
 
@@ -460,11 +465,122 @@ class ChatRepository(
         }
     }
 
-    suspend fun deleteRoomMessage(roomId: String, messageId: String): Result<Unit> {
+    suspend fun sendRoomPhotoMessage(
+        room: ChatRoom,
+        jpegBytes: ByteArray,
+        rawCaption: String = "",
+        onProgress: (Float) -> Unit = {}
+    ): Result<Unit> {
+        var currentPath = "rooms/${room.id}/photos"
+        return try {
+            val user = auth.currentUser ?: throw IllegalStateException("Not authenticated")
+            val uid = user.uid
+            val caption = rawCaption.trim().take(2000)
+            require(room.id.isNotBlank()) { "Invalid room" }
+            require(jpegBytes.isNotEmpty() && jpegBytes.size <= MAX_PHOTO_UPLOAD_BYTES) {
+                "Photo must be smaller than 9 MB"
+            }
+
+            val roomRef = db.collection("rooms").document(room.id)
+            val msgRef = roomRef.collection("messages").document()
+            val storagePath = "rooms/${room.id}/photos/${msgRef.id}.jpg"
+            currentPath = storagePath
+
+            val storageRef = storageProvider().reference.child(storagePath)
+            val metadata = storageMetadata {
+                contentType = "image/jpeg"
+                setCustomMetadata("senderId", uid)
+                setCustomMetadata("roomId", room.id)
+            }
+
+            onProgress(0.05f)
+            val uploadTask = storageRef.putBytes(jpegBytes, metadata)
+            uploadTask.addOnProgressListener { snapshot ->
+                val total = snapshot.totalByteCount
+                if (total > 0L) {
+                    val fraction = (snapshot.bytesTransferred.toFloat() / total.toFloat()).coerceIn(0.05f, 0.95f)
+                    onProgress(fraction)
+                }
+            }
+            uploadTask.await()
+            onProgress(0.98f)
+
+            val downloadUrl = storageRef.downloadUrl.await().toString()
+            require(downloadUrl.startsWith("https://")) { "Invalid Firebase Storage download URL" }
+
+            currentPath = roomRef.path
+            val latestSnap = roomRef.get().await()
+            val latestMembers = (latestSnap.get("memberUids") as? List<*>)
+                ?.filterIsInstance<String>()
+                ?.takeIf { it.isNotEmpty() }
+                ?: room.memberUids
+
+            val senderName = user.displayName?.takeIf { it.isNotBlank() }?.take(80) ?: "Member"
+            val senderPhoto = user.photoUrl?.toString()?.take(500)
+
+            currentPath = msgRef.path
+            val msgPayload = mapOf(
+                "roomId" to room.id,
+                "senderId" to uid,
+                "senderName" to senderName,
+                "senderPhotoUrl" to senderPhoto,
+                "text" to caption,
+                "imageUrl" to downloadUrl,
+                "storagePath" to storagePath,
+                "messageType" to "image",
+                "memberUids" to latestMembers,
+                "createdAt" to FieldValue.serverTimestamp()
+            ).filterValues { it != null }
+
+            msgRef.set(msgPayload).await()
+
+            val previewText = if (caption.isNotBlank()) "📷 $caption".take(500) else "📷 Photo"
+            currentPath = roomRef.path
+            roomRef.update(
+                mapOf(
+                    "lastMessageText" to previewText,
+                    "lastMessageSenderName" to senderName,
+                    "lastMessageAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            onProgress(1f)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: StorageException) {
+            handleFirestoreError(e, OperationType.WRITE, currentPath)
+            val detail = when (e.errorCode) {
+                StorageException.ERROR_BUCKET_NOT_FOUND,
+                StorageException.ERROR_PROJECT_NOT_FOUND ->
+                    "Firebase Storage is not enabled on this Firebase project yet. Enable Storage in Firebase Console."
+                StorageException.ERROR_NOT_AUTHORIZED,
+                StorageException.ERROR_NOT_AUTHENTICATED ->
+                    "Storage permission denied. Check Firebase Storage rules and sign-in session."
+                else -> e.localizedMessage ?: "Failed to upload photo to Firebase Storage."
+            }
+            Result.failure(IllegalStateException(detail, e))
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, currentPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteRoomMessage(
+        roomId: String,
+        messageId: String,
+        storagePath: String? = null
+    ): Result<Unit> {
         val docRef = db.collection("rooms").document(roomId).collection("messages").document(messageId)
         return try {
             requireUserId()
             docRef.delete().await()
+            if (!storagePath.isNullOrBlank()) {
+                try {
+                    storageProvider().reference.child(storagePath).delete().await()
+                } catch (_: Exception) {
+                }
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -546,7 +662,8 @@ class ChatRepository(
                             DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
                         ).filter { msg ->
                             msg.text.contains(query, ignoreCase = true) ||
-                                msg.senderName.contains(query, ignoreCase = true)
+                                msg.senderName.contains(query, ignoreCase = true) ||
+                                (!msg.imageUrl.isNullOrBlank() && "photo".contains(query, ignoreCase = true))
                         }.map { msg ->
                             MessageSearchHit(room = room, message = msg)
                         }
@@ -571,5 +688,9 @@ class ChatRepository(
         val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         val suffix = (1..4).map { chars[Random.nextInt(chars.length)] }.joinToString("")
         return "ES$suffix"
+    }
+
+    private companion object {
+        const val MAX_PHOTO_UPLOAD_BYTES = 9 * 1024 * 1024
     }
 }

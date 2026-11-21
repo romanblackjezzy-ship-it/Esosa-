@@ -53,7 +53,6 @@ jobs:
             "platform-tools" \
             "platforms;android-36.1" \
             "build-tools;36.0.0"
-          "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install "platforms;android-36" || true
           "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install "build-tools;36.1.0" || true
           test -f "$SDK_ROOT/platforms/android-36.1/android.jar"
 
@@ -83,20 +82,22 @@ jobs:
             touch .env.example
           fi
           if [ ! -f .env ]; then
-            touch .env
+            cp .env.example .env
           fi
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           ls -la app/google-services.json app/src/main/res/values/firebase_applet_config.xml debug.keystore .env .env.example || true
 
       - name: Build Debug APK
         env:
-          GRADLE_OPTS: "-Xmx512m -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Xmx256m -Dfile.encoding=UTF-8"
         run: |
-          set -o pipefail
           echo "Java: $(java -version 2>&1 | head -n 1)"
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "Version: ${ESOSA_VERSION_NAME} (${ESOSA_VERSION_CODE}) Repo: ${GITHUB_REPOSITORY}"
-          if ! gradle :app:assembleDebug \
+          free -m || true
+          df -h . || true
+          set +e
+          gradle :app:assembleDebug \
             --no-daemon \
             --no-configuration-cache \
             --no-build-cache \
@@ -104,13 +105,20 @@ jobs:
             --stacktrace \
             --console=plain \
             -Dorg.gradle.parallel=false \
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
-            2>&1 | tee ci-build.log; then
-            echo "=== LAST 80 LINES OF CI BUILD LOG ===" >&2
-            tail -n 80 ci-build.log >&2 || true
-            ERROR_LINE="$(grep -E '^e: |FAILURE:|BUILD FAILED|\* What went wrong:' ci-build.log | tail -n 5 | tr '\n' ' ' | sed 's/%/%25/g; s/\r//g')"
-            echo "::error title=Build Debug APK failed::${ERROR_LINE:-See ci-build.log in job summary/artifacts}"
-            exit 1
+            -Dorg.gradle.caching=false \
+            -Dorg.gradle.configuration-cache=false \
+            -Dorg.gradle.workers.max=1 \
+            -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=640m -XX:+UseG1GC -Dfile.encoding=UTF-8" \
+            2>&1 | tee ci-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo "=== GRADLE EXITED WITH CODE ${BUILD_STATUS} ===" >&2
+            echo "=== LAST 100 LINES OF CI BUILD LOG ===" >&2
+            tail -n 100 ci-build.log >&2 || true
+            ERROR_LINE="$(grep -E '^e: |FAILURE:|BUILD FAILED|\* What went wrong:|OutOfMemoryError|daemon has disappeared' ci-build.log | tail -n 5 | tr '\n' ' ' | sed 's/%/%25/g; s/\r//g')"
+            echo "::error title=Build Debug APK failed (exit ${BUILD_STATUS})::${ERROR_LINE:-Exited with code ${BUILD_STATUS}. See ci-build.log in job summary/artifacts}"
+            exit "$BUILD_STATUS"
           fi
 
       - name: Summarize CI build failure
@@ -119,7 +127,7 @@ jobs:
           {
             echo "### Build Debug APK Failure Log (tail)"
             echo '```text'
-            tail -n 120 ci-build.log
+            tail -n 140 ci-build.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

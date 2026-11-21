@@ -64,6 +64,7 @@ import com.example.R
 import com.example.core.EsosaFirestore
 import com.example.core.ThreadSelectionPreferences
 import com.example.data.audio.VoiceAudioStreamer
+import com.example.data.media.CameraPhotoHelper
 import com.example.data.model.AppUpdateInfo
 import com.example.data.repository.AiChatRepository
 import com.example.data.repository.AppUpdatePreferences
@@ -282,6 +283,8 @@ private fun AuthenticatedEsosaShell(
     val roomActionError by roomsViewModel.actionError.collectAsStateWithLifecycle()
     val isRoomBusy by roomsViewModel.isBusy.collectAsStateWithLifecycle()
     val isSendingMessage by roomsViewModel.isSendingMessage.collectAsStateWithLifecycle()
+    val photoUploadProgress by roomsViewModel.photoUploadProgress.collectAsStateWithLifecycle()
+    val photoUploadPreviewUri by roomsViewModel.photoUploadPreviewUri.collectAsStateWithLifecycle()
 
     val aiThreadsState by aiChatViewModel.threadsState.collectAsStateWithLifecycle()
     val selectedAiThreadId by aiChatViewModel.selectedThreadId.collectAsStateWithLifecycle()
@@ -445,6 +448,8 @@ private fun AuthenticatedEsosaShell(
                             actionError = roomActionError,
                             isBusy = isRoomBusy,
                             isSendingMessage = isSendingMessage,
+                            photoUploadProgress = photoUploadProgress,
+                            photoUploadPreviewUri = photoUploadPreviewUri,
                             onOpenRoom = { roomsViewModel.openRoom(it) },
                             onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
                             onOpenSearchResult = { roomId, msgId ->
@@ -455,10 +460,25 @@ private fun AuthenticatedEsosaShell(
                             onJoinRoom = { code -> roomsViewModel.joinRoomByCode(code) },
                             onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
                             onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
+                            onSendCapturedPhoto = { room, uri, caption, cleanup ->
+                                roomsViewModel.sendPhotoMessage(
+                                    room = room,
+                                    previewUriString = uri.toString(),
+                                    caption = caption,
+                                    loadJpegBytes = {
+                                        CameraPhotoHelper.compressUriToJpegBytes(context, uri)
+                                    },
+                                    onCleanup = cleanup
+                                )
+                            },
+                            onReportError = { roomsViewModel.reportActionError(it) },
                             onToggleReaction = { roomId, msgId, emoji ->
                                 roomsViewModel.toggleReaction(roomId, msgId, emoji)
                             },
                             onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
+                            onDeleteRoomMessage = { rId, msg ->
+                                roomsViewModel.deleteMessage(rId, msg.id, msg.storagePath)
+                            },
                             onLeaveOrDeleteRoom = { room -> roomsViewModel.leaveOrDeleteRoom(room) },
                             onClearError = { roomsViewModel.clearActionError() },
                             onOpenSettings = { selectedTab = EsosaTab.SETTINGS },

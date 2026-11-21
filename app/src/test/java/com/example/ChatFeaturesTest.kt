@@ -389,4 +389,70 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("ai_thread_card_ai_t2").assertIsDisplayed()
         composeTestRule.onNodeWithTag("ai_thread_card_ai_t1").assertDoesNotExist()
     }
+
+    @Test
+    fun `room displays camera button, photo upload progress, inline photo bubble, and full-screen photo preview`() {
+        val now = Timestamp(Date())
+        val room = ChatRoom(
+            id = "room_photo",
+            title = "Field Snapshots",
+            roomCode = "ES9090",
+            ownerId = "u1",
+            memberUids = listOf("u1", "u2")
+        )
+        val photoMessage = RoomMessage(
+            id = "msg_cam_1",
+            roomId = "room_photo",
+            senderId = "u1",
+            senderName = "Roman",
+            text = "Whiteboard notes",
+            imageUrl = "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/rooms%2Froom_photo%2Fphotos%2Fmsg_cam_1.jpg?alt=media",
+            storagePath = "rooms/room_photo/photos/msg_cam_1.jpg",
+            messageType = "image",
+            memberUids = listOf("u1", "u2"),
+            createdAt = now
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                MessagesScreen(
+                    currentUserId = "u1",
+                    userProfileInfo = profile,
+                    roomsState = UiState.Success(listOf(room)),
+                    selectedRoomId = room.id,
+                    activeRoom = room,
+                    activeMessagesState = UiState.Success(listOf(photoMessage)),
+                    photoUploadProgress = 0.65f,
+                    photoUploadPreviewUri = null,
+                    actionError = null,
+                    isBusy = false,
+                    onOpenRoom = {},
+                    onCreateRoom = { _, _ -> },
+                    onJoinRoom = {},
+                    onSendMessage = { _, _ -> },
+                    onDeleteMessage = { _, _ -> },
+                    onLeaveOrDeleteRoom = {},
+                    onClearError = {},
+                    onOpenSettings = {},
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("room_camera_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("photo_upload_progress_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithText("65%").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_message_image_msg_cam_1", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Whiteboard notes", useUnmergedTree = true).assertIsDisplayed()
+
+        // Tap photo to open full-screen viewer, then close
+        composeTestRule.onNodeWithTag("room_message_image_msg_cam_1", useUnmergedTree = true).performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("full_screen_photo_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("close_full_screen_photo_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("full_screen_photo_dialog").assertDoesNotExist()
+    }
 }
+

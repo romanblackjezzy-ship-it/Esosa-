@@ -17,9 +17,11 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +54,12 @@ class RoomsViewModel(
 
     private val _isSendingMessage = MutableStateFlow(false)
     val isSendingMessage: StateFlow<Boolean> = _isSendingMessage.asStateFlow()
+
+    private val _photoUploadProgress = MutableStateFlow<Float?>(null)
+    val photoUploadProgress: StateFlow<Float?> = _photoUploadProgress.asStateFlow()
+
+    private val _photoUploadPreviewUri = MutableStateFlow<String?>(null)
+    val photoUploadPreviewUri: StateFlow<String?> = _photoUploadPreviewUri.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -371,6 +379,51 @@ class RoomsViewModel(
         }
     }
 
+    fun sendPhotoMessage(
+        room: ChatRoom,
+        previewUriString: String,
+        caption: String = "",
+        loadJpegBytes: suspend () -> ByteArray,
+        onCleanup: () -> Unit = {},
+        onSent: () -> Unit = {}
+    ) {
+        if (_photoUploadProgress.value != null) return
+        clearTyping(room)
+        viewModelScope.launch {
+            _actionError.value = null
+            _photoUploadPreviewUri.value = previewUriString
+            _photoUploadProgress.value = 0.02f
+            try {
+                val jpegBytes = withContext(Dispatchers.IO) { loadJpegBytes() }
+                val result = repository.sendRoomPhotoMessage(
+                    room = room,
+                    jpegBytes = jpegBytes,
+                    rawCaption = caption,
+                    onProgress = { progress ->
+                        _photoUploadProgress.value = progress
+                    }
+                )
+                result.onSuccess {
+                    onSent()
+                }.onFailure { err ->
+                    _actionError.value = err.localizedMessage ?: "Failed to upload photo."
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _actionError.value = e.localizedMessage ?: "Could not process captured photo."
+            } finally {
+                _photoUploadProgress.value = null
+                _photoUploadPreviewUri.value = null
+                onCleanup()
+            }
+        }
+    }
+
+    fun reportActionError(message: String) {
+        _actionError.value = message
+    }
+
     fun toggleReaction(roomId: String, messageId: String, emoji: String) {
         viewModelScope.launch {
             val result = repository.toggleMessageReaction(roomId, messageId, emoji)
@@ -380,9 +433,9 @@ class RoomsViewModel(
         }
     }
 
-    fun deleteMessage(roomId: String, messageId: String) {
+    fun deleteMessage(roomId: String, messageId: String, storagePath: String? = null) {
         viewModelScope.launch {
-            val result = repository.deleteRoomMessage(roomId, messageId)
+            val result = repository.deleteRoomMessage(roomId, messageId, storagePath)
             result.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Failed to delete message."
             }

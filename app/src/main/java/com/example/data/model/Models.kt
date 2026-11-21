@@ -48,6 +48,9 @@ data class RoomMessage(
     val senderName: String = "",
     val senderPhotoUrl: String? = null,
     val text: String = "",
+    val imageUrl: String? = null,
+    val storagePath: String? = null,
+    val messageType: String = "text",
     val memberUids: List<String> = emptyList(),
     val reactions: Map<String, List<String>> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null

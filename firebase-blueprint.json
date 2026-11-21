@@ -54,7 +54,10 @@
         "senderId": { "type": "string", "description": "Sender Firebase Auth UID" },
         "senderName": { "type": "string", "description": "Sender display name" },
         "senderPhotoUrl": { "type": "string", "description": "Optional sender photo URL" },
-        "text": { "type": "string", "description": "Message text content" },
+        "text": { "type": "string", "description": "Message text content or optional photo caption" },
+        "imageUrl": { "type": "string", "description": "Optional Firebase Storage HTTPS download URL for photo messages" },
+        "storagePath": { "type": "string", "description": "Optional Firebase Storage object path for photo cleanup" },
+        "messageType": { "type": "string", "enum": ["text", "image"], "description": "Message content type" },
         "memberUids": { "type": "array", "description": "Denormalized member UIDs from parent room" },
         "reactions": { "type": "object", "description": "Optional map of emoji to list of reacting UIDs" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }

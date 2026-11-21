@@ -43,4 +43,10 @@
     <string name="search_no_results_title">No matching chats or messages</string>
     <string name="search_no_results_subtitle">Try searching another keyword, person, or room code.</string>
     <string name="search_ai_threads_placeholder">Search AI conversations…</string>
+    <string name="room_camera_capture">Capture photo</string>
+    <string name="room_camera_permission_denied">Camera permission is required to snap and send photos.</string>
+    <string name="room_uploading_photo">Uploading photo…</string>
+    <string name="room_photo_message_label">Photo</string>
+    <string name="room_photo_preview_close">Close photo preview</string>
+    <string name="room_photo_no_camera_app">No camera app is available on this device.</string>
 </resources>
