@@ -13,6 +13,8 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AppThemeMode
+import com.example.data.model.ChatWallpaper
 
 @Immutable
 data class TelegramColors(
@@ -38,7 +40,12 @@ data class TelegramColors(
     val composerBar: Color,
     val composerInput: Color,
     val sendFab: Color,
-    val onSendFab: Color
+    val onSendFab: Color,
+    val onlineDot: Color,
+    val callDarkSurface: Color,
+    val callDarkSurfaceAlt: Color,
+    val callAcceptGreen: Color,
+    val callEndRed: Color
 )
 
 private val TelegramLightTokens = TelegramColors(
@@ -64,7 +71,12 @@ private val TelegramLightTokens = TelegramColors(
     composerBar = Color.White,
     composerInput = TelegramSurfaceSecondaryDay,
     sendFab = TelegramAzure,
-    onSendFab = Color.White
+    onSendFab = Color.White,
+    onlineDot = EsosaOnlineGreen,
+    callDarkSurface = EsosaCallDarkSurface,
+    callDarkSurfaceAlt = EsosaCallDarkSurfaceAlt,
+    callAcceptGreen = EsosaCallAcceptGreen,
+    callEndRed = EsosaCallEndRed
 )
 
 private val TelegramDarkTokens = TelegramColors(
@@ -89,11 +101,23 @@ private val TelegramDarkTokens = TelegramColors(
     divider = TelegramDividerNight,
     composerBar = TelegramSurfaceNight,
     composerInput = TelegramSurfaceSecondaryNight,
-    sendFab = TelegramAzureNight(),
-    onSendFab = Color.White
+    sendFab = TelegramAzureLight,
+    onSendFab = Color.White,
+    onlineDot = EsosaOnlineGreen,
+    callDarkSurface = EsosaCallDarkSurface,
+    callDarkSurfaceAlt = EsosaCallDarkSurfaceAlt,
+    callAcceptGreen = EsosaCallAcceptGreen,
+    callEndRed = EsosaCallEndRed
 )
 
-private fun TelegramAzureNight(): Color = TelegramAzureLight
+fun wallpaperCanvasAndPattern(wallpaper: ChatWallpaper, isDark: Boolean): Pair<Color, Color> {
+    return when (wallpaper) {
+        ChatWallpaper.CLASSIC -> if (isDark) TelegramCanvasNight to TelegramPatternNight else TelegramCanvasDay to TelegramPatternDay
+        ChatWallpaper.OCEANIC -> if (isDark) WallpaperOceanicNight to WallpaperOceanicPatternNight else WallpaperOceanicDay to WallpaperOceanicPatternDay
+        ChatWallpaper.BOTANICAL -> if (isDark) WallpaperBotanicalNight to WallpaperBotanicalPatternNight else WallpaperBotanicalDay to WallpaperBotanicalPatternDay
+        ChatWallpaper.MIDNIGHT -> if (isDark) WallpaperMidnightNight to WallpaperMidnightPatternNight else WallpaperMidnightDay to WallpaperMidnightPatternDay
+    }
+}
 
 val LocalTelegramColors = staticCompositionLocalOf { TelegramLightTokens }
 
@@ -147,7 +171,7 @@ private val EsosaLightColorScheme = lightColorScheme(
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFD9F5F2),
     onTertiaryContainer = Color(0xFF053833),
-    background = TelegramSurfaceDay,
+    background = TelegramSurfaceSecondaryDay,
     onBackground = TelegramTextPrimaryDay,
     surface = TelegramSurfaceDay,
     onSurface = TelegramTextPrimaryDay,
@@ -175,7 +199,12 @@ val EsosaShapes = Shapes(
 
 @Composable
 fun EsosaTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    darkTheme: Boolean = when (themeMode) {
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+        AppThemeMode.LIGHT -> false
+        AppThemeMode.DARK -> true
+    },
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) EsosaDarkColorScheme else EsosaLightColorScheme

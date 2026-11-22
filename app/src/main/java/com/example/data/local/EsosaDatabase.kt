@@ -9,12 +9,15 @@ import androidx.room.RoomDatabase
     entities = [
         ChatRoomEntity::class,
         RoomMessageEntity::class,
+        StoryEntity::class,
+        CallLogEntity::class,
+        ChannelCommentEntity::class,
         AiThreadEntity::class,
         AiMessageEntity::class,
         LiveVoiceThreadEntity::class,
         LiveVoiceMessageEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class EsosaDatabase : RoomDatabase() {
@@ -30,7 +33,10 @@ abstract class EsosaDatabase : RoomDatabase() {
                     context.applicationContext,
                     EsosaDatabase::class.java,
                     "esosa_chat.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }

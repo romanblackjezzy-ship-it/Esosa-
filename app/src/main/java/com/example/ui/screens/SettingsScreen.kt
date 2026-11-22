@@ -4,8 +4,11 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,11 +22,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,9 +41,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -56,14 +68,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
 import com.example.R
+import com.example.data.model.ActiveSession
+import com.example.data.model.AppThemeMode
 import com.example.data.model.AppUpdateInfo
 import com.example.data.model.ChatKind
+import com.example.data.model.ChatRoom
+import com.example.data.model.ChatWallpaper
 import com.example.data.model.UserProfile
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.theme.telegramColors
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     userProfile: UserProfile,
@@ -73,9 +89,23 @@ fun SettingsScreen(
     isCheckingUpdates: Boolean,
     autoUpdateCheckEnabled: Boolean,
     githubUpdateRepo: String,
+    activeSessions: List<ActiveSession> = emptyList(),
+    blockedRooms: List<ChatRoom> = emptyList(),
     onUpdateLocalProfile: (String, String, String) -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Boolean,
+    onUpdateThemeMode: (AppThemeMode) -> Unit = {},
+    onUpdateWallpaper: (ChatWallpaper) -> Unit = {},
+    onUpdateLanguage: (String) -> Unit = {},
+    onSetTwoStepPin: (Boolean, String) -> Unit = { _, _ -> },
+    onToggleContactSync: (Boolean) -> Unit = {},
+    onToggleReadReceipts: (Boolean) -> Unit = {},
+    onUpdateLastSeenVisibility: (String) -> Unit = {},
+    onUpdateDefaultDisappearSeconds: (Int) -> Unit = {},
+    onTerminateSession: (String) -> Unit = {},
+    onTerminateAllOtherSessions: () -> Unit = {},
+    onUnblockRoom: (String) -> Unit = {},
+    onLogout: () -> Unit = {},
     onToggleAutoUpdateCheck: (Boolean) -> Unit,
     onSaveGithubRepo: (String) -> Boolean,
     onCheckForUpdatesNow: () -> Unit,
@@ -86,6 +116,10 @@ fun SettingsScreen(
     var hasOsPermission by remember { mutableStateOf(notificationManager.hasNotificationPermission()) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showPinDialog by remember { mutableStateOf(false) }
+    var showSessionsDialog by remember { mutableStateOf(false) }
+    var showBlockedDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -113,7 +147,7 @@ fun SettingsScreen(
                             color = telegram.onTopBar
                         )
                         Text(
-                            text = "Profile, notifications & updates",
+                            text = "Account, privacy, theme & updates",
                             style = MaterialTheme.typography.bodySmall,
                             color = telegram.onTopBarMuted
                         )
@@ -147,58 +181,238 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Telegram-style Local Profile Card (No Sign-In Needed)
+            // Account Profile Card
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TelegramAvatarCircle(
-                        title = userProfile.displayName,
-                        seedKey = userProfile.id,
-                        chatKind = ChatKind.DIRECT,
-                        size = 62.dp
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = userProfile.displayName,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TelegramAvatarCircle(
+                            title = userProfile.displayName,
+                            seedKey = userProfile.id,
+                            chatKind = ChatKind.DIRECT,
+                            avatarKey = userProfile.avatarKey,
+                            isOnline = true,
+                            size = 62.dp
                         )
-                        Text(
-                            text = "@${userProfile.username}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        if (userProfile.bio.isNotBlank()) {
-                            Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = userProfile.bio,
+                                text = userProfile.displayName,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "@${userProfile.username} • ${userProfile.phoneOrEmail}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (userProfile.bio.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = userProfile.bio,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        FilledTonalButton(
+                            onClick = { showEditProfileDialog = true },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Edit Profile")
+                        }
+                        OutlinedButton(
+                            onClick = onLogout,
+                            modifier = Modifier.weight(1f).testTag("settings_logout_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Log Out")
+                        }
+                    }
+                }
+            }
+
+            // Appearance & Chat Customization Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Filled.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Appearance & Chat Customization", style = MaterialTheme.typography.titleSmall)
+                    }
+                    Text("Theme Mode", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppThemeMode.entries.forEach { mode ->
+                            FilterChip(
+                                selected = userProfile.themeMode == mode,
+                                onClick = { onUpdateThemeMode(mode) },
+                                label = { Text(mode.label) },
+                                modifier = Modifier.testTag("theme_mode_${mode.id}")
+                            )
+                        }
+                    }
+                    Text("Default Chat Wallpaper", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChatWallpaper.entries.forEach { wp ->
+                            FilterChip(
+                                selected = userProfile.wallpaper == wp,
+                                onClick = { onUpdateWallpaper(wp) },
+                                label = { Text(wp.label) },
+                                modifier = Modifier.testTag("wallpaper_${wp.id}")
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showLanguageDialog = true }
+                            .padding(vertical = 4.dp)
+                            .testTag("settings_language_row"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Filled.Language, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text("Language", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Text(userProfile.language, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            // Privacy & Security Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Privacy & Security", style = MaterialTheme.typography.titleSmall)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showPinDialog = true }
+                            .padding(vertical = 4.dp)
+                            .testTag("settings_two_step_row"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Two-Step Verification", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (userProfile.twoStepPinEnabled) "PIN Lock Active" else "Off — tap to set PIN",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Storage,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.size(14.dp)
+                        Text(
+                            if (userProfile.twoStepPinEnabled) "On" else "Setup",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSessionsDialog = true }
+                            .padding(vertical = 4.dp)
+                            .testTag("settings_sessions_row"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Filled.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Active Sessions", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Text("${activeSessions.size} devices", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showBlockedDialog = true }
+                            .padding(vertical = 4.dp)
+                            .testTag("settings_blocked_row"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Filled.Block, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Blocked Users", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Text("${blockedRooms.size}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Filled.Sync, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column {
+                                Text("Contact Synchronization", style = MaterialTheme.typography.bodyMedium)
+                                Text("Keep friend list synced", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Switch(checked = userProfile.contactSyncEnabled, onCheckedChange = onToggleContactSync)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Read Receipts", style = MaterialTheme.typography.bodyMedium)
+                            Text("Show double ticks when messages are read", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = userProfile.readReceiptsEnabled, onCheckedChange = onToggleReadReceipts)
+                    }
+
+                    Text("Last Seen & Online", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Everyone", "Contacts", "Nobody").forEach { option ->
+                            FilterChip(
+                                selected = userProfile.lastSeenVisibility == option,
+                                onClick = { onUpdateLastSeenVisibility(option) },
+                                label = { Text(option) }
                             )
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                text = "Local Room Storage • No login required",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.tertiary
+                        }
+                    }
+
+                    Text("Default Disappearing Timer", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0 to "Off", 30 to "30s", 3600 to "1h", 86400 to "24h").forEach { (sec, label) ->
+                            FilterChip(
+                                selected = userProfile.defaultDisappearSeconds == sec,
+                                onClick = { onUpdateDefaultDisappearSeconds(sec) },
+                                label = { Text(label) }
                             )
                         }
                     }
@@ -207,16 +421,12 @@ fun SettingsScreen(
 
             // Notifications Card
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
@@ -224,10 +434,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             Icon(
                                 imageVector = if (userProfile.notificationsEnabled) Icons.Filled.NotificationsActive
                                 else Icons.Filled.NotificationsOff,
@@ -236,15 +443,8 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(12.dp))
                             Column {
-                                Text(
-                                    text = "Message Notifications",
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                                Text(
-                                    text = "System alerts for AI replies & updates",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("Message Notifications", style = MaterialTheme.typography.titleSmall)
+                                Text("System alerts for messages & updates", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         Switch(
@@ -265,21 +465,15 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Icon(
                                     imageVector = Icons.Filled.CheckCircle,
                                     contentDescription = null,
-                                    tint = if (hasOsPermission) MaterialTheme.colorScheme.tertiary
-                                    else MaterialTheme.colorScheme.error,
+                                    tint = if (hasOsPermission) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(Modifier.width(8.dp))
@@ -291,13 +485,9 @@ fun SettingsScreen(
                             }
                             if (!hasOsPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 FilledTonalButton(
-                                    onClick = {
-                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    },
+                                    onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                                     modifier = Modifier.testTag("grant_notification_permission_button")
-                                ) {
-                                    Text("Allow")
-                                }
+                                ) { Text("Allow") }
                             }
                         }
                     }
@@ -308,26 +498,15 @@ fun SettingsScreen(
                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             } else {
                                 val posted = onSendTestNotification()
-                                testStatus = if (posted) {
-                                    "Test notification posted to your Android shade."
-                                } else {
-                                    "Enable Android notification permission to preview alerts."
-                                }
+                                testStatus = if (posted) "Test notification posted to your Android shade."
+                                else "Enable Android notification permission to preview alerts."
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("test_notification_button")
-                    ) {
-                        Text("Send Test Alert")
-                    }
+                        modifier = Modifier.fillMaxWidth().testTag("test_notification_button")
+                    ) { Text("Send Test Alert") }
 
                     if (testStatus != null) {
-                        Text(
-                            text = testStatus.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Text(text = testStatus.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -335,38 +514,20 @@ fun SettingsScreen(
             // App Updates & GitHub Release Feed Card
             var repoDraft by remember(githubUpdateRepo) { mutableStateOf(githubUpdateRepo) }
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SystemUpdate,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = stringResource(R.string.update_section_title),
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                text = "Installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(stringResource(R.string.update_section_title), style = MaterialTheme.typography.titleSmall)
+                            Text("Installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
 
@@ -376,15 +537,8 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.update_auto_check_title),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                text = stringResource(R.string.update_auto_check_subtitle),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(stringResource(R.string.update_auto_check_title), style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.update_auto_check_subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(
                             checked = autoUpdateCheckEnabled,
@@ -405,44 +559,28 @@ fun SettingsScreen(
                             placeholder = { Text("e.g. username/Esosa") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("github_repo_input")
+                            modifier = Modifier.weight(1f).testTag("github_repo_input")
                         )
                         FilledTonalButton(
                             onClick = { onSaveGithubRepo(repoDraft) },
                             modifier = Modifier.testTag("save_github_repo_button")
-                        ) {
-                            Text("Save")
-                        }
+                        ) { Text("Save") }
                     }
 
                     Text(
                         text = updateStatusSummary,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (availableUpdate != null) {
-                            MaterialTheme.colorScheme.tertiary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        color = if (availableUpdate != null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         FilledTonalButton(
                             onClick = onCheckForUpdatesNow,
                             enabled = !isCheckingUpdates,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("check_updates_button")
+                            modifier = Modifier.weight(1f).testTag("check_updates_button")
                         ) {
                             if (isCheckingUpdates) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Checking…")
                             } else {
@@ -453,12 +591,8 @@ fun SettingsScreen(
                         if (availableUpdate != null) {
                             Button(
                                 onClick = onOpenUpdateDialog,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("download_update_settings_button")
-                            ) {
-                                Text("Update v${availableUpdate.versionName}")
-                            }
+                                modifier = Modifier.weight(1f).testTag("download_update_settings_button")
+                            ) { Text("Update v${availableUpdate.versionName}") }
                         }
                     }
                 }
@@ -474,6 +608,42 @@ fun SettingsScreen(
                 onUpdateLocalProfile(name, username, bio)
                 showEditProfileDialog = false
             }
+        )
+    }
+
+    if (showPinDialog) {
+        TwoStepPinDialog(
+            currentlyEnabled = userProfile.twoStepPinEnabled,
+            onDismiss = { showPinDialog = false },
+            onSave = { enabled, pin ->
+                onSetTwoStepPin(enabled, pin)
+                showPinDialog = false
+            }
+        )
+    }
+
+    if (showSessionsDialog) {
+        ActiveSessionsDialog(
+            sessions = activeSessions,
+            onDismiss = { showSessionsDialog = false },
+            onTerminateSession = onTerminateSession,
+            onTerminateAllOthers = onTerminateAllOtherSessions
+        )
+    }
+
+    if (showBlockedDialog) {
+        BlockedUsersDialog(
+            blockedRooms = blockedRooms,
+            onDismiss = { showBlockedDialog = false },
+            onUnblock = onUnblockRoom
+        )
+    }
+
+    if (showLanguageDialog) {
+        LanguagePickerDialog(
+            currentLanguage = userProfile.language,
+            onDismiss = { showLanguageDialog = false },
+            onSelect = onUpdateLanguage
         )
     }
 }
@@ -498,9 +668,7 @@ private fun EditLocalProfileDialog(
                     onValueChange = { if (it.length <= 40) displayName = it },
                     label = { Text("Display Name") },
                     singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("profile_name_input")
+                    modifier = Modifier.fillMaxWidth().testTag("profile_name_input")
                 )
                 OutlinedTextField(
                     value = username,
@@ -508,18 +676,14 @@ private fun EditLocalProfileDialog(
                     label = { Text("Username") },
                     prefix = { Text("@") },
                     singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("profile_username_input")
+                    modifier = Modifier.fillMaxWidth().testTag("profile_username_input")
                 )
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { if (it.length <= 120) bio = it },
                     label = { Text("Bio") },
                     maxLines = 2,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("profile_bio_input")
+                    modifier = Modifier.fillMaxWidth().testTag("profile_bio_input")
                 )
             }
         },
@@ -528,9 +692,7 @@ private fun EditLocalProfileDialog(
                 onClick = { onSave(displayName, username, bio) },
                 enabled = displayName.isNotBlank(),
                 modifier = Modifier.testTag("save_profile_button")
-            ) {
-                Text("Save")
-            }
+            ) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

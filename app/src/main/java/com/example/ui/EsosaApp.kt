@@ -2,8 +2,14 @@ package com.example.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,16 +19,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Settings
@@ -62,6 +73,7 @@ import com.example.BuildConfig
 import com.example.R
 import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
+import com.example.core.UiState
 import com.example.data.audio.VoiceAudioStreamer
 import com.example.data.local.EsosaDatabase
 import com.example.data.model.AppUpdateInfo
@@ -71,10 +83,15 @@ import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.LiveVoiceRepository
 import com.example.notifications.EsosaNotificationManager
+import com.example.ui.components.EsosaBrandLogo
+import com.example.ui.screens.ActiveCallOverlay
 import com.example.ui.screens.AiChatScreen
+import com.example.ui.screens.AuthOnboardingScreen
+import com.example.ui.screens.CallsScreen
 import com.example.ui.screens.LiveVoiceScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.theme.EsosaTheme
 import com.example.ui.viewmodel.AiChatViewModel
 import com.example.ui.viewmodel.AppUpdateViewModel
 import com.example.ui.viewmodel.LiveVoiceViewModel
@@ -87,6 +104,7 @@ enum class EsosaTab(
     val testTag: String
 ) {
     MESSAGES("Chats", Icons.Filled.Forum, Icons.Outlined.Forum, "nav_messages"),
+    CALLS("Calls", Icons.Filled.Call, Icons.Outlined.Call, "nav_calls"),
     AI_CHAT("AI Bot", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_ai_chat"),
     LIVE_VOICE("Voice", Icons.Filled.GraphicEq, Icons.Outlined.GraphicEq, "nav_live_voice"),
     SETTINGS("Settings", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings")
@@ -99,64 +117,6 @@ fun EsosaApp(
     initialShowUpdatePrompt: Boolean = false
 ) {
     val context = LocalContext.current
-
-    val appUpdateViewModel: AppUpdateViewModel = viewModel(
-        key = "app_update_checker",
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[APPLICATION_KEY])
-                AppUpdateViewModel(
-                    repository = AppUpdateRepository(),
-                    preferences = AppUpdatePreferences(app),
-                    notificationManager = EsosaNotificationManager(app)
-                )
-            }
-        }
-    )
-
-    val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
-    val showUpdateDialog by appUpdateViewModel.showUpdateDialog.collectAsStateWithLifecycle()
-
-    LaunchedEffect(Unit) {
-        appUpdateViewModel.checkForUpdatesOnOpen()
-    }
-
-    LaunchedEffect(initialShowUpdatePrompt, availableUpdate) {
-        if (initialShowUpdatePrompt && availableUpdate != null) {
-            appUpdateViewModel.openUpdateDialog()
-        }
-    }
-
-    EsosaChatShell(
-        initialRoomId = initialRoomId,
-        initialTab = initialTab,
-        appUpdateViewModel = appUpdateViewModel
-    )
-
-    val pendingUpdate = availableUpdate
-    if (showUpdateDialog && pendingUpdate != null) {
-        AppUpdateDialog(
-            update = pendingUpdate,
-            onDownload = {
-                appUpdateViewModel.dismissUpdateDialog()
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pendingUpdate.downloadUrl))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            },
-            onLater = { appUpdateViewModel.dismissUpdateDialog() },
-            onSkip = { appUpdateViewModel.skipAvailableUpdate() }
-        )
-    }
-}
-
-@Composable
-private fun EsosaChatShell(
-    initialRoomId: String?,
-    initialTab: String?,
-    appUpdateViewModel: AppUpdateViewModel
-) {
-    val context = LocalContext.current
-    val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
     val roomsViewModel: RoomsViewModel = viewModel(
         key = "telegram_rooms_local",
@@ -172,6 +132,81 @@ private fun EsosaChatShell(
             }
         }
     )
+
+    val appUpdateViewModel: AppUpdateViewModel = viewModel(
+        key = "app_update_checker",
+        factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY])
+                AppUpdateViewModel(
+                    repository = AppUpdateRepository(),
+                    preferences = AppUpdatePreferences(app),
+                    notificationManager = EsosaNotificationManager(app)
+                )
+            }
+        }
+    )
+
+    val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
+    val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
+    val showUpdateDialog by appUpdateViewModel.showUpdateDialog.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        appUpdateViewModel.checkForUpdatesOnOpen()
+    }
+
+    LaunchedEffect(initialShowUpdatePrompt, availableUpdate) {
+        if (initialShowUpdatePrompt && availableUpdate != null) {
+            appUpdateViewModel.openUpdateDialog()
+        }
+    }
+
+    EsosaTheme(themeMode = userProfile.themeMode) {
+        if (!userProfile.isAuthenticated) {
+            AuthOnboardingScreen(
+                existingProfile = userProfile,
+                onCompleteSignUp = { method, phoneOrEmail, name, username, bio, avatar ->
+                    roomsViewModel.completeOnboarding(method, phoneOrEmail, name, username, bio, avatar)
+                },
+                onCompleteLogin = { method, phoneOrEmail ->
+                    roomsViewModel.signInExisting(method, phoneOrEmail)
+                }
+            )
+        } else {
+            EsosaChatShell(
+                initialRoomId = initialRoomId,
+                initialTab = initialTab,
+                roomsViewModel = roomsViewModel,
+                appUpdateViewModel = appUpdateViewModel
+            )
+        }
+
+        val pendingUpdate = availableUpdate
+        if (showUpdateDialog && pendingUpdate != null) {
+            AppUpdateDialog(
+                update = pendingUpdate,
+                onDownload = {
+                    appUpdateViewModel.dismissUpdateDialog()
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pendingUpdate.downloadUrl))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                },
+                onLater = { appUpdateViewModel.dismissUpdateDialog() },
+                onSkip = { appUpdateViewModel.skipAvailableUpdate() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun EsosaChatShell(
+    initialRoomId: String?,
+    initialTab: String?,
+    roomsViewModel: RoomsViewModel,
+    appUpdateViewModel: AppUpdateViewModel
+) {
+    val context = LocalContext.current
+    val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
     val aiChatViewModel: AiChatViewModel = viewModel(
         key = "telegram_ai_local",
@@ -222,6 +257,13 @@ private fun EsosaChatShell(
     }
 
     val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
+    val activeSessions by roomsViewModel.activeSessions.collectAsStateWithLifecycle()
+    val stories by roomsViewModel.stories.collectAsStateWithLifecycle()
+    val callLogs by roomsViewModel.callLogs.collectAsStateWithLifecycle()
+    val activeCallState by roomsViewModel.activeCallState.collectAsStateWithLifecycle()
+    val channelComments by roomsViewModel.channelComments.collectAsStateWithLifecycle()
+    val inAppBanner by roomsViewModel.inAppBanner.collectAsStateWithLifecycle()
+
     val roomsState by roomsViewModel.roomsState.collectAsStateWithLifecycle()
     val selectedRoomId by roomsViewModel.selectedRoomId.collectAsStateWithLifecycle()
     val activeRoom by roomsViewModel.activeRoom.collectAsStateWithLifecycle()
@@ -236,6 +278,8 @@ private fun EsosaChatShell(
     val isSendingMessage by roomsViewModel.isSendingMessage.collectAsStateWithLifecycle()
     val photoUploadProgress by roomsViewModel.photoUploadProgress.collectAsStateWithLifecycle()
     val photoUploadPreviewUri by roomsViewModel.photoUploadPreviewUri.collectAsStateWithLifecycle()
+    val replyingToMessage by roomsViewModel.replyingToMessage.collectAsStateWithLifecycle()
+    val editingMessage by roomsViewModel.editingMessage.collectAsStateWithLifecycle()
 
     val aiThreadsState by aiChatViewModel.threadsState.collectAsStateWithLifecycle()
     val selectedAiThreadId by aiChatViewModel.selectedThreadId.collectAsStateWithLifecycle()
@@ -261,6 +305,9 @@ private fun EsosaChatShell(
     val githubUpdateRepo by appUpdateViewModel.githubRepo.collectAsStateWithLifecycle()
     val updateStatusSummary by appUpdateViewModel.statusSummary.collectAsStateWithLifecycle()
 
+    val allRooms = (roomsState as? UiState.Success)?.data.orEmpty()
+    val blockedRooms = remember(allRooms) { allRooms.filter { it.isBlocked } }
+
     LaunchedEffect(selectedTab) {
         roomsViewModel.setOnMessagesScreen(selectedTab == EsosaTab.MESSAGES)
         aiChatViewModel.setTabActive(selectedTab == EsosaTab.AI_CHAT)
@@ -270,96 +317,21 @@ private fun EsosaChatShell(
         aiChatViewModel.setNotificationsEnabled(userProfile.notificationsEnabled)
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val useRail = maxWidth >= 700.dp
+    Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val useRail = maxWidth >= 700.dp
 
-        Scaffold(
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                if (!useRail && !(selectedTab == EsosaTab.MESSAGES && selectedRoomId != null)) {
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        windowInsets = WindowInsets.navigationBars
-                    ) {
-                        EsosaTab.entries.forEach { tab ->
-                            val isSelected = selectedTab == tab
-                            NavigationBarItem(
-                                selected = isSelected,
-                                onClick = { selectedTab = tab },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                        contentDescription = tab.label
-                                    )
-                                },
-                                label = { Text(tab.label) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                                ),
-                                modifier = Modifier.testTag(tab.testTag)
-                            )
-                        }
-                    }
-                }
-            }
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                val bannerUpdate = availableUpdate
-                if (bannerUpdate != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { appUpdateViewModel.openUpdateDialog() }
-                            .testTag("app_update_banner")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SystemUpdate,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Update v${bannerUpdate.versionName} available (${bannerUpdate.sourceLabel})",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
-                            Text(
-                                text = "Download",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-
-                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (useRail) {
-                        NavigationRail(
-                            containerColor = MaterialTheme.colorScheme.surface
+            Scaffold(
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                bottomBar = {
+                    if (!useRail && !(selectedTab == EsosaTab.MESSAGES && selectedRoomId != null)) {
+                        NavigationBar(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            windowInsets = WindowInsets.navigationBars
                         ) {
                             EsosaTab.entries.forEach { tab ->
                                 val isSelected = selectedTab == tab
-                                NavigationRailItem(
+                                NavigationBarItem(
                                     selected = isSelected,
                                     onClick = { selectedTab = tab },
                                     icon = {
@@ -369,132 +341,312 @@ private fun EsosaChatShell(
                                         )
                                     },
                                     label = { Text(tab.label) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
                                     modifier = Modifier.testTag(tab.testTag)
                                 )
                             }
                         }
                     }
-
-                    when (selectedTab) {
-                        EsosaTab.MESSAGES -> MessagesScreen(
-                            currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
-                            roomsState = roomsState,
-                            selectedRoomId = selectedRoomId,
-                            activeRoom = activeRoom,
-                            activeMessagesState = activeMessagesState,
-                            typingUsers = roomTypingUsers,
-                            searchQuery = roomSearchQuery,
-                            matchingMessages = matchingMessages,
-                            isSearchingMessages = isSearchingMessages,
-                            highlightedMessageId = highlightedMessageId,
-                            actionError = roomActionError,
-                            isBusy = isRoomBusy,
-                            isSendingMessage = isSendingMessage,
-                            photoUploadProgress = photoUploadProgress,
-                            photoUploadPreviewUri = photoUploadPreviewUri,
-                            onOpenRoom = { roomsViewModel.openRoom(it) },
-                            onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
-                            onOpenSearchResult = { roomId, msgId ->
-                                roomsViewModel.openSearchResult(roomId, msgId)
-                            },
-                            onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
-                            onCreateRoom = { title, topic, kind ->
-                                roomsViewModel.createRoom(title, topic, kind)
-                            },
-                            onTogglePinRoom = { roomId -> roomsViewModel.togglePinRoom(roomId) },
-                            onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
-                            onSendCapturedPhoto = { room, uri, caption, cleanup ->
-                                roomsViewModel.sendPhotoMessage(
-                                    room = room,
-                                    photoUri = uri,
-                                    caption = caption,
-                                    onCleanup = cleanup
+                }
+            ) { innerPadding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                ) {
+                    val bannerUpdate = availableUpdate
+                    if (bannerUpdate != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { appUpdateViewModel.openUpdateDialog() }
+                                .testTag("app_update_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Filled.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Update v${bannerUpdate.versionName} available (${bannerUpdate.sourceLabel})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                                Text(
+                                    text = "Download",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                            },
-                            onReportError = { roomsViewModel.reportActionError(it) },
-                            onToggleReaction = { roomId, msgId, emoji ->
-                                roomsViewModel.toggleReaction(roomId, msgId, emoji)
-                            },
-                            onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
-                            onDeleteRoomMessage = { rId, msg ->
-                                roomsViewModel.deleteMessage(rId, msg.id, msg.storagePath)
-                            },
-                            onDeleteRoom = { room -> roomsViewModel.deleteRoom(room) },
-                            onClearError = { roomsViewModel.clearActionError() },
-                            modifier = Modifier.weight(1f)
-                        )
+                            }
+                        }
+                    }
 
-                        EsosaTab.AI_CHAT -> AiChatScreen(
-                            currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
-                            threadsState = aiThreadsState,
-                            selectedThreadId = selectedAiThreadId,
-                            messagesState = aiMessagesState,
-                            streamingReply = aiStreamingReply,
-                            isGenerating = aiGenerating,
-                            errorBanner = aiErrorBanner,
-                            onSelectThread = { aiChatViewModel.selectThread(it) },
-                            onCreateThread = { persona -> aiChatViewModel.createThread(persona) },
-                            onSwitchPersona = { persona -> aiChatViewModel.switchPersona(persona) },
-                            onDeleteThread = { aiChatViewModel.deleteThread(it) },
-                            onSendPrompt = { prompt, thread, msgs ->
-                                aiChatViewModel.sendPrompt(prompt, thread, msgs)
-                            },
-                            onToggleReaction = { threadId, msgId, emoji ->
-                                aiChatViewModel.toggleReaction(threadId, msgId, emoji)
-                            },
-                            onClearError = { aiChatViewModel.clearError() },
-                            modifier = Modifier.weight(1f)
-                        )
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        if (useRail) {
+                            NavigationRail(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                header = {
+                                    EsosaBrandLogo(size = 34.dp, modifier = Modifier.padding(top = 8.dp))
+                                }
+                            ) {
+                                EsosaTab.entries.forEach { tab ->
+                                    val isSelected = selectedTab == tab
+                                    NavigationRailItem(
+                                        selected = isSelected,
+                                        onClick = { selectedTab = tab },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
+                                                contentDescription = tab.label
+                                            )
+                                        },
+                                        label = { Text(tab.label) },
+                                        modifier = Modifier.testTag(tab.testTag)
+                                    )
+                                }
+                            }
+                        }
 
-                        EsosaTab.LIVE_VOICE -> LiveVoiceScreen(
-                            status = liveStatus,
-                            statusMessage = liveStatusMessage,
-                            transcripts = liveTranscripts,
-                            liveThreadsState = liveThreadsState,
-                            selectedThreadId = selectedLiveThreadId,
-                            isModelSpeaking = liveModelSpeaking,
-                            isMuted = liveMuted,
-                            isSpeakerOn = liveSpeakerOn,
-                            micLevel = liveMicLevel,
-                            isAecEnabled = liveAecEnabled,
-                            onStartConversation = { liveVoiceViewModel.startConversation() },
-                            onStopConversation = { liveVoiceViewModel.stopConversation() },
-                            onToggleMute = { liveVoiceViewModel.toggleMute() },
-                            onToggleSpeaker = { liveVoiceViewModel.toggleSpeakerphone() },
-                            onSendTextDuringLive = { liveVoiceViewModel.sendTextDuringLive(it) },
-                            onClearTranscripts = { liveVoiceViewModel.clearTranscripts() },
-                            onSelectThread = { liveVoiceViewModel.selectThread(it) },
-                            onStartNewThread = { liveVoiceViewModel.startNewThread() },
-                            onDeleteThread = { liveVoiceViewModel.deleteThread(it) },
-                            modifier = Modifier.weight(1f)
-                        )
+                        when (selectedTab) {
+                            EsosaTab.MESSAGES -> MessagesScreen(
+                                currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
+                                roomsState = roomsState,
+                                selectedRoomId = selectedRoomId,
+                                activeRoom = activeRoom,
+                                activeMessagesState = activeMessagesState,
+                                userProfile = userProfile,
+                                stories = stories,
+                                typingUsers = roomTypingUsers,
+                                searchQuery = roomSearchQuery,
+                                matchingMessages = matchingMessages,
+                                isSearchingMessages = isSearchingMessages,
+                                highlightedMessageId = highlightedMessageId,
+                                actionError = roomActionError,
+                                isBusy = isRoomBusy,
+                                isSendingMessage = isSendingMessage,
+                                photoUploadProgress = photoUploadProgress,
+                                photoUploadPreviewUri = photoUploadPreviewUri,
+                                replyingToMessage = replyingToMessage,
+                                editingMessage = editingMessage,
+                                channelCommentsMap = channelComments,
+                                onOpenRoom = { roomsViewModel.openRoom(it) },
+                                onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
+                                onOpenSearchResult = { roomId, msgId ->
+                                    roomsViewModel.openSearchResult(roomId, msgId)
+                                },
+                                onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
+                                onCreateRoom = { title, topic, kind ->
+                                    roomsViewModel.createRoom(title, topic, kind)
+                                },
+                                onTogglePinRoom = { roomsViewModel.togglePinRoom(it) },
+                                onToggleArchiveRoom = { roomsViewModel.toggleArchiveRoom(it) },
+                                onToggleMuteRoom = { roomsViewModel.toggleMuteRoom(it) },
+                                onToggleBlockRoom = { rId, blocked -> roomsViewModel.setRoomBlocked(rId, blocked) },
+                                onReportRoom = { room -> roomsViewModel.showBanner("Reported ${room.title}") },
+                                onToggleChannelSubscribe = { roomsViewModel.toggleChannelSubscription(it) },
+                                onAddGroupMember = { rId, name -> roomsViewModel.addGroupMember(rId, name) },
+                                onRemoveGroupMember = { rId, name -> roomsViewModel.removeGroupMember(rId, name) },
+                                onToggleGroupAdmin = { rId, name -> roomsViewModel.toggleGroupAdmin(rId, name) },
+                                onUpdateGroupDescription = { rId, desc -> roomsViewModel.updateGroupDescription(rId, desc) },
+                                onSetDisappearingTimer = { rId, sec -> roomsViewModel.setRoomDisappearingTimer(rId, sec) },
+                                onSetRoomWallpaper = { rId, wpId -> roomsViewModel.setRoomWallpaper(rId, wpId) },
+                                onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
+                                onScheduleMessage = { room, text, millis ->
+                                    roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)
+                                },
+                                onSendVoiceNote = { room, sec -> roomsViewModel.sendVoiceNote(room, sec) },
+                                onSendStickerOrGif = { room, text, isGif, lbl ->
+                                    roomsViewModel.sendStickerOrGif(room, text, isGif, lbl)
+                                },
+                                onSendDocumentAttachment = { room, uri ->
+                                    roomsViewModel.sendDocumentAttachment(room, uri)
+                                },
+                                onSendCapturedPhoto = { room, uri, caption, cleanup ->
+                                    roomsViewModel.sendPhotoMessage(
+                                        room = room,
+                                        photoUri = uri,
+                                        caption = caption,
+                                        onCleanup = cleanup
+                                    )
+                                },
+                                onReplyMessage = { roomsViewModel.startReply(it) },
+                                onEditMessage = { roomsViewModel.startEdit(it) },
+                                onCancelComposerMode = { roomsViewModel.cancelComposerMode() },
+                                onForwardMessage = { msg, target -> roomsViewModel.forwardMessage(msg, target) },
+                                onPinMessage = { rId, msg -> roomsViewModel.pinMessageInRoom(rId, msg) },
+                                onAddChannelComment = { rId, pId, txt ->
+                                    roomsViewModel.addChannelComment(rId, pId, txt)
+                                },
+                                onStartCall = { room, callType ->
+                                    roomsViewModel.startCall(room.id, room.title, room.avatarKey, callType)
+                                },
+                                onOpenStory = { story -> roomsViewModel.markStoryViewed(story.id) },
+                                onPostStory = { text -> roomsViewModel.postMyStory(text) },
+                                onReportError = { roomsViewModel.reportActionError(it) },
+                                onToggleReaction = { roomId, msgId, emoji ->
+                                    roomsViewModel.toggleReaction(roomId, msgId, emoji)
+                                },
+                                onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
+                                onDeleteRoomMessage = { rId, msg ->
+                                    roomsViewModel.deleteMessage(rId, msg.id, msg.storagePath)
+                                },
+                                onDeleteRoom = { room -> roomsViewModel.deleteRoom(room) },
+                                onClearError = { roomsViewModel.clearActionError() },
+                                modifier = Modifier.weight(1f)
+                            )
 
-                        EsosaTab.SETTINGS -> SettingsScreen(
-                            userProfile = userProfile,
-                            notificationManager = notificationManager,
-                            availableUpdate = availableUpdate,
-                            updateStatusSummary = updateStatusSummary,
-                            isCheckingUpdates = isCheckingUpdates,
-                            autoUpdateCheckEnabled = autoUpdateCheckEnabled,
-                            githubUpdateRepo = githubUpdateRepo,
-                            onUpdateLocalProfile = { name, username, bio ->
-                                roomsViewModel.updateLocalProfile(name, username, bio)
-                            },
-                            onToggleNotifications = { roomsViewModel.setNotificationsEnabled(it) },
-                            onSendTestNotification = { roomsViewModel.sendTestNotification() },
-                            onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
-                            onSaveGithubRepo = { repo ->
-                                appUpdateViewModel.saveGithubRepository(repo)
-                            },
-                            onCheckForUpdatesNow = {
-                                appUpdateViewModel.checkForUpdatesNow()
-                            },
-                            onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
-                            modifier = Modifier.weight(1f)
-                        )
+                            EsosaTab.CALLS -> CallsScreen(
+                                callLogs = callLogs,
+                                rooms = allRooms,
+                                onStartCall = { peerId, peerName, avatarKey, callType ->
+                                    roomsViewModel.startCall(peerId, peerName, avatarKey, callType)
+                                },
+                                onSimulateIncomingCall = { roomsViewModel.simulateIncomingCall() },
+                                onDeleteCallLog = { roomsViewModel.deleteCallLog(it) },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            EsosaTab.AI_CHAT -> AiChatScreen(
+                                currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
+                                threadsState = aiThreadsState,
+                                selectedThreadId = selectedAiThreadId,
+                                messagesState = aiMessagesState,
+                                streamingReply = aiStreamingReply,
+                                isGenerating = aiGenerating,
+                                errorBanner = aiErrorBanner,
+                                onSelectThread = { aiChatViewModel.selectThread(it) },
+                                onCreateThread = { persona -> aiChatViewModel.createThread(persona) },
+                                onSwitchPersona = { persona -> aiChatViewModel.switchPersona(persona) },
+                                onDeleteThread = { aiChatViewModel.deleteThread(it) },
+                                onSendPrompt = { prompt, thread, msgs ->
+                                    aiChatViewModel.sendPrompt(prompt, thread, msgs)
+                                },
+                                onToggleReaction = { threadId, msgId, emoji ->
+                                    aiChatViewModel.toggleReaction(threadId, msgId, emoji)
+                                },
+                                onClearError = { aiChatViewModel.clearError() },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            EsosaTab.LIVE_VOICE -> LiveVoiceScreen(
+                                status = liveStatus,
+                                statusMessage = liveStatusMessage,
+                                transcripts = liveTranscripts,
+                                liveThreadsState = liveThreadsState,
+                                selectedThreadId = selectedLiveThreadId,
+                                isModelSpeaking = liveModelSpeaking,
+                                isMuted = liveMuted,
+                                isSpeakerOn = liveSpeakerOn,
+                                micLevel = liveMicLevel,
+                                isAecEnabled = liveAecEnabled,
+                                onStartConversation = { liveVoiceViewModel.startConversation() },
+                                onStopConversation = { liveVoiceViewModel.stopConversation() },
+                                onToggleMute = { liveVoiceViewModel.toggleMute() },
+                                onToggleSpeaker = { liveVoiceViewModel.toggleSpeakerphone() },
+                                onSendTextDuringLive = { liveVoiceViewModel.sendTextDuringLive(it) },
+                                onClearTranscripts = { liveVoiceViewModel.clearTranscripts() },
+                                onSelectThread = { liveVoiceViewModel.selectThread(it) },
+                                onStartNewThread = { liveVoiceViewModel.startNewThread() },
+                                onDeleteThread = { liveVoiceViewModel.deleteThread(it) },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            EsosaTab.SETTINGS -> SettingsScreen(
+                                userProfile = userProfile,
+                                notificationManager = notificationManager,
+                                availableUpdate = availableUpdate,
+                                updateStatusSummary = updateStatusSummary,
+                                isCheckingUpdates = isCheckingUpdates,
+                                autoUpdateCheckEnabled = autoUpdateCheckEnabled,
+                                githubUpdateRepo = githubUpdateRepo,
+                                activeSessions = activeSessions,
+                                blockedRooms = blockedRooms,
+                                onUpdateLocalProfile = { name, username, bio ->
+                                    roomsViewModel.updateLocalProfile(name, username, bio)
+                                },
+                                onToggleNotifications = { roomsViewModel.setNotificationsEnabled(it) },
+                                onSendTestNotification = { roomsViewModel.sendTestNotification() },
+                                onUpdateThemeMode = { roomsViewModel.updateThemeMode(it) },
+                                onUpdateWallpaper = { roomsViewModel.updateWallpaper(it) },
+                                onUpdateLanguage = { roomsViewModel.updateLanguage(it) },
+                                onSetTwoStepPin = { en, pin -> roomsViewModel.setTwoStepPin(en, pin) },
+                                onToggleContactSync = { roomsViewModel.setContactSyncEnabled(it) },
+                                onToggleReadReceipts = { roomsViewModel.setReadReceiptsEnabled(it) },
+                                onUpdateLastSeenVisibility = { roomsViewModel.setLastSeenVisibility(it) },
+                                onUpdateDefaultDisappearSeconds = { roomsViewModel.setDefaultDisappearSeconds(it) },
+                                onTerminateSession = { roomsViewModel.terminateSession(it) },
+                                onTerminateAllOtherSessions = { roomsViewModel.terminateAllOtherSessions() },
+                                onUnblockRoom = { roomsViewModel.setRoomBlocked(it, false) },
+                                onLogout = { roomsViewModel.logout() },
+                                onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
+                                onSaveGithubRepo = { repo -> appUpdateViewModel.saveGithubRepository(repo) },
+                                onCheckForUpdatesNow = { appUpdateViewModel.checkForUpdatesNow() },
+                                onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
+        }
+
+        // In-app notification toast banner
+        AnimatedVisibility(
+            visible = inAppBanner != null,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.inverseSurface,
+                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .clickable { roomsViewModel.dismissBanner() }
+                    .testTag("in_app_notification_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Filled.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(text = inAppBanner.orEmpty(), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+
+        // Full-Screen Voice/Video Call Overlay
+        val callState = activeCallState
+        if (callState != null) {
+            ActiveCallOverlay(
+                callState = callState,
+                onAcceptIncoming = { roomsViewModel.acceptIncomingCall() },
+                onToggleMute = { roomsViewModel.toggleCallMute() },
+                onToggleSpeaker = { roomsViewModel.toggleCallSpeaker() },
+                onToggleCamera = { roomsViewModel.toggleCallCamera() },
+                onEndCall = { roomsViewModel.endCall() }
+            )
         }
     }
 }
@@ -515,9 +667,7 @@ private fun AppUpdateDialog(
                 tint = MaterialTheme.colorScheme.primary
             )
         },
-        title = {
-            Text(stringResource(R.string.update_dialog_title))
-        },
+        title = { Text(stringResource(R.string.update_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Surface(
@@ -543,9 +693,7 @@ private fun AppUpdateDialog(
             Button(
                 onClick = onDownload,
                 modifier = Modifier.testTag("download_app_update_button")
-            ) {
-                Text(stringResource(R.string.update_download_action))
-            }
+            ) { Text(stringResource(R.string.update_download_action)) }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -553,15 +701,11 @@ private fun AppUpdateDialog(
                     TextButton(
                         onClick = onSkip,
                         modifier = Modifier.testTag("skip_app_update_button")
-                    ) {
-                        Text(stringResource(R.string.update_skip_action))
-                    }
+                    ) { Text(stringResource(R.string.update_skip_action)) }
                     TextButton(
                         onClick = onLater,
                         modifier = Modifier.testTag("later_app_update_button")
-                    ) {
-                        Text(stringResource(R.string.update_later_action))
-                    }
+                    ) { Text(stringResource(R.string.update_later_action)) }
                 }
             }
         },

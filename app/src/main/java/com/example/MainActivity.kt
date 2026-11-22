@@ -11,7 +11,6 @@ import androidx.compose.runtime.setValue
 import com.example.core.configureAppCheck
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.EsosaApp
-import com.example.ui.theme.EsosaTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -29,13 +28,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            EsosaTheme {
-                EsosaApp(
-                    initialRoomId = deepLinkRoomId,
-                    initialTab = deepLinkTab,
-                    initialShowUpdatePrompt = deepLinkShowUpdatePrompt
-                )
-            }
+            EsosaApp(
+                initialRoomId = deepLinkRoomId,
+                initialTab = deepLinkTab,
+                initialShowUpdatePrompt = deepLinkShowUpdatePrompt
+            )
         }
     }
 

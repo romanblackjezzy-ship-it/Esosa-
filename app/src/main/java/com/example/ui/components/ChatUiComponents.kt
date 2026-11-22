@@ -8,7 +8,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,8 +60,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,12 +75,15 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.data.model.ChatKind
+import com.example.data.model.ChatWallpaper
 import com.example.data.model.EsosaReactions
 import com.example.ui.theme.TelegramAvatarPairs
 import com.example.ui.theme.TelegramAzure
 import com.example.ui.theme.TelegramAzureDeep
 import com.example.ui.theme.telegramColors
+import com.example.ui.theme.wallpaperCanvasAndPattern
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -101,6 +108,13 @@ fun formatRelativeThreadTime(millis: Long): String {
             SimpleDateFormat("MMM d", Locale.getDefault()).format(date)
         else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
     }
+}
+
+fun formatDurationTimer(totalSeconds: Int): String {
+    val safe = totalSeconds.coerceAtLeast(0)
+    val mins = safe / 60
+    val secs = safe % 60
+    return "%d:%02d".format(mins, secs)
 }
 
 fun messageDayKey(millis: Long): String {
@@ -131,69 +145,103 @@ private fun isYesterday(now: Calendar, target: Calendar): Boolean {
     return isSameDay(yesterday, target)
 }
 
+fun resolveAvatarDrawableRes(avatarKey: String): Int? = when (avatarKey) {
+    "maya" -> R.drawable.img_avatar_maya
+    "liam" -> R.drawable.img_avatar_liam
+    "esosa_bot" -> R.drawable.img_esosa_avatar
+    "channel_banner" -> R.drawable.img_channel_banner
+    else -> null
+}
+
 @Composable
 fun TelegramAvatarCircle(
     title: String,
     seedKey: String = title,
     chatKind: ChatKind = ChatKind.GROUP,
     size: Dp = 52.dp,
+    avatarKey: String = "",
+    isOnline: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (chatKind == ChatKind.SAVED) {
-        Box(
-            modifier = modifier
-                .size(size)
-                .clip(CircleShape)
-                .background(
-                    Brush.verticalGradient(listOf(TelegramAzure, TelegramAzureDeep))
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Bookmark,
+    val telegram = MaterialTheme.telegramColors
+    val resId = resolveAvatarDrawableRes(avatarKey)
+    Box(modifier = modifier.size(size)) {
+        if (chatKind == ChatKind.SAVED) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(Brush.verticalGradient(listOf(TelegramAzure, TelegramAzureDeep))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Bookmark,
+                    contentDescription = title,
+                    tint = Color.White,
+                    modifier = Modifier.size(size * 0.48f)
+                )
+            }
+        } else if (resId != null) {
+            Image(
+                painter = painterResource(id = resId),
                 contentDescription = title,
-                tint = Color.White,
-                modifier = Modifier.size(size * 0.48f)
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+            )
+        } else {
+            val colorPair = TelegramAvatarPairs[abs(seedKey.hashCode()) % TelegramAvatarPairs.size]
+            val initials = title
+                .trim()
+                .split(Regex("\\s+"))
+                .filter { it.isNotEmpty() }
+                .take(2)
+                .joinToString("") { it.first().uppercaseChar().toString() }
+                .ifEmpty { "E" }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(Brush.verticalGradient(listOf(colorPair.first, colorPair.second))),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initials,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (size.value * 0.36f).sp
+                )
+            }
+        }
+
+        if (isOnline && chatKind != ChatKind.SAVED) {
+            val dotSize = (size * 0.26f).coerceIn(10.dp, 16.dp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(dotSize)
+                    .clip(CircleShape)
+                    .background(telegram.onlineDot)
+                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
             )
         }
-        return
-    }
-
-    val colorPair = TelegramAvatarPairs[abs(seedKey.hashCode()) % TelegramAvatarPairs.size]
-    val initials = title
-        .trim()
-        .split(Regex("\\s+"))
-        .filter { it.isNotEmpty() }
-        .take(2)
-        .joinToString("") { it.first().uppercaseChar().toString() }
-        .ifEmpty { "E" }
-
-    Box(
-        modifier = modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(colorPair.first, colorPair.second))),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = initials,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = (size.value * 0.36f).sp
-        )
     }
 }
 
 @Composable
 fun TelegramWallpaperBackground(
+    wallpaper: ChatWallpaper = ChatWallpaper.CLASSIC,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
     val telegram = MaterialTheme.telegramColors
-    val patternColor = telegram.patternTint.copy(alpha = if (telegram.isDark) 0.42f else 0.55f)
+    val (canvasColor, rawPatternTint) = wallpaperCanvasAndPattern(wallpaper, telegram.isDark)
+    val patternColor = rawPatternTint.copy(alpha = if (telegram.isDark) 0.44f else 0.56f)
     Box(
         modifier = modifier
-            .background(telegram.chatCanvas)
+            .background(canvasColor)
             .drawBehind {
                 val step = 52.dp.toPx()
                 val cols = (size.width / step).toInt() + 2
