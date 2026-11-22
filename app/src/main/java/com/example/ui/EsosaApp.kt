@@ -2,6 +2,8 @@ package com.example.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -37,8 +39,6 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -49,8 +49,8 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,21 +62,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.example.BuildConfig
-import com.example.R
 import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.audio.VoiceAudioStreamer
 import com.example.data.local.EsosaDatabase
-import com.example.data.model.AppUpdateInfo
+import com.example.data.model.InAppInstallStage
 import com.example.data.repository.AiChatRepository
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
@@ -84,6 +84,8 @@ import com.example.data.repository.ChatRepository
 import com.example.data.repository.LiveVoiceRepository
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.EsosaBrandLogo
+import com.example.ui.components.FlexibleUpdateFloatingBar
+import com.example.ui.components.GlassUpdatePromptOverlay
 import com.example.ui.screens.ActiveCallOverlay
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthOnboardingScreen
@@ -139,6 +141,7 @@ fun EsosaApp(
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
                 AppUpdateViewModel(
+                    appContext = app,
                     repository = AppUpdateRepository(),
                     preferences = AppUpdatePreferences(app),
                     notificationManager = EsosaNotificationManager(app)
@@ -147,9 +150,42 @@ fun EsosaApp(
         }
     )
 
+    val playUpdateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        appUpdateViewModel.onPlayUpdateFlowResult(result.resultCode)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, playUpdateLauncher) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                appUpdateViewModel.onAppResumed(playUpdateLauncher)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val showUpdateDialog by appUpdateViewModel.showUpdateDialog.collectAsStateWithLifecycle()
+    val installStage by appUpdateViewModel.installStage.collectAsStateWithLifecycle()
+    val updateError by appUpdateViewModel.updateError.collectAsStateWithLifecycle()
+
+    val openVerifiedHttpsUrl: (String) -> Unit = remember(context) {
+        { url ->
+            if (AppUpdateRepository.isSecureHttpsUrl(url)) {
+                runCatching {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         appUpdateViewModel.checkForUpdatesOnOpen()
@@ -162,37 +198,52 @@ fun EsosaApp(
     }
 
     EsosaTheme(themeMode = userProfile.themeMode) {
-        if (!userProfile.isAuthenticated) {
-            AuthOnboardingScreen(
-                existingProfile = userProfile,
-                onCompleteSignUp = { method, phoneOrEmail, name, username, bio, avatar ->
-                    roomsViewModel.completeOnboarding(method, phoneOrEmail, name, username, bio, avatar)
-                },
-                onCompleteLogin = { method, phoneOrEmail ->
-                    roomsViewModel.signInExisting(method, phoneOrEmail)
-                }
-            )
-        } else {
-            EsosaChatShell(
-                initialRoomId = initialRoomId,
-                initialTab = initialTab,
-                roomsViewModel = roomsViewModel,
-                appUpdateViewModel = appUpdateViewModel
-            )
-        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (!userProfile.isAuthenticated) {
+                AuthOnboardingScreen(
+                    existingProfile = userProfile,
+                    onCompleteSignUp = { method, phoneOrEmail, name, username, bio, avatar ->
+                        roomsViewModel.completeOnboarding(method, phoneOrEmail, name, username, bio, avatar)
+                    },
+                    onCompleteLogin = { method, phoneOrEmail ->
+                        roomsViewModel.signInExisting(method, phoneOrEmail)
+                    }
+                )
+            } else {
+                EsosaChatShell(
+                    initialRoomId = initialRoomId,
+                    initialTab = initialTab,
+                    roomsViewModel = roomsViewModel,
+                    appUpdateViewModel = appUpdateViewModel
+                )
+            }
 
-        val pendingUpdate = availableUpdate
-        if (showUpdateDialog && pendingUpdate != null) {
-            AppUpdateDialog(
-                update = pendingUpdate,
-                onDownload = {
-                    appUpdateViewModel.dismissUpdateDialog()
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pendingUpdate.downloadUrl))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
+            GlassUpdatePromptOverlay(
+                visible = showUpdateDialog || installStage is InAppInstallStage.MaintenanceBlocked,
+                update = availableUpdate,
+                installStage = installStage,
+                errorState = updateError,
+                onUpdateNow = {
+                    appUpdateViewModel.startUpdate(
+                        playLauncher = playUpdateLauncher,
+                        onOpenVerifiedHttpsUrl = openVerifiedHttpsUrl
+                    )
                 },
-                onLater = { appUpdateViewModel.dismissUpdateDialog() },
-                onSkip = { appUpdateViewModel.skipAvailableUpdate() }
+                onRemindMeLater = { appUpdateViewModel.remindMeLater() },
+                onSkipVersion = { appUpdateViewModel.skipAvailableUpdate() },
+                onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
+                onRetry = {
+                    if (availableUpdate == null || installStage is InAppInstallStage.MaintenanceBlocked) {
+                        appUpdateViewModel.checkForUpdatesNow()
+                    } else {
+                        appUpdateViewModel.startUpdate(
+                            playLauncher = playUpdateLauncher,
+                            onOpenVerifiedHttpsUrl = openVerifiedHttpsUrl
+                        )
+                    }
+                },
+                onOpenFallbackUrl = openVerifiedHttpsUrl,
+                onDismiss = { appUpdateViewModel.dismissUpdateDialog() }
             )
         }
     }
@@ -303,6 +354,9 @@ private fun EsosaChatShell(
     val isCheckingUpdates by appUpdateViewModel.isChecking.collectAsStateWithLifecycle()
     val autoUpdateCheckEnabled by appUpdateViewModel.autoCheckEnabled.collectAsStateWithLifecycle()
     val githubUpdateRepo by appUpdateViewModel.githubRepo.collectAsStateWithLifecycle()
+    val remoteManifestUrl by appUpdateViewModel.remoteManifestUrl.collectAsStateWithLifecycle()
+    val installStage by appUpdateViewModel.installStage.collectAsStateWithLifecycle()
+    val updateError by appUpdateViewModel.updateError.collectAsStateWithLifecycle()
     val updateStatusSummary by appUpdateViewModel.statusSummary.collectAsStateWithLifecycle()
 
     val allRooms = (roomsState as? UiState.Success)?.data.orEmpty()
@@ -358,8 +412,17 @@ private fun EsosaChatShell(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
+                    FlexibleUpdateFloatingBar(
+                        installStage = installStage,
+                        onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() }
+                    )
+
                     val bannerUpdate = availableUpdate
-                    if (bannerUpdate != null) {
+                    val showPromptStrip = bannerUpdate != null &&
+                        installStage !is InAppInstallStage.Downloading &&
+                        installStage !is InAppInstallStage.DownloadedReadyToInstall &&
+                        installStage !is InAppInstallStage.Installing
+                    if (showPromptStrip && bannerUpdate != null) {
                         Surface(
                             color = MaterialTheme.colorScheme.tertiaryContainer,
                             modifier = Modifier
@@ -389,7 +452,7 @@ private fun EsosaChatShell(
                                     )
                                 }
                                 Text(
-                                    text = "Download",
+                                    text = "View",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -575,6 +638,10 @@ private fun EsosaChatShell(
                                 isCheckingUpdates = isCheckingUpdates,
                                 autoUpdateCheckEnabled = autoUpdateCheckEnabled,
                                 githubUpdateRepo = githubUpdateRepo,
+                                remoteManifestUrl = remoteManifestUrl,
+                                installStage = installStage,
+                                updateError = updateError,
+                                isPlayStoreDistribution = appUpdateViewModel.isPlayStoreDistribution,
                                 activeSessions = activeSessions,
                                 blockedRooms = blockedRooms,
                                 onUpdateLocalProfile = { name, username, bio ->
@@ -596,8 +663,10 @@ private fun EsosaChatShell(
                                 onLogout = { roomsViewModel.logout() },
                                 onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
                                 onSaveGithubRepo = { repo -> appUpdateViewModel.saveGithubRepository(repo) },
+                                onSaveRemoteManifestUrl = { url -> appUpdateViewModel.saveRemoteManifestUrl(url) },
                                 onCheckForUpdatesNow = { appUpdateViewModel.checkForUpdatesNow() },
                                 onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
+                                onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -649,66 +718,4 @@ private fun EsosaChatShell(
             )
         }
     }
-}
-
-@Composable
-private fun AppUpdateDialog(
-    update: AppUpdateInfo,
-    onDownload: () -> Unit,
-    onLater: () -> Unit,
-    onSkip: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = { if (!update.isMandatory) onLater() },
-        icon = {
-            Icon(
-                imageVector = Icons.Filled.SystemUpdate,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
-        },
-        title = { Text(stringResource(R.string.update_dialog_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(
-                        text = "v${BuildConfig.VERSION_NAME} → v${update.versionName} • ${update.sourceLabel}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-                Text(
-                    text = update.releaseNotes.ifBlank {
-                        "A newer release of Esosa is ready to download and install."
-                    },
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onDownload,
-                modifier = Modifier.testTag("download_app_update_button")
-            ) { Text(stringResource(R.string.update_download_action)) }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!update.isMandatory) {
-                    TextButton(
-                        onClick = onSkip,
-                        modifier = Modifier.testTag("skip_app_update_button")
-                    ) { Text(stringResource(R.string.update_skip_action)) }
-                    TextButton(
-                        onClick = onLater,
-                        modifier = Modifier.testTag("later_app_update_button")
-                    ) { Text(stringResource(R.string.update_later_action)) }
-                }
-            }
-        },
-        modifier = Modifier.testTag("app_update_dialog")
-    )
 }

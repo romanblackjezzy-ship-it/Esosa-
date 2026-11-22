@@ -19,9 +19,11 @@ android {
     val envVersionCode = providers.environmentVariable("ESOSA_VERSION_CODE").orNull?.toIntOrNull() ?: 1
     val envVersionName = providers.environmentVariable("ESOSA_VERSION_NAME").orNull?.takeIf { it.isNotBlank() } ?: "1.0.0"
     val envGithubRepo = providers.environmentVariable("GITHUB_REPOSITORY").orNull?.trim()?.replace("\"", "").orEmpty()
+    val envUpdateManifestUrl = providers.environmentVariable("ESOSA_UPDATE_MANIFEST_URL").orNull?.trim()?.replace("\"", "").orEmpty()
     versionCode = envVersionCode
     versionName = envVersionName
     buildConfigField("String", "GITHUB_REPOSITORY", "\"$envGithubRepo\"")
+    buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$envUpdateManifestUrl\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -122,6 +124,8 @@ dependencies {
   implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
+  implementation(libs.play.app.update)
+  implementation(libs.play.app.update.ktx)
   // implementation(libs.logging.interceptor)
   // implementation(libs.moshi.kotlin)
   // implementation(libs.okhttp)

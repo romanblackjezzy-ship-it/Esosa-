@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
@@ -45,6 +46,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -62,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +77,8 @@ import com.example.data.model.AppUpdateInfo
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.ChatWallpaper
+import com.example.data.model.InAppInstallStage
+import com.example.data.model.UpdateErrorState
 import com.example.data.model.UserProfile
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.TelegramAvatarCircle
@@ -89,6 +94,10 @@ fun SettingsScreen(
     isCheckingUpdates: Boolean,
     autoUpdateCheckEnabled: Boolean,
     githubUpdateRepo: String,
+    remoteManifestUrl: String = "",
+    installStage: InAppInstallStage = InAppInstallStage.Idle,
+    updateError: UpdateErrorState? = null,
+    isPlayStoreDistribution: Boolean = false,
     activeSessions: List<ActiveSession> = emptyList(),
     blockedRooms: List<ChatRoom> = emptyList(),
     onUpdateLocalProfile: (String, String, String) -> Unit,
@@ -108,8 +117,10 @@ fun SettingsScreen(
     onLogout: () -> Unit = {},
     onToggleAutoUpdateCheck: (Boolean) -> Unit,
     onSaveGithubRepo: (String) -> Boolean,
+    onSaveRemoteManifestUrl: (String) -> Boolean = { true },
     onCheckForUpdatesNow: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
+    onRestartAndInstall: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val telegram = MaterialTheme.telegramColors
@@ -511,8 +522,9 @@ fun SettingsScreen(
                 }
             }
 
-            // App Updates & GitHub Release Feed Card
+            // App Updates & Version Management Card
             var repoDraft by remember(githubUpdateRepo) { mutableStateOf(githubUpdateRepo) }
+            var manifestDraft by remember(remoteManifestUrl) { mutableStateOf(remoteManifestUrl) }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(18.dp),
@@ -522,12 +534,44 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth().padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(stringResource(R.string.update_section_title), style = MaterialTheme.typography.titleSmall)
-                            Text("Installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Filled.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(stringResource(R.string.update_section_title), style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Security,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (isPlayStoreDistribution) "Google Play" else "HTTPS Release",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
                         }
                     }
 
@@ -553,9 +597,29 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedTextField(
+                            value = manifestDraft,
+                            onValueChange = { manifestDraft = it },
+                            label = { Text("Remote Manifest JSON (HTTPS)") },
+                            placeholder = { Text("https://releases.example.com/esosa.json") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).testTag("remote_manifest_url_input")
+                        )
+                        FilledTonalButton(
+                            onClick = { onSaveRemoteManifestUrl(manifestDraft) },
+                            modifier = Modifier.testTag("save_remote_manifest_button")
+                        ) { Text("Save") }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
                             value = repoDraft,
                             onValueChange = { repoDraft = it },
-                            label = { Text("GitHub Repo (owner/repo)") },
+                            label = { Text("GitHub Repo Fallback (owner/repo)") },
                             placeholder = { Text("e.g. username/Esosa") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
@@ -570,8 +634,60 @@ fun SettingsScreen(
                     Text(
                         text = updateStatusSummary,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (availableUpdate != null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (availableUpdate != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    when (installStage) {
+                        is InAppInstallStage.Downloading -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Downloading update in background…",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (installStage.totalBytesToDownload > 0L) {
+                                    LinearProgressIndicator(
+                                        progress = { installStage.progress },
+                                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+                                    )
+                                } else {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+                                }
+                            }
+                        }
+
+                        is InAppInstallStage.DownloadedReadyToInstall -> {
+                            Button(
+                                onClick = onRestartAndInstall,
+                                modifier = Modifier.fillMaxWidth().testTag("settings_restart_install_button")
+                            ) {
+                                Text("Restart and Install Downloaded Update")
+                            }
+                        }
+
+                        else -> Unit
+                    }
+
+                    if (updateError != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = updateError.title,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = updateError.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         FilledTonalButton(
@@ -592,7 +708,7 @@ fun SettingsScreen(
                             Button(
                                 onClick = onOpenUpdateDialog,
                                 modifier = Modifier.weight(1f).testTag("download_update_settings_button")
-                            ) { Text("Update v${availableUpdate.versionName}") }
+                            ) { Text("View v${availableUpdate.versionName}") }
                         }
                     }
                 }

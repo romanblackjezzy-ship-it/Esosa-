@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -10,9 +11,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.example.data.model.AppThemeMode
 import com.example.data.model.ChatWallpaper
 
@@ -48,6 +52,49 @@ data class TelegramColors(
     val callEndRed: Color
 )
 
+@Immutable
+data class EsosaGlassColors(
+    val isDark: Boolean,
+    val backdropScrim: Color,
+    val surfaceTop: Color,
+    val surfaceBottom: Color,
+    val specularBorder: Color,
+    val innerSectionSurface: Color,
+    val ambientGlowPrimary: Color,
+    val ambientGlowSecondary: Color,
+    val recommendedAccent: Color,
+    val criticalAccent: Color,
+    val successAccent: Color
+)
+
+private val EsosaLightGlassTokens = EsosaGlassColors(
+    isDark = false,
+    backdropScrim = EsosaGlassBackdropDay,
+    surfaceTop = EsosaGlassSurfaceTopDay,
+    surfaceBottom = EsosaGlassSurfaceBottomDay,
+    specularBorder = EsosaGlassBorderDay,
+    innerSectionSurface = EsosaGlassInnerCardDay,
+    ambientGlowPrimary = EsosaGlassGlowPrimaryDay,
+    ambientGlowSecondary = EsosaGlassGlowSecondaryDay,
+    recommendedAccent = EsosaWarningAmber,
+    criticalAccent = EsosaCallEndRed,
+    successAccent = EsosaCallAcceptGreen
+)
+
+private val EsosaDarkGlassTokens = EsosaGlassColors(
+    isDark = true,
+    backdropScrim = EsosaGlassBackdropNight,
+    surfaceTop = EsosaGlassSurfaceTopNight,
+    surfaceBottom = EsosaGlassSurfaceBottomNight,
+    specularBorder = EsosaGlassBorderNight,
+    innerSectionSurface = EsosaGlassInnerCardNight,
+    ambientGlowPrimary = EsosaGlassGlowPrimaryNight,
+    ambientGlowSecondary = EsosaGlassGlowSecondaryNight,
+    recommendedAccent = EsosaWarningAmberDark,
+    criticalAccent = EsosaCallEndRed,
+    successAccent = EsosaSecondaryLight
+)
+
 private val TelegramLightTokens = TelegramColors(
     isDark = false,
     topBarContainer = TelegramHeaderDay,
@@ -70,7 +117,7 @@ private val TelegramLightTokens = TelegramColors(
     divider = TelegramDividerDay,
     composerBar = Color.White,
     composerInput = TelegramSurfaceSecondaryDay,
-    sendFab = TelegramAzure,
+    sendFab = EsosaPrimaryBlue,
     onSendFab = Color.White,
     onlineDot = EsosaOnlineGreen,
     callDarkSurface = EsosaCallDarkSurface,
@@ -101,7 +148,7 @@ private val TelegramDarkTokens = TelegramColors(
     divider = TelegramDividerNight,
     composerBar = TelegramSurfaceNight,
     composerInput = TelegramSurfaceSecondaryNight,
-    sendFab = TelegramAzureLight,
+    sendFab = EsosaPrimaryLight,
     onSendFab = Color.White,
     onlineDot = EsosaOnlineGreen,
     callDarkSurface = EsosaCallDarkSurface,
@@ -120,25 +167,31 @@ fun wallpaperCanvasAndPattern(wallpaper: ChatWallpaper, isDark: Boolean): Pair<C
 }
 
 val LocalTelegramColors = staticCompositionLocalOf { TelegramLightTokens }
+val LocalEsosaGlassColors = staticCompositionLocalOf { EsosaLightGlassTokens }
 
 val MaterialTheme.telegramColors: TelegramColors
     @Composable
     @ReadOnlyComposable
     get() = LocalTelegramColors.current
 
+val MaterialTheme.esosaGlassColors: EsosaGlassColors
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalEsosaGlassColors.current
+
 private val EsosaDarkColorScheme = darkColorScheme(
-    primary = TelegramAzureLight,
+    primary = EsosaPrimaryLight,
     onPrimary = Color(0xFF06253A),
     primaryContainer = TelegramOutgoingNight,
     onPrimaryContainer = Color(0xFFD6EBFF),
-    secondary = TelegramAzure,
-    onSecondary = Color.White,
-    secondaryContainer = TelegramSurfaceHighestNight,
-    onSecondaryContainer = Color(0xFFD8E8F8),
-    tertiary = TelegramTealAccent,
-    onTertiary = Color(0xFF002420),
-    tertiaryContainer = Color(0xFF153D3B),
-    onTertiaryContainer = Color(0xFFBDF5EE),
+    secondary = EsosaSecondaryMint,
+    onSecondary = Color(0xFF002420),
+    secondaryContainer = Color(0xFF153D3B),
+    onSecondaryContainer = Color(0xFFBDF5EE),
+    tertiary = EsosaPrimaryBlue,
+    onTertiary = Color.White,
+    tertiaryContainer = TelegramSurfaceHighestNight,
+    onTertiaryContainer = Color(0xFFD8E8F8),
     background = TelegramCanvasNight,
     onBackground = TelegramTextPrimaryNight,
     surface = TelegramSurfaceNight,
@@ -159,18 +212,18 @@ private val EsosaDarkColorScheme = darkColorScheme(
 )
 
 private val EsosaLightColorScheme = lightColorScheme(
-    primary = TelegramAzure,
+    primary = EsosaPrimaryBlue,
     onPrimary = Color.White,
     primaryContainer = Color(0xFFD6EEFC),
     onPrimaryContainer = Color(0xFF06324B),
-    secondary = TelegramHeaderDay,
+    secondary = EsosaSecondaryMint,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE3EEF7),
-    onSecondaryContainer = Color(0xFF1D3952),
-    tertiary = TelegramTealAccent,
+    secondaryContainer = Color(0xFFD9F5F2),
+    onSecondaryContainer = Color(0xFF053833),
+    tertiary = EsosaPrimaryDeep,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFD9F5F2),
-    onTertiaryContainer = Color(0xFF053833),
+    tertiaryContainer = Color(0xFFE3EEF7),
+    onTertiaryContainer = Color(0xFF1D3952),
     background = TelegramSurfaceSecondaryDay,
     onBackground = TelegramTextPrimaryDay,
     surface = TelegramSurfaceDay,
@@ -209,8 +262,24 @@ fun EsosaTheme(
 ) {
     val colorScheme = if (darkTheme) EsosaDarkColorScheme else EsosaLightColorScheme
     val telegramTokens = if (darkTheme) TelegramDarkTokens else TelegramLightTokens
+    val glassTokens = if (darkTheme) EsosaDarkGlassTokens else EsosaLightGlassTokens
 
-    CompositionLocalProvider(LocalTelegramColors provides telegramTokens) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val activity = view.context as? Activity ?: return@SideEffect
+            val window = activity.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalTelegramColors provides telegramTokens,
+        LocalEsosaGlassColors provides glassTokens
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = EsosaTypography,

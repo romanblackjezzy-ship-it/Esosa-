@@ -2,16 +2,25 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Esosa Brand Core (Deep Ocean Cobalt + Emerald Mint + Signal Slate)
-val TelegramAzure = Color(0xFF1F7FE0)
-val TelegramAzureDeep = Color(0xFF135CB3)
-val TelegramAzureLight = Color(0xFF60AFFF)
-val EsosaEmerald = Color(0xFF14B8A6)
+// Esosa Brand Core Identity (Deep Ocean Cobalt + Emerald Mint + Signal Slate)
+val EsosaPrimaryBlue = Color(0xFF1F7FE0)
+val EsosaPrimaryDeep = Color(0xFF135CB3)
+val EsosaPrimaryLight = Color(0xFF60AFFF)
+val EsosaSecondaryMint = Color(0xFF14B8A6)
+val EsosaSecondaryDeep = Color(0xFF0F766E)
+val EsosaSecondaryLight = Color(0xFF5EEAD4)
+
+val TelegramAzure = EsosaPrimaryBlue
+val TelegramAzureDeep = EsosaPrimaryDeep
+val TelegramAzureLight = EsosaPrimaryLight
+val EsosaEmerald = EsosaSecondaryMint
 val EsosaOnlineGreen = Color(0xFF22C55E)
 val EsosaCallEndRed = Color(0xFFE53935)
 val EsosaCallAcceptGreen = Color(0xFF16A34A)
 val EsosaCallDarkSurface = Color(0xFF0B1320)
 val EsosaCallDarkSurfaceAlt = Color(0xFF162235)
+val EsosaWarningAmber = Color(0xFFF59E0B)
+val EsosaWarningAmberDark = Color(0xFFFBBF24)
 
 // Day Palette
 val TelegramHeaderDay = Color(0xFF1B5CA8)
@@ -25,7 +34,7 @@ val TelegramOnIncomingDay = Color(0xFF11181C)
 val TelegramOutgoingMetaDay = Color(0xFF2F855A)
 val TelegramCheckTintDay = Color(0xFF1D9BF0)
 val TelegramDatePillDay = Color(0x6627425B)
-val TelegramUnreadBadgeDay = Color(0xFF1F7FE0)
+val TelegramUnreadBadgeDay = EsosaPrimaryBlue
 val TelegramPinnedTintDay = Color(0xFF7B8B9C)
 val TelegramSurfaceDay = Color(0xFFFFFFFF)
 val TelegramSurfaceSecondaryDay = Color(0xFFF3F6FA)
@@ -55,6 +64,23 @@ val TelegramDividerNight = Color(0xFF1D2A3A)
 val TelegramTextPrimaryNight = Color(0xFFF1F5F9)
 val TelegramTextSecondaryNight = Color(0xFF8B9EB3)
 
+// Glassmorphism Tokens (Day & Night)
+val EsosaGlassBackdropDay = Color(0x7A0B1829)
+val EsosaGlassSurfaceTopDay = Color(0xEBFFFFFF)
+val EsosaGlassSurfaceBottomDay = Color(0xD9EBF3FC)
+val EsosaGlassBorderDay = Color(0xCCFFFFFF)
+val EsosaGlassInnerCardDay = Color(0x99FFFFFF)
+val EsosaGlassGlowPrimaryDay = Color(0x3D1F7FE0)
+val EsosaGlassGlowSecondaryDay = Color(0x3314B8A6)
+
+val EsosaGlassBackdropNight = Color(0xA6050B14)
+val EsosaGlassSurfaceTopNight = Color(0xE6172638)
+val EsosaGlassSurfaceBottomNight = Color(0xD90E1826)
+val EsosaGlassBorderNight = Color(0x479AC5F4)
+val EsosaGlassInnerCardNight = Color(0x731F3248)
+val EsosaGlassGlowPrimaryNight = Color(0x4760AFFF)
+val EsosaGlassGlowSecondaryNight = Color(0x3D14B8A6)
+
 // Wallpaper Variant Tokens
 val WallpaperOceanicDay = Color(0xFFCDE2F7)
 val WallpaperOceanicPatternDay = Color(0xFF9AC2EA)
@@ -75,7 +101,7 @@ val WallpaperMidnightPatternNight = Color(0xFF232345)
 val TelegramError = Color(0xFFE53935)
 val TelegramErrorContainerLight = Color(0xFFFFEBEE)
 val TelegramErrorContainerDark = Color(0xFF54171A)
-val TelegramTealAccent = EsosaEmerald
+val TelegramTealAccent = EsosaSecondaryMint
 
 // Vibrant circular avatar pairs (top gradient color -> bottom gradient color)
 val TelegramAvatarPairs: List<Pair<Color, Color>> = listOf(
