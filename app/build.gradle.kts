@@ -13,7 +13,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.esosachat.xkmqzp"
+    applicationId = "com.aistudio.esosa.chat.v3net"
     minSdk = 24
     targetSdk = 36
     val envVersionCode = providers.environmentVariable("ESOSA_VERSION_CODE").orNull?.toIntOrNull() ?: 1

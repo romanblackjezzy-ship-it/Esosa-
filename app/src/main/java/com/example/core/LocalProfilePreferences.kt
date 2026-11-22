@@ -276,8 +276,8 @@ class LocalProfilePreferences(context: Context) {
         private const val KEY_LAST_SEEN_VISIBILITY = "last_seen_visibility"
         private const val KEY_DEFAULT_DISAPPEAR_SEC = "default_disappear_sec"
         private const val KEY_ACTIVE_SESSIONS = "active_sessions_json"
-        private const val DEFAULT_NAME = "Esosa User"
-        private const val DEFAULT_USERNAME = "esosa_chat"
-        private const val DEFAULT_BIO = "Designing calm, private conversations"
+        private const val DEFAULT_NAME = ""
+        private const val DEFAULT_USERNAME = ""
+        private const val DEFAULT_BIO = ""
     }
 }
