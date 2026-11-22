@@ -174,9 +174,9 @@ class ChatRepository(
         dao.updateChannelSubscription(roomId, nextSubscribed, nextCount, System.currentTimeMillis())
     }
 
-    suspend fun addGroupMember(roomId: String, memberName: String): Result<Unit> = runCatching {
-        val clean = memberName.trim().take(40)
-        require(clean.isNotEmpty()) { "Member name cannot be empty." }
+    suspend fun addGroupMember(roomId: String, memberEmail: String): Result<Unit> = runCatching {
+        val clean = memberEmail.trim().lowercase().take(120)
+        require(isValidEmail(clean)) { "Please enter a valid email address." }
         val room = dao.getRoomById(roomId) ?: error("Group no longer exists")
         val existing = StringListJsonCodec.decode(room.memberNamesJson)
         if (existing.none { it.equals(clean, ignoreCase = true) }) {
@@ -245,17 +245,41 @@ class ChatRepository(
         isPublic: Boolean = true
     ): Result<String> {
         return try {
-            val title = rawTitle.trim().take(80)
-            require(title.isNotEmpty()) { "Chat name cannot be empty." }
-            val topic = rawTopic.trim().take(160)
+            val trimmedTitle = rawTitle.trim()
+            val trimmedTopic = rawTopic.trim()
+            val title: String
+            val topic: String
+            val handle: String
+            val members: List<String>
+
+            if (chatKind == ChatKind.DIRECT) {
+                val candidateEmail = when {
+                    isValidEmail(trimmedTitle) -> trimmedTitle.lowercase().take(120)
+                    isValidEmail(trimmedTopic) -> trimmedTopic.lowercase().take(120)
+                    else -> throw IllegalArgumentException("Please enter a valid email address.")
+                }
+                title = if (isValidEmail(trimmedTitle) || trimmedTitle.isBlank()) {
+                    deriveDisplayNameFromEmail(candidateEmail)
+                } else {
+                    trimmedTitle.take(80)
+                }
+                topic = candidateEmail
+                handle = candidateEmail
+                members = listOf("You", candidateEmail)
+            } else {
+                title = trimmedTitle.take(80)
+                require(title.isNotEmpty()) { "Chat name cannot be empty." }
+                topic = trimmedTopic.take(160)
+                handle = title.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+                members = when (chatKind) {
+                    ChatKind.GROUP -> (listOf("You") + initialMembers).distinct()
+                    else -> listOf("You")
+                }
+            }
+
             val now = System.currentTimeMillis()
             val roomId = "chat_${now}_${UUID.randomUUID().toString().take(8)}"
             val roomCode = generateRoomCode()
-            val members = when (chatKind) {
-                ChatKind.GROUP -> (listOf("You") + initialMembers).distinct()
-                ChatKind.DIRECT -> listOf("You", title)
-                else -> listOf("You")
-            }
             val admins = if (chatKind == ChatKind.GROUP || chatKind == ChatKind.CHANNEL) {
                 listOf("You")
             } else {
@@ -265,7 +289,6 @@ class ChatRepository(
                 ChatKind.CHANNEL -> if (isPublic) "Public channel created" else "Private channel created"
                 ChatKind.DIRECT -> "Direct chat started"
                 ChatKind.SAVED -> "Saved Messages ready"
-                ChatKind.BOT -> "Bot connected"
                 ChatKind.GROUP -> "Group created"
             }
             dao.upsertRoom(
@@ -284,13 +307,12 @@ class ChatRepository(
                     lastMessageAtMillis = now,
                     createdAtMillis = now,
                     updatedAtMillis = now,
-                    handle = title.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_'),
+                    handle = handle,
                     isOnline = chatKind == ChatKind.DIRECT,
                     onlineStatusText = when (chatKind) {
                         ChatKind.CHANNEL -> if (isPublic) "Public Channel" else "Private Channel"
                         ChatKind.DIRECT -> "online"
                         ChatKind.GROUP -> "${members.size} members"
-                        ChatKind.BOT -> "bot"
                         ChatKind.SAVED -> "Personal storage"
                     },
                     memberNamesJson = StringListJsonCodec.encode(members),
@@ -804,5 +826,24 @@ class ChatRepository(
 
     companion object {
         const val SAVED_MESSAGES_ROOM_ID = "saved_messages"
+        private val EMAIL_REGEX = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+
+        fun isValidEmail(rawEmail: String): Boolean =
+            EMAIL_REGEX.matches(rawEmail.trim())
+
+        fun deriveDisplayNameFromEmail(rawEmail: String): String {
+            val clean = rawEmail.trim().lowercase()
+            val localPart = clean.substringBefore('@')
+            val words = localPart
+                .split('.', '_', '-', '+')
+                .map { token -> token.trim() }
+                .filter { it.isNotEmpty() }
+                .map { word ->
+                    word.replaceFirstChar { ch ->
+                        if (ch.isLowerCase()) ch.titlecase() else ch.toString()
+                    }
+                }
+            return words.joinToString(" ").ifBlank { clean }.take(80)
+        }
     }
 }

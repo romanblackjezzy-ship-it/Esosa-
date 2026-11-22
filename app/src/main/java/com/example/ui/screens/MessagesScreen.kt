@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -215,7 +214,7 @@ fun MessagesScreen(
                 VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 if (selectedRoomId != null && activeRoom != null) {
-                    TelegramChatDetailView(
+                    ConversationScreen(
                         currentUserId = currentUserId,
                         room = activeRoom,
                         allRooms = allRooms,
@@ -231,6 +230,7 @@ fun MessagesScreen(
                         editingMessage = editingMessage,
                         channelCommentsMap = channelCommentsMap,
                         showBackButton = false,
+                        applyNavigationBarInsets = true,
                         onBack = { onOpenRoom(null) },
                         onOpenInfo = { showInspector = !showInspector },
                         onStartCall = { type -> onStartCall(activeRoom, type) },
@@ -318,7 +318,7 @@ fun MessagesScreen(
         } else {
             if (selectedRoomId != null) {
                 BackHandler { onOpenRoom(null) }
-                TelegramChatDetailView(
+                ConversationScreen(
                     currentUserId = currentUserId,
                     room = activeRoom,
                     allRooms = allRooms,
@@ -334,6 +334,7 @@ fun MessagesScreen(
                     editingMessage = editingMessage,
                     channelCommentsMap = channelCommentsMap,
                     showBackButton = true,
+                    applyNavigationBarInsets = true,
                     onBack = { onOpenRoom(null) },
                     onOpenInfo = { showInspector = true },
                     onStartCall = { type -> activeRoom?.let { onStartCall(it, type) } },
@@ -581,7 +582,7 @@ private fun TelegramChatsListView(
                             when (selectedFolder) {
                                 ChatFolderFilter.ALL -> rooms.filterNot { it.isArchived }
                                 ChatFolderFilter.PERSONAL -> rooms.filter {
-                                    !it.isArchived && (it.chatKind == ChatKind.DIRECT || it.chatKind == ChatKind.SAVED || it.chatKind == ChatKind.BOT)
+                                    !it.isArchived && (it.chatKind == ChatKind.DIRECT || it.chatKind == ChatKind.SAVED)
                                 }
                                 ChatFolderFilter.GROUPS -> rooms.filter { !it.isArchived && it.chatKind == ChatKind.GROUP }
                                 ChatFolderFilter.CHANNELS -> rooms.filter { !it.isArchived && it.chatKind == ChatKind.CHANNEL }
@@ -860,7 +861,6 @@ private fun TelegramChatRow(
                         when (room.chatKind) {
                             ChatKind.GROUP -> Icon(Icons.Filled.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                             ChatKind.CHANNEL -> Icon(Icons.Filled.Campaign, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            ChatKind.BOT -> Icon(Icons.Filled.SmartToy, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp))
                             else -> Unit
                         }
                         Text(

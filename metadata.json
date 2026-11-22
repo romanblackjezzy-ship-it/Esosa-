@@ -1,6 +1,6 @@
 {
   "name": "Esosa",
-  "description": "Next-generation messaging platform with phone/email OTP onboarding, direct & group chats, channels, stories, voice/video calls, AI bot, and live voice.",
+  "description": "Next-generation Telegram-style messaging platform with direct email chats, group chats, channels, stories, camera photo sharing, voice/video calls, and automatic app updates.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

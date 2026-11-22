@@ -49,7 +49,7 @@ class TelegramRoomPersistenceTest {
     fun `starter chats, stories, calls, and comments are seeded and support full messaging lifecycle`() = runBlocking {
         repository.ensureStarterChats().getOrThrow()
         val initialRooms = repository.observeRooms().first()
-        assertEquals(8, initialRooms.size)
+        assertEquals(7, initialRooms.size)
         val savedRoom = initialRooms.first { it.id == ChatRepository.SAVED_MESSAGES_ROOM_ID }
         assertEquals("Saved Messages", savedRoom.title)
         assertEquals(ChatKind.SAVED, savedRoom.chatKind)
@@ -57,6 +57,24 @@ class TelegramRoomPersistenceTest {
 
         assertTrue(repository.observeStories().first().size >= 4)
         assertTrue(repository.observeCallLogs().first().size >= 4)
+
+        // Direct user creation accepts valid email only
+        assertTrue(
+            repository.createRoom(
+                rawTitle = "NotAnEmail",
+                rawTopic = "",
+                chatKind = ChatKind.DIRECT
+            ).isFailure
+        )
+        val directRoomId = repository.createRoom(
+            rawTitle = "alex.mercer@esosa.app",
+            rawTopic = "",
+            chatKind = ChatKind.DIRECT
+        ).getOrThrow()
+        val directRoom = repository.observeRoom(directRoomId).first()!!
+        assertEquals("Alex Mercer", directRoom.title)
+        assertEquals("alex.mercer@esosa.app", directRoom.handle)
+        assertEquals("alex.mercer@esosa.app", directRoom.topic)
 
         val createdId = repository.createRoom(
             rawTitle = "Android Release Team",
@@ -71,11 +89,12 @@ class TelegramRoomPersistenceTest {
         assertFalse(groupRoom.isPinned)
         assertEquals(3, groupRoom.memberCount)
 
-        // Group member & admin controls
-        repository.addGroupMember(createdId, "Elena Rostova").getOrThrow()
+        // Group member & admin controls (members must be added by email)
+        assertTrue(repository.addGroupMember(createdId, "Elena Rostova").isFailure)
+        repository.addGroupMember(createdId, "elena.rostova@esosa.chat").getOrThrow()
         repository.toggleGroupAdmin(createdId, "Maya Lin").getOrThrow()
         val updatedGroup = repository.observeRoom(createdId).first()!!
-        assertTrue("Elena Rostova" in updatedGroup.memberNames)
+        assertTrue("elena.rostova@esosa.chat" in updatedGroup.memberNames)
         assertTrue("Maya Lin" in updatedGroup.adminNames)
 
         // Send message, reply, edit, react, pin, forward, voice note

@@ -21,7 +21,6 @@ internal object StarterSeedData {
         val m4 = now - 2 * 3_600_000L
         val m5 = now - 5 * 3_600_000L
         val m6 = now - 16 * 3_600_000L
-        val m7 = now - 28 * 3_600_000L
         val m8 = now - 48 * 3_600_000L
 
         return listOf(
@@ -158,26 +157,6 @@ internal object StarterSeedData {
                 isSubscribed = true,
                 isPublic = true,
                 adminNamesJson = StringListJsonCodec.encode(listOf("Editorial Desk"))
-            ),
-            ChatRoomEntity(
-                id = "bot_esosa_concierge",
-                title = "Esosa Concierge Bot",
-                topic = "Automated shortcuts, reminders & release assistant",
-                chatKind = ChatKind.BOT.id,
-                roomCode = "BOT900",
-                memberCount = 2,
-                isPinned = false,
-                unreadCount = 0,
-                lastMessageText = "Try /status, /schedule, or open the AI Bot tab for Gemini!",
-                lastMessageSenderName = "Esosa Concierge Bot",
-                lastMessageIsMine = false,
-                lastMessageAtMillis = m7,
-                createdAtMillis = m8,
-                updatedAtMillis = m7,
-                avatarKey = "esosa_bot",
-                handle = "esosa_bot",
-                isOnline = true,
-                onlineStatusText = "bot"
             ),
             ChatRoomEntity(
                 id = "dm_kaito_archived",
@@ -417,21 +396,6 @@ internal object StarterSeedData {
                 isRead = true,
                 viewCount = 9120,
                 createdAtMillis = now - 16 * oneHour
-            ),
-
-            // Concierge Bot
-            RoomMessageEntity(
-                id = "seed_bot_1",
-                roomId = "bot_esosa_concierge",
-                senderId = "bot_concierge",
-                senderName = "Esosa Concierge Bot",
-                text = "Welcome to Esosa! Need full Gemini AI reasoning or real-time Live Voice? Switch to the AI Bot or Voice tabs anytime, or tap a quick command here.",
-                imageUrl = null,
-                storagePath = null,
-                messageType = "text",
-                reactionsJson = "{}",
-                isRead = true,
-                createdAtMillis = now - 28 * oneHour
             ),
 
             // Kaito Archived DM

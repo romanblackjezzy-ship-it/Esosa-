@@ -5,26 +5,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.example.core.UiState
-import com.example.data.model.AiMessage
-import com.example.data.model.AiThread
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
+import com.example.data.model.ChatWallpaper
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
-import com.example.ui.screens.AiChatScreen
-import com.example.ui.screens.LiveVoiceScreen
+import com.example.ui.EsosaTab
+import com.example.ui.screens.ChatInfoInspectorPanel
 import com.example.ui.screens.MessagesScreen
+import com.example.ui.screens.TelegramCreateChatDialog
 import com.example.ui.theme.EsosaTheme
-import com.example.ui.viewmodel.LiveTranscriptItem
-import com.example.ui.viewmodel.LiveVoiceStatus
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -126,93 +127,99 @@ class ChatFeaturesTest {
     }
 
     @Test
-    fun `ai chat displays timestamps, typing indicator while generating, and emoji reactions`() {
-        val nowMillis = System.currentTimeMillis()
-        val thread = AiThread(id = "thread_1", userId = "local_me", title = "Assistant")
-        val aiMsg = AiMessage(
-            id = "ai_1",
-            userId = "local_me",
-            threadId = "thread_1",
-            role = "model",
-            text = "Here is your summary.",
-            reactions = mapOf("🔥" to listOf("local_me")),
-            createdAtMillis = nowMillis
+    fun `esosa tabs exclude ai bot and live voice`() {
+        assertEquals(
+            listOf(EsosaTab.MESSAGES, EsosaTab.CALLS, EsosaTab.SETTINGS),
+            EsosaTab.entries
         )
-        val toggledAiReactions = mutableListOf<Triple<String, String, String>>()
-
-        composeTestRule.setContent {
-            EsosaTheme {
-                AiChatScreen(
-                    currentUserId = "local_me",
-                    threadsState = UiState.Success(listOf(thread)),
-                    selectedThreadId = thread.id,
-                    messagesState = UiState.Success(listOf(aiMsg)),
-                    streamingReply = null,
-                    isGenerating = true,
-                    errorBanner = null,
-                    onSelectThread = {},
-                    onCreateThread = {},
-                    onSwitchPersona = {},
-                    onDeleteThread = {},
-                    onSendPrompt = { _, _, _ -> },
-                    onToggleReaction = { tId, mId, emoji ->
-                        toggledAiReactions.add(Triple(tId, mId, emoji))
-                    },
-                    onClearError = {}
-                )
-            }
-        }
-
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("ai_message_timestamp_ai_1", useUnmergedTree = true)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag("ai_typing_indicator").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Esosa General is typing").assertIsDisplayed()
-
-        composeTestRule.onNodeWithTag("ai_react_button_ai_1").performClick()
-        composeTestRule.onNodeWithTag("reaction_option_ai_1_👏").performClick()
-
-        assertEquals(listOf(Triple("thread_1", "ai_1", "👏")), toggledAiReactions)
     }
 
     @Test
-    fun `live voice screen shows transcript timestamps and live speaking indicator`() {
-        val nowMillis = System.currentTimeMillis()
-        val transcripts = listOf(
-            LiveTranscriptItem(
-                id = "lv_1",
-                speaker = "You",
-                text = "What is on my schedule?",
-                isStreaming = false,
-                createdAtMillis = nowMillis
-            )
-        )
+    fun `create chat dialog in personal mode accepts only valid email`() {
+        var confirmed: Triple<String, String, ChatKind>? = null
 
         composeTestRule.setContent {
             EsosaTheme {
-                LiveVoiceScreen(
-                    status = LiveVoiceStatus.ACTIVE,
-                    statusMessage = "Listening live",
-                    transcripts = transcripts,
-                    isModelSpeaking = true,
-                    isMuted = false,
-                    isSpeakerOn = true,
-                    micLevel = 0.4f,
-                    isAecEnabled = true,
-                    onStartConversation = {},
-                    onStopConversation = {},
-                    onToggleMute = {},
-                    onToggleSpeaker = {},
-                    onSendTextDuringLive = {},
-                    onClearTranscripts = {}
+                TelegramCreateChatDialog(
+                    isBusy = false,
+                    onDismiss = {},
+                    onConfirm = { title, topic, kind ->
+                        confirmed = Triple(title, topic, kind)
+                    }
                 )
             }
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("live_transcript_timestamp_lv_1").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("live_typing_indicator").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Esosa Live is speaking").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("create_room_email_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("create_room_title_input").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("create_room_topic_input").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("confirm_create_room_button").assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag("create_room_email_input").performTextInput("invalid-email")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("confirm_create_room_button").assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag("create_room_email_input").performTextClearance()
+        composeTestRule.onNodeWithTag("create_room_email_input").performTextInput("Elena.Rostova@Esosa.Chat")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("confirm_create_room_button").assertIsEnabled().performClick()
+
+        assertEquals(Triple("elena.rostova@esosa.chat", "", ChatKind.DIRECT), confirmed)
+    }
+
+    @Test
+    fun `chat info inspector add member dialog requires valid email`() {
+        val groupRoom = ChatRoom(
+            id = "group_1",
+            title = "Design Core",
+            chatKind = ChatKind.GROUP,
+            roomCode = "DSG123",
+            memberNames = listOf("You"),
+            adminNames = listOf("You")
+        )
+        var addedEmail: String? = null
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                ChatInfoInspectorPanel(
+                    room = groupRoom,
+                    messages = emptyList(),
+                    defaultWallpaper = ChatWallpaper.CLASSIC,
+                    onClose = {},
+                    onStartCall = {},
+                    onToggleMute = {},
+                    onTogglePin = {},
+                    onToggleBlock = {},
+                    onReport = {},
+                    onToggleSubscribe = {},
+                    onAddMember = { addedEmail = it },
+                    onRemoveMember = {},
+                    onToggleAdmin = {},
+                    onUpdateDescription = {},
+                    onSetDisappearingTimer = {},
+                    onSetWallpaper = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("add_group_member_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("add_member_email_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("confirm_add_member_button").assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag("add_member_email_input").performTextInput("notanemail")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("confirm_add_member_button").assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag("add_member_email_input").performTextClearance()
+        composeTestRule.onNodeWithTag("add_member_email_input").performTextInput("TeamMate@Esosa.app")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("confirm_add_member_button").assertIsEnabled().performClick()
+
+        assertEquals("teammate@esosa.app", addedEmail)
     }
 
     @Test
@@ -311,55 +318,6 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("zzzz_nomatch")
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("search_no_results_state").assertIsDisplayed()
-    }
-
-    @Test
-    fun `ai history sheet includes search bar to filter past conversations`() {
-        val nowMillis = System.currentTimeMillis()
-        val threadOne = AiThread(
-            id = "ai_t1",
-            userId = "local_me",
-            title = "Android Release Plan",
-            lastMessagePreview = "APK signing steps",
-            updatedAtMillis = nowMillis
-        )
-        val threadTwo = AiThread(
-            id = "ai_t2",
-            userId = "local_me",
-            title = "Grocery Recipes",
-            lastMessagePreview = "Pasta sauce ideas",
-            updatedAtMillis = nowMillis
-        )
-
-        composeTestRule.setContent {
-            EsosaTheme {
-                AiChatScreen(
-                    threadsState = UiState.Success(listOf(threadOne, threadTwo)),
-                    selectedThreadId = threadOne.id,
-                    messagesState = UiState.Success(emptyList()),
-                    streamingReply = null,
-                    isGenerating = false,
-                    errorBanner = null,
-                    onSelectThread = {},
-                    onCreateThread = {},
-                    onSwitchPersona = {},
-                    onDeleteThread = {},
-                    onSendPrompt = { _, _, _ -> },
-                    onClearError = {}
-                )
-            }
-        }
-
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("ai_history_button").performClick()
-        composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("ai_threads_search_bar").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("ai_threads_search_bar").performTextInput("Grocery")
-        composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("ai_thread_card_ai_t2").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("ai_thread_card_ai_t1").assertDoesNotExist()
     }
 
     @Test

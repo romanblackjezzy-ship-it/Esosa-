@@ -99,37 +99,6 @@ class EsosaNotificationManager(private val context: Context) {
         }
     }
 
-    fun showAiReplyNotification(threadTitle: String, preview: String) {
-        if (!hasNotificationPermission()) return
-
-        val intent = Intent(appContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_TARGET_TAB, TAB_AI_CHAT)
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            appContext,
-            AI_NOTIFICATION_ID,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(appContext, channelId)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("Gemini reply ready • $threadTitle")
-            .setContentText(preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(preview))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(appContext)
-                .notify(AI_NOTIFICATION_ID, notification)
-        } catch (_: SecurityException) {
-        }
-    }
-
     fun showAppUpdateNotification(
         versionName: String,
         releaseNotes: String,
@@ -207,8 +176,6 @@ class EsosaNotificationManager(private val context: Context) {
         const val EXTRA_TARGET_TAB = "extra_target_tab"
         const val EXTRA_SHOW_UPDATE_DIALOG = "extra_show_update_dialog"
         const val TAB_MESSAGES = "messages"
-        const val TAB_AI_CHAT = "ai_chat"
-        private const val AI_NOTIFICATION_ID = 4001
         private const val TEST_NOTIFICATION_ID = 4002
         private const val UPDATE_NOTIFICATION_ID = 4003
     }

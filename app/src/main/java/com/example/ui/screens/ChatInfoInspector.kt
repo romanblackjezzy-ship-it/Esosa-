@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
@@ -65,8 +67,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.model.CallType
@@ -74,6 +78,7 @@ import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.ChatWallpaper
 import com.example.data.model.RoomMessage
+import com.example.data.repository.ChatRepository
 import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.components.formatRelativeThreadTime
 
@@ -199,7 +204,7 @@ fun ChatInfoInspectorPanel(
                     )
                     if (room.handle.isNotBlank()) {
                         Text(
-                            text = "@${room.handle}",
+                            text = if (room.handle.contains("@")) room.handle else "@${room.handle}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -587,26 +592,53 @@ fun ChatInfoInspectorPanel(
     }
 
     if (showAddMemberDialog) {
-        var newMember by remember { mutableStateOf("") }
+        var memberEmail by remember { mutableStateOf("") }
+        val isMemberEmailValid = ChatRepository.isValidEmail(memberEmail)
         AlertDialog(
             onDismissRequest = { showAddMemberDialog = false },
-            title = { Text("Add Group Member") },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .widthIn(max = 560.dp),
+            title = { Text("Add Member by Email") },
             text = {
-                OutlinedTextField(
-                    value = newMember,
-                    onValueChange = { if (it.length <= 40) newMember = it },
-                    label = { Text("Member Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = memberEmail,
+                        onValueChange = { if (it.length <= 120) memberEmail = it },
+                        label = { Text("Email Address") },
+                        placeholder = { Text("teammate@example.com") },
+                        isError = memberEmail.isNotBlank() && !isMemberEmailValid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("add_member_email_input")
+                    )
+                    Text(
+                        text = if (memberEmail.isNotBlank() && !isMemberEmailValid) {
+                            "Enter a valid email address"
+                        } else {
+                            "Invite a user using only their email address"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (memberEmail.isNotBlank() && !isMemberEmailValid) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        onAddMember(newMember)
+                        onAddMember(memberEmail.trim().lowercase())
                         showAddMemberDialog = false
                     },
-                    enabled = newMember.isNotBlank()
+                    enabled = isMemberEmailValid,
+                    modifier = Modifier.testTag("confirm_add_member_button")
                 ) { Text("Add") }
             },
             dismissButton = {
@@ -619,6 +651,11 @@ fun ChatInfoInspectorPanel(
         var descDraft by remember(room.topic) { mutableStateOf(room.topic) }
         AlertDialog(
             onDismissRequest = { showEditDescDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .widthIn(max = 560.dp),
             title = { Text("Edit Description") },
             text = {
                 OutlinedTextField(

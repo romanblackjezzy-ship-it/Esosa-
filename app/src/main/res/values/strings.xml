@@ -1,22 +1,11 @@
 <resources>
     <string name="app_name">Esosa</string>
     <string name="tab_messages">Chats</string>
-    <string name="tab_ai_chat">AI Bot</string>
-    <string name="tab_live_voice">Voice</string>
     <string name="tab_profile">Settings</string>
     <string name="notification_channel_id">esosa_messages</string>
     <string name="notification_channel_name">Esosa Chats</string>
-    <string name="notification_channel_description">Incoming chat messages and AI bot replies</string>
-    <string name="live_voice_title">Live Voice</string>
-    <string name="live_voice_mic_permission_rationale">Microphone access is needed so Esosa can capture 16 kHz voice audio and stream real-time replies.</string>
-    <string name="live_voice_mic_permission_denied">Microphone permission was denied. Enable it in App Settings to use live voice.</string>
-    <string name="live_voice_open_settings">Open Settings</string>
-    <string name="live_voice_grant_mic">Allow Microphone</string>
-    <string name="live_voice_mute">Mute mic</string>
-    <string name="live_voice_unmute">Unmute mic</string>
-    <string name="live_voice_speaker_on">Speaker on</string>
-    <string name="live_voice_speaker_off">Earpiece</string>
-    <string name="live_voice_audio_pipeline_badge">16kHz PCM Capture • AEC • 24kHz Stream</string>
+    <string name="notification_channel_description">Incoming chat messages and app updates</string>
+    <string name="open_settings">Open Settings</string>
     <string name="notification_updates_channel_id">esosa_updates</string>
     <string name="notification_updates_channel_name">App Updates</string>
     <string name="notification_updates_channel_description">Alerts when a newer version of Esosa is available to download</string>
@@ -25,8 +14,8 @@
     <string name="update_later_action">Later</string>
     <string name="update_skip_action">Skip Version</string>
     <string name="update_section_title">App Updates</string>
-    <string name="update_auto_check_title">Automatic Update Alerts</string>
-    <string name="update_auto_check_subtitle">Check for new releases and notify on app open</string>
+    <string name="update_auto_check_title">Automatic App Updates</string>
+    <string name="update_auto_check_subtitle">Automatically check, notify, and deliver new releases</string>
     <string name="update_check_now">Check for Updates</string>
     <string name="search_chats_placeholder">Search</string>
     <string name="search_chats_clear">Clear search</string>
@@ -34,7 +23,6 @@
     <string name="search_results_messages">Messages</string>
     <string name="search_no_results_title">No matching chats or messages</string>
     <string name="search_no_results_subtitle">Try searching another keyword, chat name, or photo.</string>
-    <string name="search_ai_threads_placeholder">Search AI chats…</string>
     <string name="room_camera_capture">Capture photo</string>
     <string name="room_camera_permission_denied">Camera permission is required to snap and send photos.</string>
     <string name="room_uploading_photo">Saving photo…</string>
@@ -45,4 +33,15 @@
     <string name="telegram_saved_messages_subtitle">Cloudless local notes &amp; photos</string>
     <string name="telegram_settings_profile_title">Local Profile</string>
     <string name="telegram_settings_edit_profile">Edit Profile</string>
+    <string name="conversation_scroll_to_bottom">Scroll to latest messages</string>
+    <string name="conversation_media_section_title">Attach Media &amp; Tools</string>
+    <string name="conversation_media_gallery">Gallery</string>
+    <string name="conversation_media_camera">Camera</string>
+    <string name="conversation_media_document">Document</string>
+    <string name="conversation_media_voice">Voice Note</string>
+    <string name="conversation_media_stickers">Stickers</string>
+    <string name="conversation_media_schedule">Schedule</string>
+    <string name="conversation_input_placeholder">Message</string>
+    <string name="conversation_channel_placeholder">Broadcast to channel…</string>
+    <string name="conversation_toggle_media_section">Toggle media attachments</string>
 </resources>

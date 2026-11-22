@@ -27,17 +27,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -74,29 +70,22 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
-import com.example.data.audio.VoiceAudioStreamer
 import com.example.data.local.EsosaDatabase
 import com.example.data.model.InAppInstallStage
-import com.example.data.repository.AiChatRepository
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
-import com.example.data.repository.LiveVoiceRepository
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.EsosaBrandLogo
 import com.example.ui.components.FlexibleUpdateFloatingBar
 import com.example.ui.components.GlassUpdatePromptOverlay
 import com.example.ui.screens.ActiveCallOverlay
-import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthOnboardingScreen
 import com.example.ui.screens.CallsScreen
-import com.example.ui.screens.LiveVoiceScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.EsosaTheme
-import com.example.ui.viewmodel.AiChatViewModel
 import com.example.ui.viewmodel.AppUpdateViewModel
-import com.example.ui.viewmodel.LiveVoiceViewModel
 import com.example.ui.viewmodel.RoomsViewModel
 
 enum class EsosaTab(
@@ -107,8 +96,6 @@ enum class EsosaTab(
 ) {
     MESSAGES("Chats", Icons.Filled.Forum, Icons.Outlined.Forum, "nav_messages"),
     CALLS("Calls", Icons.Filled.Call, Icons.Outlined.Call, "nav_calls"),
-    AI_CHAT("AI Bot", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_ai_chat"),
-    LIVE_VOICE("Voice", Icons.Filled.GraphicEq, Icons.Outlined.GraphicEq, "nav_live_voice"),
     SETTINGS("Settings", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings")
 }
 
@@ -154,6 +141,10 @@ fun EsosaApp(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         appUpdateViewModel.onPlayUpdateFlowResult(result.resultCode)
+    }
+
+    LaunchedEffect(playUpdateLauncher) {
+        appUpdateViewModel.registerPlayLauncher(playUpdateLauncher)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -259,51 +250,14 @@ private fun EsosaChatShell(
     val context = LocalContext.current
     val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
-    val aiChatViewModel: AiChatViewModel = viewModel(
-        key = "telegram_ai_local",
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[APPLICATION_KEY])
-                val dao = EsosaDatabase.getInstance(app).esosaDao()
-                AiChatViewModel(
-                    repository = AiChatRepository(app, dao),
-                    notificationManager = EsosaNotificationManager(app),
-                    selectionPreferences = ThreadSelectionPreferences(app)
-                )
-            }
-        }
-    )
-
-    val liveVoiceViewModel: LiveVoiceViewModel = viewModel(
-        key = "telegram_live_local",
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[APPLICATION_KEY])
-                val dao = EsosaDatabase.getInstance(app).esosaDao()
-                LiveVoiceViewModel(
-                    audioStreamer = VoiceAudioStreamer(app.applicationContext),
-                    repository = LiveVoiceRepository(app, dao),
-                    selectionPreferences = ThreadSelectionPreferences(app)
-                )
-            }
-        }
-    )
-
     var selectedTab by rememberSaveable {
-        mutableStateOf(
-            when (initialTab) {
-                EsosaNotificationManager.TAB_AI_CHAT -> EsosaTab.AI_CHAT
-                else -> EsosaTab.MESSAGES
-            }
-        )
+        mutableStateOf(EsosaTab.MESSAGES)
     }
 
     LaunchedEffect(initialRoomId, initialTab) {
         if (!initialRoomId.isNullOrBlank()) {
             selectedTab = EsosaTab.MESSAGES
             roomsViewModel.openRoom(initialRoomId)
-        } else if (initialTab == EsosaNotificationManager.TAB_AI_CHAT) {
-            selectedTab = EsosaTab.AI_CHAT
         }
     }
 
@@ -332,24 +286,6 @@ private fun EsosaChatShell(
     val replyingToMessage by roomsViewModel.replyingToMessage.collectAsStateWithLifecycle()
     val editingMessage by roomsViewModel.editingMessage.collectAsStateWithLifecycle()
 
-    val aiThreadsState by aiChatViewModel.threadsState.collectAsStateWithLifecycle()
-    val selectedAiThreadId by aiChatViewModel.selectedThreadId.collectAsStateWithLifecycle()
-    val aiMessagesState by aiChatViewModel.messagesState.collectAsStateWithLifecycle()
-    val aiStreamingReply by aiChatViewModel.streamingReply.collectAsStateWithLifecycle()
-    val aiGenerating by aiChatViewModel.isGenerating.collectAsStateWithLifecycle()
-    val aiErrorBanner by aiChatViewModel.errorBanner.collectAsStateWithLifecycle()
-
-    val liveStatus by liveVoiceViewModel.status.collectAsStateWithLifecycle()
-    val liveStatusMessage by liveVoiceViewModel.statusMessage.collectAsStateWithLifecycle()
-    val liveTranscripts by liveVoiceViewModel.transcripts.collectAsStateWithLifecycle()
-    val liveThreadsState by liveVoiceViewModel.liveThreadsState.collectAsStateWithLifecycle()
-    val selectedLiveThreadId by liveVoiceViewModel.selectedThreadId.collectAsStateWithLifecycle()
-    val liveModelSpeaking by liveVoiceViewModel.isModelSpeaking.collectAsStateWithLifecycle()
-    val liveMuted by liveVoiceViewModel.isMuted.collectAsStateWithLifecycle()
-    val liveSpeakerOn by liveVoiceViewModel.isSpeakerOn.collectAsStateWithLifecycle()
-    val liveMicLevel by liveVoiceViewModel.micLevel.collectAsStateWithLifecycle()
-    val liveAecEnabled by liveVoiceViewModel.isAecEnabled.collectAsStateWithLifecycle()
-
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val isCheckingUpdates by appUpdateViewModel.isChecking.collectAsStateWithLifecycle()
     val autoUpdateCheckEnabled by appUpdateViewModel.autoCheckEnabled.collectAsStateWithLifecycle()
@@ -364,11 +300,6 @@ private fun EsosaChatShell(
 
     LaunchedEffect(selectedTab) {
         roomsViewModel.setOnMessagesScreen(selectedTab == EsosaTab.MESSAGES)
-        aiChatViewModel.setTabActive(selectedTab == EsosaTab.AI_CHAT)
-    }
-
-    LaunchedEffect(userProfile.notificationsEnabled) {
-        aiChatViewModel.setNotificationsEnabled(userProfile.notificationsEnabled)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -582,51 +513,6 @@ private fun EsosaChatShell(
                                 },
                                 onSimulateIncomingCall = { roomsViewModel.simulateIncomingCall() },
                                 onDeleteCallLog = { roomsViewModel.deleteCallLog(it) },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            EsosaTab.AI_CHAT -> AiChatScreen(
-                                currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
-                                threadsState = aiThreadsState,
-                                selectedThreadId = selectedAiThreadId,
-                                messagesState = aiMessagesState,
-                                streamingReply = aiStreamingReply,
-                                isGenerating = aiGenerating,
-                                errorBanner = aiErrorBanner,
-                                onSelectThread = { aiChatViewModel.selectThread(it) },
-                                onCreateThread = { persona -> aiChatViewModel.createThread(persona) },
-                                onSwitchPersona = { persona -> aiChatViewModel.switchPersona(persona) },
-                                onDeleteThread = { aiChatViewModel.deleteThread(it) },
-                                onSendPrompt = { prompt, thread, msgs ->
-                                    aiChatViewModel.sendPrompt(prompt, thread, msgs)
-                                },
-                                onToggleReaction = { threadId, msgId, emoji ->
-                                    aiChatViewModel.toggleReaction(threadId, msgId, emoji)
-                                },
-                                onClearError = { aiChatViewModel.clearError() },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            EsosaTab.LIVE_VOICE -> LiveVoiceScreen(
-                                status = liveStatus,
-                                statusMessage = liveStatusMessage,
-                                transcripts = liveTranscripts,
-                                liveThreadsState = liveThreadsState,
-                                selectedThreadId = selectedLiveThreadId,
-                                isModelSpeaking = liveModelSpeaking,
-                                isMuted = liveMuted,
-                                isSpeakerOn = liveSpeakerOn,
-                                micLevel = liveMicLevel,
-                                isAecEnabled = liveAecEnabled,
-                                onStartConversation = { liveVoiceViewModel.startConversation() },
-                                onStopConversation = { liveVoiceViewModel.stopConversation() },
-                                onToggleMute = { liveVoiceViewModel.toggleMute() },
-                                onToggleSpeaker = { liveVoiceViewModel.toggleSpeakerphone() },
-                                onSendTextDuringLive = { liveVoiceViewModel.sendTextDuringLive(it) },
-                                onClearTranscripts = { liveVoiceViewModel.clearTranscripts() },
-                                onSelectThread = { liveVoiceViewModel.selectThread(it) },
-                                onStartNewThread = { liveVoiceViewModel.startNewThread() },
-                                onDeleteThread = { liveVoiceViewModel.deleteThread(it) },
                                 modifier = Modifier.weight(1f)
                             )
 

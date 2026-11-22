@@ -35,7 +35,11 @@ class AppUpdatePreferences(context: Context) {
     var githubRepository: String
         get() {
             val saved = prefs.getString(KEY_GITHUB_REPO, null)
-            return if (!saved.isNullOrBlank()) saved else BuildConfig.GITHUB_REPOSITORY
+            return if (!saved.isNullOrBlank()) {
+                saved
+            } else {
+                BuildConfig.GITHUB_REPOSITORY.ifBlank { DEFAULT_GITHUB_REPOSITORY }
+            }
         }
         set(value) {
             prefs.edit().putString(KEY_GITHUB_REPO, value.trim()).apply()
@@ -101,6 +105,7 @@ class AppUpdatePreferences(context: Context) {
     }
 
     companion object {
+        const val DEFAULT_GITHUB_REPOSITORY = "romanblackjezzy-ship-it/Esosa-"
         private const val PREFS_NAME = "esosa_update_prefs"
         private const val KEY_AUTO_CHECK_ENABLED = "auto_check_enabled"
         private const val KEY_GITHUB_REPO = "github_repo"

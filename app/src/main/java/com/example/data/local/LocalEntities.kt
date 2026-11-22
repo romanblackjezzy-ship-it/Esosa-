@@ -4,17 +4,12 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import com.example.data.model.AiMessage
-import com.example.data.model.AiPersona
-import com.example.data.model.AiThread
 import com.example.data.model.CallDirection
 import com.example.data.model.CallLogEntry
 import com.example.data.model.CallType
 import com.example.data.model.ChannelComment
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
-import com.example.data.model.LiveVoiceMessage
-import com.example.data.model.LiveVoiceThread
 import com.example.data.model.RoomMessage
 import com.example.data.model.StoryItem
 import org.json.JSONArray
@@ -270,108 +265,6 @@ data class ChannelCommentEntity(
         postId = postId,
         roomId = roomId,
         authorName = authorName,
-        text = text,
-        createdAtMillis = createdAtMillis
-    )
-}
-
-@Entity(tableName = "ai_threads")
-data class AiThreadEntity(
-    @PrimaryKey val id: String,
-    val title: String,
-    val personaId: String,
-    val modelName: String,
-    val systemInstruction: String,
-    val lastMessagePreview: String,
-    val createdAtMillis: Long,
-    val updatedAtMillis: Long
-) {
-    fun toDomain(): AiThread = AiThread(
-        id = id,
-        title = title,
-        personaId = personaId,
-        modelName = modelName.ifBlank { AiPersona.fromId(personaId).modelName },
-        systemInstruction = systemInstruction.ifBlank { AiPersona.fromId(personaId).systemInstruction },
-        lastMessagePreview = lastMessagePreview,
-        createdAtMillis = createdAtMillis,
-        updatedAtMillis = updatedAtMillis
-    )
-}
-
-@Entity(
-    tableName = "ai_messages",
-    foreignKeys = [
-        ForeignKey(
-            entity = AiThreadEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["threadId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
-    indices = [Index(value = ["threadId", "createdAtMillis"])]
-)
-data class AiMessageEntity(
-    @PrimaryKey val id: String,
-    val threadId: String,
-    val role: String,
-    val text: String,
-    val modelName: String,
-    val reactionsJson: String,
-    val createdAtMillis: Long
-) {
-    fun toDomain(): AiMessage = AiMessage(
-        id = id,
-        threadId = threadId,
-        role = role,
-        text = text,
-        modelName = modelName,
-        reactions = ReactionsJsonCodec.decode(reactionsJson),
-        createdAtMillis = createdAtMillis
-    )
-}
-
-@Entity(tableName = "live_voice_threads")
-data class LiveVoiceThreadEntity(
-    @PrimaryKey val id: String,
-    val title: String,
-    val modelName: String,
-    val lastTranscriptPreview: String,
-    val createdAtMillis: Long,
-    val updatedAtMillis: Long
-) {
-    fun toDomain(): LiveVoiceThread = LiveVoiceThread(
-        id = id,
-        title = title,
-        modelName = modelName,
-        lastTranscriptPreview = lastTranscriptPreview,
-        createdAtMillis = createdAtMillis,
-        updatedAtMillis = updatedAtMillis
-    )
-}
-
-@Entity(
-    tableName = "live_voice_messages",
-    foreignKeys = [
-        ForeignKey(
-            entity = LiveVoiceThreadEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["threadId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
-    indices = [Index(value = ["threadId", "createdAtMillis"])]
-)
-data class LiveVoiceMessageEntity(
-    @PrimaryKey val id: String,
-    val threadId: String,
-    val speaker: String,
-    val text: String,
-    val createdAtMillis: Long
-) {
-    fun toDomain(): LiveVoiceMessage = LiveVoiceMessage(
-        id = id,
-        threadId = threadId,
-        speaker = speaker,
         text = text,
         createdAtMillis = createdAtMillis
     )

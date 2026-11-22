@@ -451,7 +451,7 @@ fun AuthOnboardingScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            listOf("default", "maya", "liam", "esosa_bot").forEach { preset ->
+                            listOf("default", "maya", "liam", "esosa").forEach { preset ->
                                 val selected = avatarKey == preset
                                 Box(
                                     modifier = Modifier

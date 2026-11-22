@@ -5,12 +5,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import com.example.core.UiState
-import com.example.data.model.AiMessage
-import com.example.data.model.AiThread
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
-import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.theme.EsosaTheme
 import org.junit.Rule
@@ -83,49 +80,5 @@ class ChatAutoScrollTest {
         messagesState.value = UiState.Success(updatedMessages)
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Newest incoming room message #26").assertIsDisplayed()
-    }
-
-    @Test
-    fun `ai chat auto-scrolls on new message and streaming reply update`() {
-        val baseMillis = 1_700_000_000_000L
-        val initialMessages = (1..20).map { idx ->
-            AiMessage(
-                id = "ai_$idx",
-                userId = "local_me",
-                threadId = "thread_1",
-                role = if (idx % 2 == 1) "user" else "model",
-                text = "Gemini message #$idx",
-                createdAtMillis = baseMillis + idx * 1000L
-            )
-        }
-        val messagesState = mutableStateOf<UiState<List<AiMessage>>>(UiState.Success(initialMessages))
-        val streamingReply = mutableStateOf<String?>(null)
-        val thread = AiThread(id = "thread_1", userId = "local_me", title = "Assistant")
-
-        composeTestRule.setContent {
-            EsosaTheme {
-                AiChatScreen(
-                    threadsState = UiState.Success(listOf(thread)),
-                    selectedThreadId = thread.id,
-                    messagesState = messagesState.value,
-                    streamingReply = streamingReply.value,
-                    isGenerating = streamingReply.value != null,
-                    errorBanner = null,
-                    onSelectThread = {},
-                    onCreateThread = {},
-                    onSwitchPersona = {},
-                    onDeleteThread = {},
-                    onSendPrompt = { _, _, _ -> },
-                    onClearError = {}
-                )
-            }
-        }
-
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("Gemini message #20").assertIsDisplayed()
-
-        streamingReply.value = "Streaming reply token chunk"
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("Streaming reply token chunk").assertIsDisplayed()
     }
 }

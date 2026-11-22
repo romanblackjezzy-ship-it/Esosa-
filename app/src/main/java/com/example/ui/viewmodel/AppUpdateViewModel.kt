@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 
 class AppUpdateViewModel(
     private val appContext: Context,
@@ -38,9 +39,11 @@ class AppUpdateViewModel(
     private val playCoordinator: PlayInAppUpdateCoordinator = PlayInAppUpdateCoordinator(appContext)
 ) : ViewModel() {
 
-    private var hasCheckedOnOpen = false
+    private var hasSucceededCheckInSession = false
     private var dismissedInSessionKey: String? = null
     private var cachedPlayAppUpdateInfo: PlayAppUpdateInfo? = null
+    private var cachedPlayLauncherRef: WeakReference<ActivityResultLauncher<IntentSenderRequest>>? = null
+    private var pendingAutoDownloadType: PreferredUpdateType? = null
     private var listenerRegistered = false
 
     private val _availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
@@ -75,9 +78,18 @@ class AppUpdateViewModel(
     val isPlayStoreDistribution: Boolean
         get() = playCoordinator.isInstalledFromGooglePlay()
 
+    fun registerPlayLauncher(launcher: ActivityResultLauncher<IntentSenderRequest>) {
+        cachedPlayLauncherRef = WeakReference(launcher)
+        val pendingType = pendingAutoDownloadType
+        val playInfo = cachedPlayAppUpdateInfo
+        if (pendingType != null && playInfo != null) {
+            pendingAutoDownloadType = null
+            launchAutomaticPlayUpdate(playInfo, pendingType, launcher)
+        }
+    }
+
     fun checkForUpdatesOnOpen() {
-        if (!preferences.autoCheckEnabled || hasCheckedOnOpen) return
-        hasCheckedOnOpen = true
+        if (!preferences.autoCheckEnabled || hasSucceededCheckInSession || _isChecking.value) return
         runUpdateCheck(userInitiated = false)
     }
 
@@ -86,6 +98,16 @@ class AppUpdateViewModel(
     }
 
     fun onAppResumed(launcher: ActivityResultLauncher<IntentSenderRequest>) {
+        cachedPlayLauncherRef = WeakReference(launcher)
+        val pendingType = pendingAutoDownloadType
+        val playInfo = cachedPlayAppUpdateInfo
+        if (pendingType != null && playInfo != null) {
+            pendingAutoDownloadType = null
+            launchAutomaticPlayUpdate(playInfo, pendingType, launcher)
+        }
+        if (preferences.autoCheckEnabled && !hasSucceededCheckInSession && !_isChecking.value) {
+            runUpdateCheck(userInitiated = false)
+        }
         if (!isSupportedPlayCoreOs()) return
         viewModelScope.launch {
             when (val outcome = playCoordinator.queryPlayUpdate(BuildConfig.VERSION_NAME)) {
@@ -388,12 +410,14 @@ class AppUpdateViewModel(
                 val mergedUpdate = mergePlayAndRemoteUpdate(playOutcome, remoteUpdate)
 
                 if (mergedUpdate != null) {
+                    hasSucceededCheckInSession = true
                     _availableUpdate.value = mergedUpdate
-                    _installStage.value = if (playOutcome?.downloadedReadyToInstall == true) {
+                    val initialStage = if (playOutcome?.downloadedReadyToInstall == true) {
                         InAppInstallStage.DownloadedReadyToInstall
                     } else {
                         InAppInstallStage.PromptAvailable
                     }
+                    _installStage.value = initialStage
                     _statusSummary.value =
                         "Update available: v${mergedUpdate.versionName} • ${mergedUpdate.sourceLabel}"
 
@@ -412,10 +436,36 @@ class AppUpdateViewModel(
                         update = mergedUpdate,
                         dismissedInSessionKey = dismissedInSessionKey
                     )
-                    if (!suppress) {
+                    val playInfo = cachedPlayAppUpdateInfo
+                    val shouldAutoStartPlayDelivery = !userInitiated &&
+                        !suppress &&
+                        preferences.autoCheckEnabled &&
+                        playInfo != null &&
+                        mergedUpdate.downloadAvailable &&
+                        initialStage == InAppInstallStage.PromptAvailable &&
+                        repository.isNetworkAvailable(appContext) &&
+                        repository.hasSufficientStorage(appContext)
+
+                    if (shouldAutoStartPlayDelivery && playInfo != null) {
+                        val desiredType = if (mergedUpdate.effectiveIsCritical ||
+                            mergedUpdate.updateType == PreferredUpdateType.IMMEDIATE
+                        ) {
+                            PreferredUpdateType.IMMEDIATE
+                        } else {
+                            PreferredUpdateType.FLEXIBLE
+                        }
+                        val launcher = cachedPlayLauncherRef?.get()
+                        if (launcher != null) {
+                            launchAutomaticPlayUpdate(playInfo, desiredType, launcher)
+                        } else {
+                            pendingAutoDownloadType = desiredType
+                            if (!suppress) _showUpdateDialog.value = true
+                        }
+                    } else if (!suppress) {
                         _showUpdateDialog.value = true
                     }
                 } else {
+                    hasSucceededCheckInSession = true
                     _availableUpdate.value = null
                     _installStage.value = InAppInstallStage.Idle
                     _statusSummary.value =
@@ -465,6 +515,29 @@ class AppUpdateViewModel(
             isMandatory = preferImmediate,
             versionCode = maxOf(remoteUpdate.versionCode, playOutcome.mappedUpdate.versionCode)
         )
+    }
+
+    private fun launchAutomaticPlayUpdate(
+        playInfo: PlayAppUpdateInfo,
+        updateType: PreferredUpdateType,
+        launcher: ActivityResultLauncher<IntentSenderRequest>
+    ) {
+        if (!isSupportedPlayCoreOs()) {
+            _showUpdateDialog.value = true
+            return
+        }
+        ensurePlayInstallListenerRegistered()
+        val started = playCoordinator.startUpdateFlow(playInfo, updateType, launcher)
+        if (started) {
+            if (updateType == PreferredUpdateType.FLEXIBLE) {
+                _showUpdateDialog.value = false
+                _installStage.value = InAppInstallStage.Downloading(0L, 0L)
+            } else {
+                _showUpdateDialog.value = true
+            }
+        } else {
+            _showUpdateDialog.value = true
+        }
     }
 
     private fun ensurePlayInstallListenerRegistered() {

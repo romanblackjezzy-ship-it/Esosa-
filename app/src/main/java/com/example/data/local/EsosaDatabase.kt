@@ -11,13 +11,9 @@ import androidx.room.RoomDatabase
         RoomMessageEntity::class,
         StoryEntity::class,
         CallLogEntity::class,
-        ChannelCommentEntity::class,
-        AiThreadEntity::class,
-        AiMessageEntity::class,
-        LiveVoiceThreadEntity::class,
-        LiveVoiceMessageEntity::class
+        ChannelCommentEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class EsosaDatabase : RoomDatabase() {

@@ -103,5 +103,6 @@ class AppUpdateRepositoryTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppUpdatePreferences(context)
         assertTrue(prefs.autoCheckEnabled)
+        assertEquals(AppUpdatePreferences.DEFAULT_GITHUB_REPOSITORY, prefs.githubRepository)
     }
 }

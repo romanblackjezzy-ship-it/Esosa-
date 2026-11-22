@@ -108,7 +108,7 @@ jobs:
             echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
           else
             FIREBASE_CONFIG_MODE="placeholder"
-            FIREBASE_CONFIG_NOTE="Note: app/google-services.json was missing from this repository checkout, so this APK was compiled with a structural CI placeholder. Local Telegram-style chats, camera photos, and saved messages work immediately with zero login; add app/google-services.json or the GOOGLE_SERVICES_JSON secret to enable live AI Bot & Voice features."
+            FIREBASE_CONFIG_NOTE="Note: app/google-services.json was missing from this repository checkout, so this APK was compiled with a structural CI placeholder. Telegram-style chats, email contacts, camera photos, and saved messages work immediately."
             cat > app/google-services.json <<'EOF'
           {
             "project_info": {
@@ -150,7 +150,7 @@ jobs:
             "configuration_version": "1"
           }
           EOF
-            echo "::warning title=Missing app/google-services.json::app/google-services.json was not found in the GitHub repository checkout or GOOGLE_SERVICES_JSON secret. Generated a CI placeholder so local chats work out-of-the-box; add app/google-services.json or the GOOGLE_SERVICES_JSON secret for live AI Bot & Voice features."
+            echo "::warning title=Missing app/google-services.json::app/google-services.json was not found in the GitHub repository checkout or GOOGLE_SERVICES_JSON secret. Generated a CI placeholder so Esosa builds cleanly."
           fi
 
           echo "FIREBASE_CONFIG_MODE=${FIREBASE_CONFIG_MODE}" >> "$GITHUB_ENV"

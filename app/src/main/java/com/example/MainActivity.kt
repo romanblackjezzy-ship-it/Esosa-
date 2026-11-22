@@ -8,7 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.example.core.configureAppCheck
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.EsosaApp
 
@@ -20,9 +19,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // STEP 1: Configure Firebase App Check with launch intent before any UI, ViewModel, or Firebase call
-        configureAppCheck(this, intent)
 
         extractDeepLinks(intent)
         enableEdgeToEdge()
