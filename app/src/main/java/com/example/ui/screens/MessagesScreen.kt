@@ -100,6 +100,7 @@ import com.example.ui.components.RoomsLoadingSkeleton
 import com.example.ui.components.StoriesStrip
 import com.example.ui.components.StoryViewerDialog
 import com.example.ui.components.TelegramAvatarCircle
+import com.example.ui.components.TypingMiniDots
 import com.example.ui.components.buildHighlightedText
 import com.example.ui.components.formatRelativeThreadTime
 import com.example.ui.theme.telegramColors
@@ -122,6 +123,7 @@ fun MessagesScreen(
     userProfile: UserProfile = UserProfile(),
     stories: List<StoryItem> = emptyList(),
     typingUsers: List<RoomTypingStatus> = emptyList(),
+    roomTypingMap: Map<String, List<RoomTypingStatus>> = emptyMap(),
     searchQuery: String = "",
     matchingMessages: List<MessageSearchHit> = emptyList(),
     isSearchingMessages: Boolean = false,
@@ -190,6 +192,7 @@ fun MessagesScreen(
                     roomsState = roomsState,
                     stories = stories,
                     selectedRoomId = selectedRoomId,
+                    roomTypingMap = roomTypingMap,
                     searchQuery = searchQuery,
                     matchingMessages = matchingMessages,
                     isSearchingMessages = isSearchingMessages,
@@ -383,6 +386,7 @@ fun MessagesScreen(
                     roomsState = roomsState,
                     stories = stories,
                     selectedRoomId = null,
+                    roomTypingMap = roomTypingMap,
                     searchQuery = searchQuery,
                     matchingMessages = matchingMessages,
                     isSearchingMessages = isSearchingMessages,
@@ -444,6 +448,7 @@ private fun TelegramChatsListView(
     roomsState: UiState<List<ChatRoom>>,
     stories: List<StoryItem>,
     selectedRoomId: String?,
+    roomTypingMap: Map<String, List<RoomTypingStatus>> = emptyMap(),
     searchQuery: String,
     matchingMessages: List<MessageSearchHit>,
     isSearchingMessages: Boolean,
@@ -685,10 +690,12 @@ private fun TelegramChatsListView(
                         ) {
                             if (trimmedQuery.isEmpty()) {
                                 items(folderFilteredRooms, key = { it.id }) { room ->
+                                    val roomTypingList = roomTypingMap[room.id].orEmpty()
                                     TelegramChatRow(
                                         room = room,
                                         isSelected = room.id == selectedRoomId,
                                         searchQuery = "",
+                                        roomTypingList = roomTypingList,
                                         onClick = { onOpenRoom(room.id) },
                                         onTogglePin = { onTogglePinRoom(room.id) },
                                         onToggleArchive = { onToggleArchiveRoom(room.id) },
@@ -713,10 +720,12 @@ private fun TelegramChatsListView(
                                         )
                                     }
                                     items(folderFilteredRooms, key = { "room_${it.id}" }) { room ->
+                                        val roomTypingList = roomTypingMap[room.id].orEmpty()
                                         TelegramChatRow(
                                             room = room,
                                             isSelected = room.id == selectedRoomId,
                                             searchQuery = trimmedQuery,
+                                            roomTypingList = roomTypingList,
                                             onClick = { onOpenRoom(room.id) },
                                             onTogglePin = { onTogglePinRoom(room.id) },
                                             onToggleArchive = { onToggleArchiveRoom(room.id) },
@@ -808,6 +817,7 @@ private fun TelegramChatRow(
     room: ChatRoom,
     isSelected: Boolean,
     searchQuery: String,
+    roomTypingList: List<RoomTypingStatus> = emptyList(),
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
     onToggleArchive: () -> Unit,
@@ -909,26 +919,44 @@ private fun TelegramChatRow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val previewText = when {
-                        room.lastMessageSenderName.isNotBlank() && room.lastMessageText.isNotBlank() ->
-                            "${room.lastMessageSenderName}: ${room.lastMessageText}"
-                        room.lastMessageText.isNotBlank() -> room.lastMessageText
-                        room.topic.isNotBlank() -> room.topic
-                        else -> room.chatKind.label
+                    if (roomTypingList.isNotEmpty()) {
+                        val firstTyper = roomTypingList[0].displayName
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "$firstTyper is typing",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            TypingMiniDots(color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        val previewText = when {
+                            room.lastMessageSenderName.isNotBlank() && room.lastMessageText.isNotBlank() ->
+                                "${room.lastMessageSenderName}: ${room.lastMessageText}"
+                            room.lastMessageText.isNotBlank() -> room.lastMessageText
+                            room.topic.isNotBlank() -> room.topic
+                            else -> room.chatKind.label
+                        }
+                        Text(
+                            text = buildHighlightedText(
+                                text = previewText,
+                                query = searchQuery,
+                                highlightBackground = highlightBg,
+                                highlightTextColor = highlightFg
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
-                    Text(
-                        text = buildHighlightedText(
-                            text = previewText,
-                            query = searchQuery,
-                            highlightBackground = highlightBg,
-                            highlightTextColor = highlightFg
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
                     Spacer(Modifier.width(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

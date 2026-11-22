@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -100,6 +101,7 @@ import com.example.ui.components.ScrollToBottomPill
 import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.components.TelegramWallpaperBackground
 import com.example.ui.components.TypingIndicatorBanner
+import com.example.ui.components.TypingMiniDots
 import com.example.ui.components.formatChatDateLabel
 import com.example.ui.components.messageDayKey
 import com.example.ui.theme.telegramColors
@@ -322,6 +324,13 @@ fun ConversationScreen(
         }
     }
 
+    LaunchedEffect(typingUsers.size) {
+        if (typingUsers.isNotEmpty() && messagesList.isNotEmpty()) {
+            val target = (messagesList.size - 1).coerceAtLeast(0)
+            listState.animateScrollToItem(target)
+        }
+    }
+
     val typingLabel = remember(typingUsers) {
         when (typingUsers.size) {
             0 -> ""
@@ -412,13 +421,23 @@ fun ConversationScreen(
                                 }
                             }
                             if (subtitleText.isNotBlank()) {
-                                Text(
-                                    text = subtitleText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = telegram.onTopBarMuted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = subtitleText,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = if (typingUsers.isNotEmpty()) FontWeight.SemiBold else FontWeight.Normal
+                                        ),
+                                        color = if (typingUsers.isNotEmpty()) MaterialTheme.colorScheme.primary else telegram.onTopBarMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (typingUsers.isNotEmpty()) {
+                                        TypingMiniDots(color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
                             }
                         }
                     }

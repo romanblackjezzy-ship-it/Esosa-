@@ -403,6 +403,52 @@ class ChatRepository(
         }
     }
 
+    suspend fun receiveContactMessage(
+        room: ChatRoom,
+        text: String,
+        senderId: String,
+        senderName: String
+    ): Result<Unit> {
+        return try {
+            val cleanText = text.trim().take(4000)
+            val now = System.currentTimeMillis()
+            val messageId = "msg_recv_${now}_${UUID.randomUUID().toString().take(8)}"
+            val effectiveDisappear = if (room.disappearingSeconds > 0) room.disappearingSeconds else 0
+            val expiresAt = if (effectiveDisappear > 0) now + effectiveDisappear * 1000L else null
+
+            dao.upsertRoomMessage(
+                RoomMessageEntity(
+                    id = messageId,
+                    roomId = room.id,
+                    senderId = senderId,
+                    senderName = senderName,
+                    text = cleanText,
+                    imageUrl = null,
+                    storagePath = null,
+                    messageType = "text",
+                    reactionsJson = "{}",
+                    isRead = false,
+                    createdAtMillis = now,
+                    expiresAtMillis = expiresAt,
+                    viewCount = 0
+                )
+            )
+            dao.updateRoomLastMessage(
+                roomId = room.id,
+                lastText = cleanText.take(240),
+                senderName = senderName,
+                isMine = false,
+                lastAt = now,
+                updatedAt = now
+            )
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun sendVoiceNote(room: ChatRoom, durationSec: Int): Result<Unit> {
         return try {
             val profile = profilePreferences.getProfile()

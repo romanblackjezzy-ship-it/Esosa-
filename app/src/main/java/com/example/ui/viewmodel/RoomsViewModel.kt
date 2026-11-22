@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -84,8 +85,16 @@ class RoomsViewModel(
     private val _highlightedMessageId = MutableStateFlow<String?>(null)
     val highlightedMessageId: StateFlow<String?> = _highlightedMessageId.asStateFlow()
 
-    private val _typingUsers = MutableStateFlow<List<RoomTypingStatus>>(emptyList())
-    val typingUsers: StateFlow<List<RoomTypingStatus>> = _typingUsers.asStateFlow()
+    private val _roomTypingMap = MutableStateFlow<Map<String, List<RoomTypingStatus>>>(emptyMap())
+    val roomTypingMap: StateFlow<Map<String, List<RoomTypingStatus>>> = _roomTypingMap.asStateFlow()
+
+    val typingUsers: StateFlow<List<RoomTypingStatus>> = combine(
+        _selectedRoomId,
+        _roomTypingMap
+    ) { roomId, map ->
+        if (roomId.isNullOrBlank()) emptyList()
+        else map[roomId].orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _replyingToMessage = MutableStateFlow<RoomMessage?>(null)
     val replyingToMessage: StateFlow<RoomMessage?> = _replyingToMessage.asStateFlow()
@@ -99,6 +108,8 @@ class RoomsViewModel(
     private var searchJob: Job? = null
     private var callConnectJob: Job? = null
     private var bannerJob: Job? = null
+    private var userTypingJob: Job? = null
+    private val contactReplyJobs = mutableMapOf<String, Job>()
 
     val userProfile: StateFlow<UserProfile> = repository.observeUserProfile()
         .stateIn(
@@ -421,6 +432,140 @@ class RoomsViewModel(
         _editingMessage.value = null
     }
 
+    fun setTyping(roomId: String, userId: String, displayName: String, isTyping: Boolean) {
+        val current = _roomTypingMap.value.toMutableMap()
+        val list = current[roomId].orEmpty().filter { it.userId != userId }
+        if (isTyping) {
+            val status = RoomTypingStatus(
+                id = userId,
+                userId = userId,
+                roomId = roomId,
+                displayName = displayName,
+                typing = true
+            )
+            current[roomId] = list + status
+        } else {
+            if (list.isEmpty()) {
+                current.remove(roomId)
+            } else {
+                current[roomId] = list
+            }
+        }
+        _roomTypingMap.value = current
+    }
+
+    fun clearTypingForRoom(roomId: String) {
+        val current = _roomTypingMap.value.toMutableMap()
+        if (current.remove(roomId) != null) {
+            _roomTypingMap.value = current
+        }
+    }
+
+    fun onDraftChanged(room: ChatRoom?, draft: String) {
+        if (room == null) return
+        userTypingJob?.cancel()
+        if (draft.isNotBlank()) {
+            userTypingJob = viewModelScope.launch {
+                delay(3000)
+            }
+        }
+    }
+
+    fun simulateContactTyping(
+        roomId: String,
+        contactName: String = "",
+        durationMillis: Long = 3200L
+    ) {
+        viewModelScope.launch {
+            val room = (roomsState.value as? UiState.Success)?.data?.firstOrNull { it.id == roomId }
+            val name = when {
+                contactName.isNotBlank() -> contactName
+                room != null && room.chatKind == ChatKind.DIRECT -> room.title
+                room != null && room.memberNames.isNotEmpty() ->
+                    room.memberNames.firstOrNull { it != "You" && it != userProfile.value.displayName } ?: room.title
+                else -> "Contact"
+            }
+            val contactId = "contact_${name.lowercase().replace(" ", "_")}"
+            setTyping(roomId, contactId, name, isTyping = true)
+            try {
+                delay(durationMillis)
+            } finally {
+                setTyping(roomId, contactId, name, isTyping = false)
+            }
+        }
+    }
+
+    fun triggerContactComposingAndReply(room: ChatRoom, userMessageText: String) {
+        if (room.chatKind == ChatKind.SAVED || room.isBlocked) return
+        val myName = userProfile.value.displayName
+        val contactName = when (room.chatKind) {
+            ChatKind.DIRECT -> room.title
+            ChatKind.GROUP -> {
+                val candidate = room.memberNames.firstOrNull { it != "You" && it != myName }
+                candidate ?: "Liam Chen"
+            }
+            ChatKind.CHANNEL -> return
+        }
+        val contactId = "contact_${contactName.lowercase().replace(" ", "_")}"
+
+        contactReplyJobs[room.id]?.cancel()
+        contactReplyJobs[room.id] = viewModelScope.launch {
+            try {
+                delay(750)
+                setTyping(room.id, contactId, contactName, isTyping = true)
+                delay(2600)
+                setTyping(room.id, contactId, contactName, isTyping = false)
+
+                val replyText = generateContactReply(userMessageText, contactName)
+                repository.receiveContactMessage(
+                    room = room,
+                    text = replyText,
+                    senderId = contactId,
+                    senderName = contactName
+                )
+
+                if (_selectedRoomId.value != room.id || !_isOnMessagesScreen.value) {
+                    notificationManager.showIncomingMessageNotification(
+                        roomId = room.id,
+                        roomTitle = room.title,
+                        senderName = contactName,
+                        messageText = replyText
+                    )
+                }
+            } catch (_: CancellationException) {
+                setTyping(room.id, contactId, contactName, isTyping = false)
+            }
+        }
+    }
+
+    private fun generateContactReply(input: String, contactName: String): String {
+        val lower = input.lowercase().trim()
+        return when {
+            lower.contains("hello") || lower.contains("hi") || lower.contains("hey") ->
+                "Hey! Good to hear from you."
+            lower.contains("photo") || lower.contains("image") || lower.contains("pic") ->
+                "Looks great! Thanks for sharing."
+            lower.contains("where") || lower.contains("when") || lower.contains("time") ->
+                "Let me double-check the schedule and confirm in a bit!"
+            lower.contains("thank") ->
+                "You're welcome! Anytime."
+            lower.contains("voice") ->
+                "Got your voice note! Listening right now."
+            lower.contains("ok") || lower.contains("sure") || lower.contains("deal") ->
+                "Perfect! Talk to you soon."
+            else -> {
+                val responses = listOf(
+                    "Got it, thanks for the update!",
+                    "Sounds good to me!",
+                    "Noted! I'll take a look right away.",
+                    "Awesome, appreciate you letting me know.",
+                    "Received! Working on this now."
+                )
+                responses[(input.hashCode().let { if (it < 0) -it else it }) % responses.size]
+            }
+        }
+    }
+
     fun sendMessage(
         room: ChatRoom,
         text: String,
@@ -449,6 +594,8 @@ class RoomsViewModel(
                     _replyingToMessage.value = null
                     if (scheduledForMillis != null) {
                         showBanner("Message scheduled")
+                    } else if (editing == null) {
+                        triggerContactComposingAndReply(room, text)
                     }
                     onSent()
                 }.onFailure { err ->
@@ -462,7 +609,9 @@ class RoomsViewModel(
 
     fun sendVoiceNote(room: ChatRoom, durationSec: Int) {
         viewModelScope.launch {
-            repository.sendVoiceNote(room, durationSec).onFailure {
+            repository.sendVoiceNote(room, durationSec).onSuccess {
+                triggerContactComposingAndReply(room, "Voice message (${durationSec}s)")
+            }.onFailure {
                 _actionError.value = it.localizedMessage ?: "Could not save voice note."
             }
         }
@@ -475,13 +624,17 @@ class RoomsViewModel(
                 rawText = text,
                 messageType = if (isGif) "gif" else "sticker",
                 attachmentName = label
-            )
+            ).onSuccess {
+                triggerContactComposingAndReply(room, if (isGif) "GIF" else "Sticker")
+            }
         }
     }
 
     fun sendDocumentAttachment(room: ChatRoom, uri: Uri) {
         viewModelScope.launch {
-            repository.sendDocumentAttachment(room, uri).onFailure {
+            repository.sendDocumentAttachment(room, uri).onSuccess {
+                triggerContactComposingAndReply(room, "Attached file")
+            }.onFailure {
                 _actionError.value = it.localizedMessage ?: "Failed to attach file."
             }
         }
@@ -535,6 +688,7 @@ class RoomsViewModel(
                     }
                 )
                 result.onSuccess {
+                    triggerContactComposingAndReply(room, if (caption.isNotBlank()) caption else "Photo")
                     onSent()
                 }.onFailure { err ->
                     _actionError.value = err.localizedMessage ?: "Failed to save photo."
@@ -572,6 +726,8 @@ class RoomsViewModel(
     fun deleteRoom(room: ChatRoom) {
         viewModelScope.launch {
             _isBusy.value = true
+            clearTypingForRoom(room.id)
+            contactReplyJobs[room.id]?.cancel()
             val result = repository.deleteRoom(room)
             _isBusy.value = false
             result.onSuccess {

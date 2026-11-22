@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -727,41 +728,94 @@ fun TypingPulseDots(
 ) {
     val transition = rememberInfiniteTransition(label = "typing_dots")
     val dot1 by transition.animateFloat(
-        initialValue = 0.3f,
+        initialValue = 0.25f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(420), RepeatMode.Reverse),
         label = "dot1"
     )
     val dot2 by transition.animateFloat(
-        initialValue = 0.3f,
+        initialValue = 0.25f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450, delayMillis = 150), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 140), RepeatMode.Reverse),
         label = "dot2"
     )
     val dot3 by transition.animateFloat(
-        initialValue = 0.3f,
+        initialValue = 0.25f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450, delayMillis = 300), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 280), RepeatMode.Reverse),
         label = "dot3"
     )
 
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        Icon(
+            imageVector = Icons.Filled.Edit,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(14.dp)
+        )
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface
         )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(dot1, dot2, dot3).forEach { alpha ->
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .alpha(alpha)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun TypingMiniDots(
+    color: Color = MaterialTheme.colorScheme.primary,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "typing_mini_dots")
+    val dot1 by transition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(380), RepeatMode.Reverse),
+        label = "mini_dot1"
+    )
+    val dot2 by transition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(380, delayMillis = 120), RepeatMode.Reverse),
+        label = "mini_dot2"
+    )
+    val dot3 by transition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(380, delayMillis = 240), RepeatMode.Reverse),
+        label = "mini_dot3"
+    )
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
         listOf(dot1, dot2, dot3).forEach { alpha ->
             Box(
                 modifier = Modifier
-                    .size(6.dp)
+                    .size(4.dp)
                     .alpha(alpha)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
+                    .background(color)
             )
         }
     }
