@@ -210,11 +210,12 @@ class PlayInAppUpdateCoordinator(context: Context) {
                 canRetry = false,
                 hasFallbackAction = true
             )
-            InstallErrorCode.ERROR_INSTALL_NOT_ALLOWED -> UpdateErrorState(
-                kind = UpdateErrorKind.INSUFFICIENT_STORAGE,
-                title = "Cannot Install Right Now",
-                message = "Ensure sufficient battery and free storage space, then retry the update.",
-                canRetry = true
+            -4, -5 -> UpdateErrorState(
+                kind = UpdateErrorKind.INSTALL_FAILED,
+                title = "Package Update Conflict",
+                message = "Existing package signature or version conflict detected. Use the verified HTTPS release link to install cleanly.",
+                canRetry = true,
+                hasFallbackAction = true
             )
             InstallErrorCode.ERROR_DOWNLOAD_NOT_PRESENT -> UpdateErrorState(
                 kind = UpdateErrorKind.RESTART_INTERRUPTED,
@@ -231,9 +232,10 @@ class PlayInAppUpdateCoordinator(context: Context) {
             )
             else -> UpdateErrorState(
                 kind = UpdateErrorKind.DOWNLOAD_FAILED,
-                title = "Update Download Failed",
-                message = "An error occurred while downloading the update (code $errorCode). Check your connection and retry.",
-                canRetry = true
+                title = "Package Installation Failed",
+                message = "An error occurred during package installation (code $errorCode). Use the verified HTTPS release link to update cleanly.",
+                canRetry = true,
+                hasFallbackAction = true
             )
         }
     }
