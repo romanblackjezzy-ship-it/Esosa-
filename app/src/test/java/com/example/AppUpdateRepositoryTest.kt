@@ -105,4 +105,38 @@ class AppUpdateRepositoryTest {
         assertTrue(prefs.autoCheckEnabled)
         assertEquals(AppUpdatePreferences.DEFAULT_GITHUB_REPOSITORY, prefs.githubRepository)
     }
+
+    @Test
+    fun `parseGitHubReleaseJson extracts signing_sha256 and supports monotonic epoch-minute build codes`() {
+        val sha256 = "73:F4:D7:D0:3F:A5:5C:1E:63:77:35:72:BD:D7:40:97:90:A5:F0:A8:A6:07:D7:3F:F7:A1:0E:96:65:80:98:27"
+        val json = """
+            {
+              "tag_name": "v1.0.1",
+              "name": "Esosa v1.0.1",
+              "draft": false,
+              "html_url": "https://github.com/romanblackjezzy-ship-it/Esosa-/releases/tag/v1.0.1",
+              "body": "Automated build of **Esosa v1.0.1** (build `29924360`, `romanblackjezzy-ship-it/Esosa-`, Firebase config: `repo`) [signing_sha256:$sha256].\nDownload the `.apk` asset below to update your Android device.",
+              "assets": [
+                {
+                  "name": "Esosa-v1.0.1.apk",
+                  "browser_download_url": "https://github.com/romanblackjezzy-ship-it/Esosa-/releases/download/v1.0.1/Esosa-v1.0.1.apk"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val parsed = AppUpdateRepository.parseGitHubReleaseJson(json)
+        assertNotNull(parsed)
+        assertEquals(29924360L, parsed!!.versionCode)
+        assertEquals(sha256, parsed.expectedSigningSha256)
+        assertFalse(parsed.releaseNotes.contains("signing_sha256"))
+        assertTrue(
+            AppUpdateRepository.isNewerRelease(
+                candidateVersionCode = parsed.versionCode,
+                candidateVersionName = parsed.versionName,
+                currentVersionCode = 50L,
+                currentVersionName = "1.0.49"
+            )
+        )
+    }
 }

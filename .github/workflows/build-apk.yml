@@ -64,24 +64,102 @@ jobs:
 
       - name: Prepare versioning, signing keystore, and Firebase config
         env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_DEBUG_KEYSTORE_B64_SECRET: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
           GOOGLE_SERVICES_JSON_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
           GOOGLE_SERVICES_JSON_B64_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          NEXT_CODE=$((GITHUB_RUN_NUMBER + 1))
-          NEXT_NAME="1.0.${GITHUB_RUN_NUMBER}"
-          echo "ESOSA_VERSION_CODE=${NEXT_CODE}" >> "$GITHUB_ENV"
-          echo "ESOSA_VERSION_NAME=${NEXT_NAME}" >> "$GITHUB_ENV"
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          import time
+          import urllib.request
 
-          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_number = int(os.environ.get("GITHUB_RUN_NUMBER", "1") or "1")
+          token = os.environ.get("GH_TOKEN", "")
+
+          max_release_build = 0
+          max_patch = 0
+
+          if repo:
+              try:
+                  req = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/releases?per_page=100",
+                      headers={
+                          "Accept": "application/vnd.github+json",
+                          "User-Agent": "Esosa-CI-Versioner",
+                          **({"Authorization": f"Bearer {token}"} if token else {}),
+                      },
+                  )
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      releases = json.loads(resp.read().decode("utf-8"))
+                  for rel in releases:
+                      body = rel.get("body") or ""
+                      m_build = re.search(r"build\s+`?(\d+)`?", body, re.IGNORECASE)
+                      if m_build:
+                          max_release_build = max(max_release_build, int(m_build.group(1)))
+                      tag = (rel.get("tag_name") or "").lstrip("vV")
+                      m_patch = re.match(r"^1\.0\.(\d+)$", tag)
+                      if m_patch:
+                          max_patch = max(max_patch, int(m_patch.group(1)))
+              except Exception as exc:
+                  print(f"Release metadata lookup skipped: {exc}")
+
+          # Epoch minutes (~29,900,000 in 2026) always fits in signed 32-bit Int (<2.1B),
+          # exceeds prior run-number-based builds (1..1,000,000), and guarantees monotonic upgrades
+          # even if workflows or repositories are recreated.
+          time_code = int(time.time()) // 60
+          next_code = max(max_release_build + 1, time_code, run_number + 1)
+          next_patch = max(max_patch + 1, run_number)
+          next_name = f"1.0.{next_patch}"
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"ESOSA_VERSION_CODE={next_code}\n")
+              env_file.write(f"ESOSA_VERSION_NAME={next_name}\n")
+
+          print(f"Resolved ESOSA_VERSION_CODE={next_code}, ESOSA_VERSION_NAME={next_name}")
+          PYEOF
+
+          CANONICAL_SHA256="73:F4:D7:D0:3F:A5:5C:1E:63:77:35:72:BD:D7:40:97:90:A5:F0:A8:A6:07:D7:3F:F7:A1:0E:96:65:80:98:27"
+
+          if [ -n "${ANDROID_DEBUG_KEYSTORE_B64_SECRET}" ]; then
+            printf '%s' "${ANDROID_DEBUG_KEYSTORE_B64_SECRET}" | tr -d '\r\n\t ' | base64 -d > debug.keystore
+            KEYSTORE_SOURCE="secret"
+          elif [ -s debug.keystore.base64 ]; then
+            tr -d '\r\n\t ' < debug.keystore.base64 | base64 -d > debug.keystore
+            KEYSTORE_SOURCE="repo_base64"
+          elif [ -s debug.keystore ]; then
+            KEYSTORE_SOURCE="repo_file"
+          else
+            echo "::error title=Missing signing keystore::Neither debug.keystore.base64 nor ANDROID_DEBUG_KEYSTORE_BASE64 was found. Refusing to generate a random signing key because doing so causes 'package conflicts with an existing package' on user devices."
+            exit 1
           fi
-          if [ ! -f debug.keystore ] || ! keytool -list -keystore debug.keystore -storepass android >/dev/null 2>&1; then
-            rm -f debug.keystore
-            keytool -genkeypair -v -keystore debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+
+          if ! keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey > keystore-info.txt 2>&1; then
+            cat keystore-info.txt >&2 || true
+            echo "::error title=Invalid signing keystore::Failed to read androiddebugkey from restored debug.keystore (source=${KEYSTORE_SOURCE})."
+            exit 1
           fi
+
+          KEYSTORE_SHA1="$(grep -m1 'SHA1:' keystore-info.txt | sed 's/.*SHA1:[[:space:]]*//' | tr -d '\r')"
+          KEYSTORE_SHA256="$(grep -m1 'SHA256:' keystore-info.txt | sed 's/.*SHA256:[[:space:]]*//' | tr -d '\r')"
+          rm -f keystore-info.txt
+
+          if [ -z "${KEYSTORE_SHA256}" ]; then
+            echo "::error title=Missing keystore fingerprint::Could not extract SHA-256 fingerprint from debug.keystore."
+            exit 1
+          fi
+
+          if [ "${KEYSTORE_SOURCE}" = "repo_base64" ] && [ "${KEYSTORE_SHA256}" != "${CANONICAL_SHA256}" ]; then
+            echo "::error title=Keystore fingerprint mismatch::Expected ${CANONICAL_SHA256} from debug.keystore.base64, got ${KEYSTORE_SHA256}."
+            exit 1
+          fi
+
+          echo "KEYSTORE_SHA1=${KEYSTORE_SHA1}" >> "$GITHUB_ENV"
+          echo "KEYSTORE_SHA256=${KEYSTORE_SHA256}" >> "$GITHUB_ENV"
+          echo "Restored debug.keystore (source=${KEYSTORE_SOURCE}, SHA1=${KEYSTORE_SHA1}, SHA256=${KEYSTORE_SHA256})"
 
           if [ ! -f .env.example ]; then
             touch .env.example
@@ -102,7 +180,7 @@ jobs:
             FIREBASE_CONFIG_MODE="secret"
             echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON secret."
           elif [ -n "${GOOGLE_SERVICES_JSON_B64_SECRET}" ]; then
-            printf '%s' "${GOOGLE_SERVICES_JSON_B64_SECRET}" | base64 -d > app/google-services.json
+            printf '%s' "${GOOGLE_SERVICES_JSON_B64_SECRET}" | tr -d '\r\n\t ' | base64 -d > app/google-services.json
             python3 -m json.tool app/google-services.json >/dev/null
             FIREBASE_CONFIG_MODE="secret_base64"
             echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
@@ -121,7 +199,7 @@ jobs:
                 "client_info": {
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
                   "android_client_info": {
-                    "package_name": "com.aistudio.esosachat.xkmqzp"
+                    "package_name": "com.aistudio.esosa.chat.v3net"
                   }
                 },
                 "oauth_client": [
@@ -191,6 +269,32 @@ jobs:
             exit "$BUILD_STATUS"
           fi
 
+      - name: Verify APK package ID, versionCode, and signing certificate
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK_PATH"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          test -n "$AAPT2"
+
+          "$APKSIGNER" verify --print-certs -v "$APK_PATH" | tee apk-certs.txt
+          "$AAPT2" dump badging "$APK_PATH" | head -n 5 | tee apk-badging.txt
+
+          grep -q "package: name='com.aistudio.esosa.chat.v3net'" apk-badging.txt
+          grep -q "versionCode='${ESOSA_VERSION_CODE}'" apk-badging.txt
+
+          APK_SHA256_RAW="$(grep -m1 'Signer #1 certificate SHA-256 digest:' apk-certs.txt | sed 's/.*digest:[[:space:]]*//' | tr '[:lower:]' '[:upper:]' | tr -d '\r')"
+          APK_SHA256_COLON="$(echo "$APK_SHA256_RAW" | sed 's/../&:/g; s/:$//')"
+          rm -f apk-certs.txt apk-badging.txt
+
+          if [ "$APK_SHA256_COLON" != "${KEYSTORE_SHA256}" ]; then
+            echo "::error title=APK signature mismatch::APK SHA-256 (${APK_SHA256_COLON}) does not match keystore SHA-256 (${KEYSTORE_SHA256})."
+            exit 1
+          fi
+          echo "APK_SHA256=${APK_SHA256_COLON}" >> "$GITHUB_ENV"
+          echo "Verified APK com.aistudio.esosa.chat.v3net v${ESOSA_VERSION_NAME} (${ESOSA_VERSION_CODE}) signed with ${APK_SHA256_COLON}"
+
       - name: Summarize CI build failure
         if: failure() && hashFiles('ci-build.log') != ''
         run: |
@@ -227,9 +331,10 @@ jobs:
           tag_name: v${{ env.ESOSA_VERSION_NAME }}
           name: Esosa v${{ env.ESOSA_VERSION_NAME }}
           body: |
-            Automated build of **Esosa v${{ env.ESOSA_VERSION_NAME }}** (build `${{ env.ESOSA_VERSION_CODE }}`, `${{ github.repository }}`, Firebase config: `${{ env.FIREBASE_CONFIG_MODE }}`).
+            Automated build of **Esosa v${{ env.ESOSA_VERSION_NAME }}** (build `${{ env.ESOSA_VERSION_CODE }}`, `${{ github.repository }}`, Firebase config: `${{ env.FIREBASE_CONFIG_MODE }}`) [signing_sha256:${{ env.APK_SHA256 }}].
             Download the `.apk` asset below to update your Android device.
 
+            - Signing SHA-256: `${{ env.APK_SHA256 }}`
             ${{ env.FIREBASE_CONFIG_NOTE }}
           files: Esosa-v*.apk
           make_latest: true

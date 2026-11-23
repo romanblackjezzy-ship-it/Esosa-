@@ -385,6 +385,7 @@ class AppUpdateRepository {
         private val PRIORITY_TAG_REGEX = Regex("\\[priority:(optional|recommended|critical)]", RegexOption.IGNORE_CASE)
         private val MIN_VERSION_TAG_REGEX = Regex("\\[min_version:([0-9.]+)]", RegexOption.IGNORE_CASE)
         private val MIN_BUILD_TAG_REGEX = Regex("\\[min_build:(\\d+)]", RegexOption.IGNORE_CASE)
+        private val SIGNING_SHA256_TAG_REGEX = Regex("\\[signing_sha256:([0-9A-Fa-f:]+)]", RegexOption.IGNORE_CASE)
 
         fun isValidGitHubRepoSlug(slug: String): Boolean = REPO_SLUG_REGEX.matches(slug.trim())
 
@@ -525,6 +526,7 @@ class AppUpdateRepository {
                 val priorityTag = PRIORITY_TAG_REGEX.find(body)?.groupValues?.getOrNull(1)
                 val minBuild = MIN_BUILD_TAG_REGEX.find(body)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
                 val minVersion = MIN_VERSION_TAG_REGEX.find(body)?.groupValues?.getOrNull(1).orEmpty()
+                val signingSha256 = SIGNING_SHA256_TAG_REGEX.find(body)?.groupValues?.getOrNull(1).orEmpty().uppercase()
                 val hasImmediateTag = body.contains("[immediate]", ignoreCase = true)
                 val hasMaintenanceTag = body.contains("[maintenance]", ignoreCase = true)
 
@@ -560,7 +562,8 @@ class AppUpdateRepository {
                     distributionChannel = UpdateDistributionChannel.GITHUB_RELEASES,
                     downloadAvailable = true,
                     maintenanceMode = hasMaintenanceTag,
-                    maintenanceMessage = if (hasMaintenanceTag) cleanNotes else ""
+                    maintenanceMessage = if (hasMaintenanceTag) cleanNotes else "",
+                    expectedSigningSha256 = signingSha256
                 )
             } catch (_: Exception) {
                 null
@@ -572,6 +575,7 @@ class AppUpdateRepository {
                 .replace(PRIORITY_TAG_REGEX, "")
                 .replace(MIN_VERSION_TAG_REGEX, "")
                 .replace(MIN_BUILD_TAG_REGEX, "")
+                .replace(SIGNING_SHA256_TAG_REGEX, "")
                 .replace("[immediate]", "", ignoreCase = true)
                 .replace("[maintenance]", "", ignoreCase = true)
 
