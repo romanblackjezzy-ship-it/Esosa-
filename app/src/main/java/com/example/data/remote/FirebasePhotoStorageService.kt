@@ -63,6 +63,50 @@ class FirebasePhotoStorageService(
         }
     }
 
+    suspend fun uploadProfilePhoto(
+        uid: String,
+        jpegBytes: ByteArray,
+        onProgress: (Float) -> Unit = {}
+    ): UploadedPhoto {
+        require(uid.isNotBlank()) { "Sign in to update profile photo." }
+        require(jpegBytes.isNotEmpty()) { "Captured photo is empty." }
+        if (jpegBytes.size.toLong() >= MAX_UPLOAD_BYTES) {
+            throw IllegalArgumentException("Compressed photo exceeds the 10 MB upload limit.")
+        }
+
+        val storagePath = userProfilePhotoStoragePath(uid)
+        val metadata = StorageMetadata.Builder()
+            .setContentType(IMAGE_JPEG_CONTENT_TYPE)
+            .setCustomMetadata("userId", uid)
+            .build()
+
+        val photoRef = storage.reference.child(storagePath)
+        return try {
+            val uploadTask = photoRef.putBytes(jpegBytes, metadata)
+            uploadTask.addOnProgressListener { snapshot ->
+                val total = snapshot.totalByteCount
+                if (total > 0L) {
+                    val fraction = (snapshot.bytesTransferred.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    onProgress(0.15f + fraction * 0.75f)
+                }
+            }
+            uploadTask.await()
+            onProgress(0.95f)
+            val downloadUrl = photoRef.downloadUrl.await().toString()
+            if (!downloadUrl.startsWith("https://")) {
+                throw IllegalStateException("Unexpected non-HTTPS download URL returned by Firebase Storage.")
+            }
+            UploadedPhoto(
+                downloadUrl = downloadUrl,
+                storagePath = storagePath
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: StorageException) {
+            throw IOException(mapStorageErrorMessage(e), e)
+        }
+    }
+
     suspend fun deletePhotoIfOwned(storagePath: String?) {
         if (!isRemoteRoomPhotoPath(storagePath)) return
         val path = storagePath ?: return
@@ -100,6 +144,9 @@ class FirebasePhotoStorageService(
 
         fun roomPhotoStoragePath(roomId: String, messageId: String): String =
             "rooms/$roomId/photos/$messageId.jpg"
+
+        fun userProfilePhotoStoragePath(uid: String): String =
+            "users/$uid/profile.jpg"
 
         fun isRemoteRoomPhotoPath(path: String?): Boolean =
             !path.isNullOrBlank() && path.startsWith("rooms/")

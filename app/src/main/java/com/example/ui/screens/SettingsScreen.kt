@@ -1,9 +1,12 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.example.data.media.CameraPhotoHelper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -130,10 +133,12 @@ fun SettingsScreen(
     onCheckForUpdatesNow: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
     onRestartAndInstall: () -> Unit = {},
-    onUpdateProfilePhoto: (ByteArray) -> Unit = {},
+    onUpdateProfilePhoto: (ByteArray, (String) -> Unit) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val telegram = MaterialTheme.telegramColors
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var hasOsPermission by remember { mutableStateOf(notificationManager.hasNotificationPermission()) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -141,6 +146,64 @@ fun SettingsScreen(
     var showSessionsDialog by remember { mutableStateOf(false) }
     var showBlockedDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
+
+    var isUploadingDirectPhoto by remember { mutableStateOf(false) }
+    var pendingDirectCaptureUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var pendingDirectCaptureFile by remember { mutableStateOf<java.io.File?>(null) }
+
+    val directTakePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingDirectCaptureUri
+        val file = pendingDirectCaptureFile
+        pendingDirectCaptureUri = null
+        pendingDirectCaptureFile = null
+        if (success && uri != null) {
+            isUploadingDirectPhoto = true
+            scope.launch {
+                val bytes = runCatching {
+                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri)
+                }.getOrNull()
+                file?.delete()
+                if (bytes != null && bytes.isNotEmpty()) {
+                    onUpdateProfilePhoto(bytes) {
+                        isUploadingDirectPhoto = false
+                    }
+                } else {
+                    isUploadingDirectPhoto = false
+                }
+            }
+        } else {
+            file?.delete()
+            isUploadingDirectPhoto = false
+        }
+    }
+
+    val directCameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
+            pendingDirectCaptureUri = uri
+            pendingDirectCaptureFile = file
+            directTakePictureLauncher.launch(uri)
+        }
+    }
+
+    val launchDirectCamera: () -> Unit = {
+        val hasCam = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCam) {
+            val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
+            pendingDirectCaptureUri = uri
+            pendingDirectCaptureFile = file
+            directTakePictureLauncher.launch(uri)
+        } else {
+            directCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -213,14 +276,51 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TelegramAvatarCircle(
-                            title = userProfile.displayName,
-                            seedKey = userProfile.id,
-                            chatKind = ChatKind.DIRECT,
-                            avatarKey = userProfile.avatarKey,
-                            isOnline = true,
-                            size = 62.dp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clickable(enabled = !isUploadingDirectPhoto) { launchDirectCamera() }
+                                .testTag("settings_profile_avatar"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            TelegramAvatarCircle(
+                                title = userProfile.displayName,
+                                seedKey = userProfile.id,
+                                chatKind = ChatKind.DIRECT,
+                                avatarKey = userProfile.avatarKey,
+                                photoUrl = userProfile.photoUrl,
+                                isOnline = true,
+                                size = 64.dp
+                            )
+                            if (isUploadingDirectPhoto) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(64.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(22.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Filled.PhotoCamera,
+                                            contentDescription = stringResource(R.string.profile_photo_take),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -272,21 +372,32 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         FilledTonalButton(
-                            onClick = { showEditProfileDialog = true },
-                            modifier = Modifier.weight(1f)
+                            onClick = { launchDirectCamera() },
+                            enabled = !isUploadingDirectPhoto,
+                            modifier = Modifier.weight(1f).testTag("take_profile_photo_settings_button")
                         ) {
-                            Text("Edit Profile")
+                            Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.profile_photo_take))
                         }
                         OutlinedButton(
-                            onClick = onLogout,
-                            modifier = Modifier.weight(1f).testTag("settings_logout_button")
+                            onClick = { showEditProfileDialog = true },
+                            modifier = Modifier.weight(1f).testTag("edit_profile_dialog_button")
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Log Out")
+                            Text("Edit Profile")
                         }
+                    }
+                    OutlinedButton(
+                        onClick = onLogout,
+                        modifier = Modifier.fillMaxWidth().testTag("settings_logout_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Log Out")
                     }
                 }
             }
@@ -810,13 +921,14 @@ private fun EditLocalProfileDialog(
     initialProfile: UserProfile,
     onDismiss: () -> Unit,
     onSave: (String, String, String) -> Unit,
-    onUpdateProfilePhoto: (ByteArray) -> Unit
+    onUpdateProfilePhoto: (ByteArray, (String) -> Unit) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var displayName by remember { mutableStateOf(initialProfile.displayName) }
     var username by remember { mutableStateOf(initialProfile.username) }
     var bio by remember { mutableStateOf(initialProfile.bio) }
+    var currentPhotoUrl by remember { mutableStateOf(initialProfile.photoUrl) }
     var isUploadingPhoto by remember { mutableStateOf(false) }
     var pendingCaptureUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var pendingCaptureFile by remember { mutableStateOf<java.io.File?>(null) }
@@ -832,13 +944,17 @@ private fun EditLocalProfileDialog(
             isUploadingPhoto = true
             scope.launch {
                 val bytes = runCatching {
-                    com.example.data.media.CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri)
+                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri)
                 }.getOrNull()
                 file?.delete()
                 if (bytes != null && bytes.isNotEmpty()) {
-                    onUpdateProfilePhoto(bytes)
+                    onUpdateProfilePhoto(bytes) { newUrl ->
+                        currentPhotoUrl = newUrl
+                        isUploadingPhoto = false
+                    }
+                } else {
+                    isUploadingPhoto = false
                 }
-                isUploadingPhoto = false
             }
         } else {
             file?.delete()
@@ -850,7 +966,7 @@ private fun EditLocalProfileDialog(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            val (uri, file) = com.example.data.media.CameraPhotoHelper.createTempPhotoTarget(context)
+            val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
             pendingCaptureUri = uri
             pendingCaptureFile = file
             takePictureLauncher.launch(uri)
@@ -874,12 +990,12 @@ private fun EditLocalProfileDialog(
                     modifier = Modifier
                         .size(80.dp)
                         .clickable(enabled = !isUploadingPhoto) {
-                            val hasCam = androidx.core.content.ContextCompat.checkSelfPermission(
+                            val hasCam = ContextCompat.checkSelfPermission(
                                 context,
                                 Manifest.permission.CAMERA
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) == PackageManager.PERMISSION_GRANTED
                             if (hasCam) {
-                                val (uri, file) = com.example.data.media.CameraPhotoHelper.createTempPhotoTarget(context)
+                                val (uri, file) = CameraPhotoHelper.createTempPhotoTarget(context)
                                 pendingCaptureUri = uri
                                 pendingCaptureFile = file
                                 takePictureLauncher.launch(uri)
@@ -889,25 +1005,15 @@ private fun EditLocalProfileDialog(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (initialProfile.photoUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = initialProfile.photoUrl,
-                            contentDescription = displayName,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape)
-                        )
-                    } else {
-                        TelegramAvatarCircle(
-                            title = displayName.ifBlank { initialProfile.displayName },
-                            seedKey = initialProfile.id,
-                            chatKind = ChatKind.DIRECT,
-                            avatarKey = initialProfile.avatarKey,
-                            isOnline = true,
-                            size = 80.dp
-                        )
-                    }
+                    TelegramAvatarCircle(
+                        title = displayName.ifBlank { initialProfile.displayName },
+                        seedKey = initialProfile.id,
+                        chatKind = ChatKind.DIRECT,
+                        avatarKey = initialProfile.avatarKey,
+                        photoUrl = currentPhotoUrl,
+                        isOnline = true,
+                        size = 80.dp
+                    )
                     if (isUploadingPhoto) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),

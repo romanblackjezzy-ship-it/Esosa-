@@ -986,14 +986,14 @@ class RoomsViewModel(
         }
     }
 
-    fun updateProfilePhoto(jpegBytes: ByteArray, onSuccess: () -> Unit = {}) {
+    fun updateProfilePhoto(jpegBytes: ByteArray, onSuccess: (String) -> Unit = {}) {
         viewModelScope.launch {
             _isBusy.value = true
             repository.updateProfilePhoto(jpegBytes)
-                .onSuccess {
+                .onSuccess { url ->
                     _isBusy.value = false
                     showBanner("Profile photo updated")
-                    onSuccess()
+                    onSuccess(url)
                 }
                 .onFailure {
                     _isBusy.value = false

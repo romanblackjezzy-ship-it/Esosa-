@@ -801,7 +801,7 @@ private fun EsosaChatShell(
                                 onCheckForUpdatesNow = { appUpdateViewModel.checkForUpdatesNow() },
                                 onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
                                 onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
-                                onUpdateProfilePhoto = { bytes -> roomsViewModel.updateProfilePhoto(bytes) },
+                                onUpdateProfilePhoto = { bytes, onDone -> roomsViewModel.updateProfilePhoto(bytes, onDone) },
                                 modifier = Modifier.weight(1f)
                             )
                         }

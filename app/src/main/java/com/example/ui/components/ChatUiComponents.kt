@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import coil.compose.AsyncImage
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -164,6 +165,7 @@ fun TelegramAvatarCircle(
     chatKind: ChatKind = ChatKind.GROUP,
     size: Dp = 52.dp,
     avatarKey: String = "",
+    photoUrl: String? = null,
     isOnline: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -185,6 +187,15 @@ fun TelegramAvatarCircle(
                     modifier = Modifier.size(size * 0.48f)
                 )
             }
+        } else if (!photoUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = photoUrl,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+            )
         } else if (resId != null) {
             Image(
                 painter = painterResource(id = resId),

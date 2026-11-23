@@ -313,28 +313,27 @@ class ChatRepository(
         if (uid == LocalProfilePreferences.LOCAL_USER_ID || photoStorageService == null || syncService == null) {
             return Result.failure(IllegalStateException("Sign in with Google to update cloud profile photo."))
         }
-        val storagePath = "users/$uid/profile.jpg"
-        val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child(storagePath)
-        storageRef.putBytes(
-            jpegBytes,
-            com.google.firebase.storage.StorageMetadata.Builder().setContentType("image/jpeg").build()
-        ).await()
-        val downloadUrl = storageRef.downloadUrl.await().toString()
-        if (!downloadUrl.startsWith("https://")) {
-            throw IllegalStateException("Unexpected non-HTTPS download URL returned by Firebase Storage.")
+        return try {
+            val uploaded = photoStorageService.uploadProfilePhoto(uid, jpegBytes)
+            profilePreferences.updatePhotoUrl(uploaded.downloadUrl)
+            runFirestoreWrite {
+                syncService.updateUserProfileFields(uid, mapOf("photoUrl" to uploaded.downloadUrl))
+            }.getOrThrow()
+
+            runCatching {
+                auth?.currentUser?.updateProfile(
+                    com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                        .setPhotoUri(Uri.parse(uploaded.downloadUrl))
+                        .build()
+                )?.await()
+            }
+
+            Result.success(uploaded.downloadUrl)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-        profilePreferences.updatePhotoUrl(downloadUrl)
-        runFirestoreWrite {
-            syncService.updateUserProfileFields(uid, mapOf("photoUrl" to downloadUrl))
-        }.getOrThrow()
-
-        auth?.currentUser?.updateProfile(
-            com.google.firebase.auth.UserProfileChangeRequest.Builder()
-                .setPhotoUri(Uri.parse(downloadUrl))
-                .build()
-        )?.await()
-
-        return Result.success(downloadUrl)
     }
 
     suspend fun updateNotificationsEnabled(enabled: Boolean): Result<Unit> {

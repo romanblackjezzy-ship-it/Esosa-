@@ -27,7 +27,7 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
              data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
-             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2000)) &&
              (!('username' in data) || (data.username is string && data.username.size() <= 40)) &&
              (!('bio' in data) || (data.bio is string && data.bio.size() <= 200)) &&
              (!('avatarKey' in data) || (data.avatarKey is string && data.avatarKey.size() <= 64)) &&

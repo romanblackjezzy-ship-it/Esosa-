@@ -56,8 +56,8 @@ class FirestoreChatSyncService(
                     ?: localProfile.phoneOrEmail.takeIf { it.contains("@") && it.length >= 3 }
                     ?: "$uid@esosa.chat"
                 ).take(150)
-            val photoUrl = firebaseUser.photoUrl?.toString()?.take(500)
-                ?: localProfile.photoUrl.takeIf { it.isNotBlank() }?.take(500)
+            val photoUrl = firebaseUser.photoUrl?.toString()?.take(2000)
+                ?: localProfile.photoUrl.takeIf { it.isNotBlank() }?.take(2000)
 
             if (!existing.exists()) {
                 val payload = hashMapOf<String, Any?>(
