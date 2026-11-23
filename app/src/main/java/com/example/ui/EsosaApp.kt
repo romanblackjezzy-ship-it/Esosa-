@@ -1,9 +1,15 @@
 package com.example.ui
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,12 +35,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -45,6 +54,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -58,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -67,10 +78,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.R
 import com.example.core.LocalProfilePreferences
 import com.example.core.ThreadSelectionPreferences
 import com.example.core.UiState
 import com.example.data.local.EsosaDatabase
+import com.example.data.media.VoiceCallAudioController
+import com.example.data.model.CallType
 import com.example.data.model.InAppInstallStage
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
@@ -240,6 +254,25 @@ fun EsosaApp(
     }
 }
 
+private sealed interface PendingVoiceCallRequest {
+    data class Outgoing(
+        val peerRoomId: String,
+        val peerName: String,
+        val avatarKey: String,
+        val callType: CallType
+    ) : PendingVoiceCallRequest
+
+    data class OutgoingEmail(val email: String) : PendingVoiceCallRequest
+    data object AcceptIncoming : PendingVoiceCallRequest
+    data object EnableMicOnly : PendingVoiceCallRequest
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 @Composable
 private fun EsosaChatShell(
     initialRoomId: String?,
@@ -248,10 +281,97 @@ private fun EsosaChatShell(
     appUpdateViewModel: AppUpdateViewModel
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
     var selectedTab by rememberSaveable {
         mutableStateOf(EsosaTab.MESSAGES)
+    }
+
+    var hasMicPermission by remember {
+        mutableStateOf(VoiceCallAudioController.hasMicrophonePermission(context))
+    }
+    var pendingCallRequest by remember { mutableStateOf<PendingVoiceCallRequest?>(null) }
+    var showMicRationaleDialog by remember { mutableStateOf(false) }
+    var micPermanentlyDenied by remember { mutableStateOf(false) }
+
+    fun executePendingCall(request: PendingVoiceCallRequest, granted: Boolean) {
+        when (request) {
+            is PendingVoiceCallRequest.Outgoing -> roomsViewModel.startCall(
+                peerRoomId = request.peerRoomId,
+                peerName = request.peerName,
+                avatarKey = request.avatarKey,
+                callType = request.callType,
+                hasMicPermission = granted
+            )
+            is PendingVoiceCallRequest.OutgoingEmail -> roomsViewModel.startVoiceCallByEmail(
+                email = request.email,
+                hasMicPermission = granted
+            )
+            PendingVoiceCallRequest.AcceptIncoming -> roomsViewModel.acceptIncomingCall(
+                hasMicPermission = granted
+            )
+            PendingVoiceCallRequest.EnableMicOnly -> roomsViewModel.showBanner(
+                "Microphone enabled for voice calls"
+            )
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMicPermission = granted
+        roomsViewModel.updateCallMicPermission(granted)
+        val pending = pendingCallRequest
+        if (granted) {
+            pendingCallRequest = null
+            showMicRationaleDialog = false
+            micPermanentlyDenied = false
+            if (pending != null) {
+                executePendingCall(pending, granted = true)
+            }
+        } else {
+            val activity = context.findActivity()
+            val canShowRationale = activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity,
+                    Manifest.permission.RECORD_AUDIO
+                )
+            micPermanentlyDenied = !canShowRationale
+            showMicRationaleDialog = true
+        }
+    }
+
+    fun requestMicAndExecute(request: PendingVoiceCallRequest) {
+        val granted = VoiceCallAudioController.hasMicrophonePermission(context)
+        hasMicPermission = granted
+        if (granted) {
+            executePendingCall(request, granted = true)
+        } else {
+            pendingCallRequest = request
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val grantedNow = VoiceCallAudioController.hasMicrophonePermission(context)
+                hasMicPermission = grantedNow
+                roomsViewModel.updateCallMicPermission(grantedNow)
+                if (grantedNow && showMicRationaleDialog) {
+                    showMicRationaleDialog = false
+                    micPermanentlyDenied = false
+                    val pending = pendingCallRequest
+                    pendingCallRequest = null
+                    if (pending != null) {
+                        executePendingCall(pending, granted = true)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(initialRoomId, initialTab) {
@@ -274,6 +394,7 @@ private fun EsosaChatShell(
     val activeRoom by roomsViewModel.activeRoom.collectAsStateWithLifecycle()
     val activeMessagesState by roomsViewModel.activeMessagesState.collectAsStateWithLifecycle()
     val roomTypingUsers by roomsViewModel.typingUsers.collectAsStateWithLifecycle()
+    val roomTypingMap by roomsViewModel.roomTypingMap.collectAsStateWithLifecycle()
     val roomSearchQuery by roomsViewModel.searchQuery.collectAsStateWithLifecycle()
     val matchingMessages by roomsViewModel.matchingMessages.collectAsStateWithLifecycle()
     val isSearchingMessages by roomsViewModel.isSearchingMessages.collectAsStateWithLifecycle()
@@ -427,6 +548,7 @@ private fun EsosaChatShell(
                                 userProfile = userProfile,
                                 stories = stories,
                                 typingUsers = roomTypingUsers,
+                                roomTypingMap = roomTypingMap,
                                 searchQuery = roomSearchQuery,
                                 matchingMessages = matchingMessages,
                                 isSearchingMessages = isSearchingMessages,
@@ -460,6 +582,7 @@ private fun EsosaChatShell(
                                 onUpdateGroupDescription = { rId, desc -> roomsViewModel.updateGroupDescription(rId, desc) },
                                 onSetDisappearingTimer = { rId, sec -> roomsViewModel.setRoomDisappearingTimer(rId, sec) },
                                 onSetRoomWallpaper = { rId, wpId -> roomsViewModel.setRoomWallpaper(rId, wpId) },
+                                onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
                                 onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
                                 onScheduleMessage = { room, text, millis ->
                                     roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)
@@ -488,7 +611,14 @@ private fun EsosaChatShell(
                                     roomsViewModel.addChannelComment(rId, pId, txt)
                                 },
                                 onStartCall = { room, callType ->
-                                    roomsViewModel.startCall(room.id, room.title, room.avatarKey, callType)
+                                    requestMicAndExecute(
+                                        PendingVoiceCallRequest.Outgoing(
+                                            peerRoomId = room.id,
+                                            peerName = room.title,
+                                            avatarKey = room.avatarKey,
+                                            callType = callType
+                                        )
+                                    )
                                 },
                                 onOpenStory = { story -> roomsViewModel.markStoryViewed(story.id) },
                                 onPostStory = { text -> roomsViewModel.postMyStory(text) },
@@ -508,10 +638,26 @@ private fun EsosaChatShell(
                             EsosaTab.CALLS -> CallsScreen(
                                 callLogs = callLogs,
                                 rooms = allRooms,
-                                onStartCall = { peerId, peerName, avatarKey, callType ->
-                                    roomsViewModel.startCall(peerId, peerName, avatarKey, callType)
+                                hasMicrophonePermission = hasMicPermission,
+                                onRequestMicPermission = {
+                                    requestMicAndExecute(PendingVoiceCallRequest.EnableMicOnly)
                                 },
-                                onSimulateIncomingCall = { roomsViewModel.simulateIncomingCall() },
+                                onStartCall = { peerId, peerName, avatarKey, callType ->
+                                    requestMicAndExecute(
+                                        PendingVoiceCallRequest.Outgoing(
+                                            peerRoomId = peerId,
+                                            peerName = peerName,
+                                            avatarKey = avatarKey,
+                                            callType = callType
+                                        )
+                                    )
+                                },
+                                onStartVoiceCallByEmail = { email ->
+                                    requestMicAndExecute(PendingVoiceCallRequest.OutgoingEmail(email))
+                                },
+                                onSimulateIncomingCall = {
+                                    roomsViewModel.simulateIncomingCall(hasMicPermission = hasMicPermission)
+                                },
                                 onDeleteCallLog = { roomsViewModel.deleteCallLog(it) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -596,11 +742,81 @@ private fun EsosaChatShell(
         if (callState != null) {
             ActiveCallOverlay(
                 callState = callState,
-                onAcceptIncoming = { roomsViewModel.acceptIncomingCall() },
+                onAcceptIncoming = {
+                    requestMicAndExecute(PendingVoiceCallRequest.AcceptIncoming)
+                },
                 onToggleMute = { roomsViewModel.toggleCallMute() },
                 onToggleSpeaker = { roomsViewModel.toggleCallSpeaker() },
                 onToggleCamera = { roomsViewModel.toggleCallCamera() },
+                onRequestMicPermission = {
+                    requestMicAndExecute(PendingVoiceCallRequest.EnableMicOnly)
+                },
                 onEndCall = { roomsViewModel.endCall() }
+            )
+        }
+
+        if (showMicRationaleDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showMicRationaleDialog = false
+                    pendingCallRequest = null
+                },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = {
+                    Text(stringResource(R.string.voice_call_mic_permission_title))
+                },
+                text = {
+                    Text(
+                        text = if (micPermanentlyDenied) {
+                            stringResource(R.string.voice_call_mic_permission_settings_body)
+                        } else {
+                            stringResource(R.string.voice_call_mic_permission_body)
+                        }
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (micPermanentlyDenied) {
+                                showMicRationaleDialog = false
+                                val settingsIntent = Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", context.packageName, null)
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(settingsIntent)
+                            } else {
+                                showMicRationaleDialog = false
+                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        modifier = Modifier.testTag("mic_permission_confirm_button")
+                    ) {
+                        Text(
+                            if (micPermanentlyDenied) {
+                                stringResource(R.string.voice_call_mic_open_settings)
+                            } else {
+                                stringResource(R.string.voice_call_mic_grant_action)
+                            }
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showMicRationaleDialog = false
+                            pendingCallRequest = null
+                        }
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                modifier = Modifier.testTag("mic_permission_rationale_dialog")
             )
         }
     }

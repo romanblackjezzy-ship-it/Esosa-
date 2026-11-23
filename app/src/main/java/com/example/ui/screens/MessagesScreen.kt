@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DoneAll
@@ -205,6 +206,7 @@ fun MessagesScreen(
                     onTogglePinRoom = onTogglePinRoom,
                     onToggleArchiveRoom = onToggleArchiveRoom,
                     onToggleMuteRoom = onToggleMuteRoom,
+                    onStartVoiceCall = { room -> onStartCall(room, CallType.VOICE) },
                     onDeleteRoom = onDeleteRoom,
                     onOpenStory = onOpenStory,
                     onPostStory = onPostStory,
@@ -399,6 +401,7 @@ fun MessagesScreen(
                     onTogglePinRoom = onTogglePinRoom,
                     onToggleArchiveRoom = onToggleArchiveRoom,
                     onToggleMuteRoom = onToggleMuteRoom,
+                    onStartVoiceCall = { room -> onStartCall(room, CallType.VOICE) },
                     onDeleteRoom = onDeleteRoom,
                     onOpenStory = onOpenStory,
                     onPostStory = onPostStory,
@@ -461,6 +464,7 @@ private fun TelegramChatsListView(
     onTogglePinRoom: (String) -> Unit,
     onToggleArchiveRoom: (String) -> Unit,
     onToggleMuteRoom: (String) -> Unit,
+    onStartVoiceCall: (ChatRoom) -> Unit = {},
     onDeleteRoom: (ChatRoom) -> Unit,
     onOpenStory: (StoryItem) -> Unit,
     onPostStory: (String) -> Unit,
@@ -700,6 +704,7 @@ private fun TelegramChatsListView(
                                         onTogglePin = { onTogglePinRoom(room.id) },
                                         onToggleArchive = { onToggleArchiveRoom(room.id) },
                                         onToggleMute = { onToggleMuteRoom(room.id) },
+                                        onStartVoiceCall = { onStartVoiceCall(room) },
                                         onDelete = { onDeleteRoom(room) }
                                     )
                                     HorizontalDivider(
@@ -730,6 +735,7 @@ private fun TelegramChatsListView(
                                             onTogglePin = { onTogglePinRoom(room.id) },
                                             onToggleArchive = { onToggleArchiveRoom(room.id) },
                                             onToggleMute = { onToggleMuteRoom(room.id) },
+                                            onStartVoiceCall = { onStartVoiceCall(room) },
                                             onDelete = { onDeleteRoom(room) }
                                         )
                                         HorizontalDivider(
@@ -822,6 +828,7 @@ private fun TelegramChatRow(
     onTogglePin: () -> Unit,
     onToggleArchive: () -> Unit,
     onToggleMute: () -> Unit,
+    onStartVoiceCall: () -> Unit,
     onDelete: () -> Unit
 ) {
     val telegram = MaterialTheme.telegramColors
@@ -983,6 +990,13 @@ private fun TelegramChatRow(
         }
 
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            if ((room.chatKind == ChatKind.DIRECT || room.chatKind == ChatKind.GROUP) && !room.isBlocked) {
+                DropdownMenuItem(
+                    text = { Text("Voice Call") },
+                    leadingIcon = { Icon(Icons.Filled.Call, contentDescription = null) },
+                    onClick = { showMenu = false; onStartVoiceCall() }
+                )
+            }
             DropdownMenuItem(
                 text = { Text(if (room.isPinned) "Unpin Chat" else "Pin to Top") },
                 leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },

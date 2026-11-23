@@ -216,14 +216,20 @@ fun SettingsScreen(
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = userProfile.displayName,
+                                text = userProfile.displayName.ifBlank { "My Profile" },
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
-                            Text(
-                                text = "@${userProfile.username} • ${userProfile.phoneOrEmail}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            val subtitleParts = buildList {
+                                if (userProfile.username.isNotBlank()) add("@${userProfile.username}")
+                                if (userProfile.phoneOrEmail.isNotBlank()) add(userProfile.phoneOrEmail)
+                            }
+                            if (subtitleParts.isNotEmpty()) {
+                                Text(
+                                    text = subtitleParts.joinToString(" • "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             if (userProfile.bio.isNotBlank()) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(

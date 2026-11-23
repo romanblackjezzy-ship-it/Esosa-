@@ -44,4 +44,14 @@
     <string name="conversation_input_placeholder">Message</string>
     <string name="conversation_channel_placeholder">Broadcast to channel…</string>
     <string name="conversation_toggle_media_section">Toggle media attachments</string>
+    <string name="voice_call_action">Voice Call</string>
+    <string name="voice_call_new_button">Voice Call</string>
+    <string name="voice_call_mic_permission_title">Microphone Permission Required</string>
+    <string name="voice_call_mic_permission_body">Esosa needs access to your microphone to transmit audio during voice and video calls.</string>
+    <string name="voice_call_mic_permission_settings_body">Microphone access was denied. Open App Settings and enable Microphone permission to place or answer voice calls.</string>
+    <string name="voice_call_mic_grant_action">Allow Microphone</string>
+    <string name="voice_call_mic_open_settings">Open Settings</string>
+    <string name="voice_call_mic_active">Microphone active</string>
+    <string name="voice_call_mic_muted">Microphone muted</string>
+    <string name="voice_call_mic_unavailable">Microphone permission required</string>
 </resources>

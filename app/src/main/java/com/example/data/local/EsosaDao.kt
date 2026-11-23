@@ -190,4 +190,20 @@ interface EsosaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChannelComments(comments: List<ChannelCommentEntity>)
+
+    // ---- Demo Cleanup ----
+    @Query("DELETE FROM chat_rooms WHERE id IN (:roomIds)")
+    suspend fun deleteRoomsByIds(roomIds: List<String>)
+
+    @Query("DELETE FROM room_messages WHERE roomId IN (:roomIds)")
+    suspend fun deleteMessagesForRoomIds(roomIds: List<String>)
+
+    @Query("DELETE FROM stories WHERE id IN (:storyIds)")
+    suspend fun deleteStoriesByIds(storyIds: List<String>)
+
+    @Query("DELETE FROM call_logs WHERE id IN (:callIds)")
+    suspend fun deleteCallLogsByIds(callIds: List<String>)
+
+    @Query("DELETE FROM channel_comments WHERE id IN (:commentIds)")
+    suspend fun deleteChannelCommentsByIds(commentIds: List<String>)
 }

@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.LocalProfilePreferences
+import com.example.data.local.ChatRoomEntity
 import com.example.data.local.EsosaDatabase
+import com.example.data.local.StoryEntity
 import com.example.data.model.ChatKind
 import com.example.data.repository.ChatRepository
 import kotlinx.coroutines.flow.first
@@ -46,17 +48,53 @@ class TelegramRoomPersistenceTest {
     }
 
     @Test
-    fun `starter chats, stories, calls, and comments are seeded and support full messaging lifecycle`() = runBlocking {
+    fun `demo profiles are removed and only saved vault plus user-created chats persist`() = runBlocking {
+        val now = System.currentTimeMillis()
+        // Pre-populate legacy demo records to verify automatic cleanup on startup
+        database.esosaDao().upsertRoom(
+            ChatRoomEntity(
+                id = "dm_maya_lin",
+                title = "Maya Lin",
+                topic = "Demo",
+                chatKind = ChatKind.DIRECT.id,
+                roomCode = "MAYA01",
+                memberCount = 2,
+                isPinned = false,
+                unreadCount = 0,
+                lastMessageText = "",
+                lastMessageSenderName = "",
+                lastMessageIsMine = false,
+                lastMessageAtMillis = now,
+                createdAtMillis = now,
+                updatedAtMillis = now
+            )
+        )
+        database.esosaDao().upsertStory(
+            StoryEntity(
+                id = "story_maya",
+                authorName = "Maya Lin",
+                authorHandle = "@maya_lin",
+                avatarKey = "maya",
+                previewText = "Demo",
+                accentSeed = "maya",
+                isViewed = false,
+                isMine = false,
+                createdAtMillis = now
+            )
+        )
+
         repository.ensureStarterChats().getOrThrow()
+
         val initialRooms = repository.observeRooms().first()
-        assertEquals(7, initialRooms.size)
-        val savedRoom = initialRooms.first { it.id == ChatRepository.SAVED_MESSAGES_ROOM_ID }
+        assertEquals(1, initialRooms.size)
+        val savedRoom = initialRooms.first()
+        assertEquals(ChatRepository.SAVED_MESSAGES_ROOM_ID, savedRoom.id)
         assertEquals("Saved Messages", savedRoom.title)
         assertEquals(ChatKind.SAVED, savedRoom.chatKind)
         assertTrue(savedRoom.isPinned)
 
-        assertTrue(repository.observeStories().first().size >= 4)
-        assertTrue(repository.observeCallLogs().first().size >= 4)
+        assertTrue(repository.observeStories().first().isEmpty())
+        assertTrue(repository.observeCallLogs().first().isEmpty())
 
         // Direct user creation accepts valid email only
         assertTrue(
@@ -80,22 +118,22 @@ class TelegramRoomPersistenceTest {
             rawTitle = "Android Release Team",
             rawTopic = "APK builds & notes",
             chatKind = ChatKind.GROUP,
-            initialMembers = listOf("Maya Lin", "Liam O'Connor")
+            initialMembers = listOf("alex.mercer@esosa.app")
         ).getOrThrow()
 
         val allRooms = repository.observeRooms().first()
-        assertEquals(9, allRooms.size)
+        assertEquals(3, allRooms.size)
         val groupRoom = allRooms.first { it.id == createdId }
         assertFalse(groupRoom.isPinned)
-        assertEquals(3, groupRoom.memberCount)
+        assertEquals(2, groupRoom.memberCount)
 
         // Group member & admin controls (members must be added by email)
-        assertTrue(repository.addGroupMember(createdId, "Elena Rostova").isFailure)
-        repository.addGroupMember(createdId, "elena.rostova@esosa.chat").getOrThrow()
-        repository.toggleGroupAdmin(createdId, "Maya Lin").getOrThrow()
+        assertTrue(repository.addGroupMember(createdId, "Not an email").isFailure)
+        repository.addGroupMember(createdId, "jordan.lee@esosa.chat").getOrThrow()
+        repository.toggleGroupAdmin(createdId, "alex.mercer@esosa.app").getOrThrow()
         val updatedGroup = repository.observeRoom(createdId).first()!!
-        assertTrue("elena.rostova@esosa.chat" in updatedGroup.memberNames)
-        assertTrue("Maya Lin" in updatedGroup.adminNames)
+        assertTrue("jordan.lee@esosa.chat" in updatedGroup.memberNames)
+        assertTrue("alex.mercer@esosa.app" in updatedGroup.adminNames)
 
         // Send message, reply, edit, react, pin, forward, voice note
         repository.sendRoomMessage(updatedGroup, "Checklist is ready for v1.0").getOrThrow()
@@ -131,15 +169,21 @@ class TelegramRoomPersistenceTest {
         repository.togglePinRoom(createdId).getOrThrow()
         assertTrue(repository.observeRoom(createdId).first()!!.isPinned)
 
-        // Channel subscription & comments
-        val channelId = "channel_esosa_insider"
+        // Channel creation, subscription & comments
+        val channelId = repository.createRoom(
+            rawTitle = "Release Notes",
+            rawTopic = "Product updates",
+            chatKind = ChatKind.CHANNEL
+        ).getOrThrow()
         val channelBefore = repository.observeRoom(channelId).first()!!
         repository.toggleChannelSubscription(channelId).getOrThrow()
         val channelAfter = repository.observeRoom(channelId).first()!!
         assertEquals(!channelBefore.isSubscribed, channelAfter.isSubscribed)
 
-        repository.addChannelComment(channelId, "seed_ch_esosa_2", "Looking great!").getOrThrow()
-        val comments = repository.observeAllChannelComments().first()["seed_ch_esosa_2"].orEmpty()
+        repository.sendRoomMessage(channelAfter, "Welcome to Release Notes!").getOrThrow()
+        val channelPost = repository.observeMessages(channelId).first().first()
+        repository.addChannelComment(channelId, channelPost.id, "Looking great!").getOrThrow()
+        val comments = repository.observeAllChannelComments().first()[channelPost.id].orEmpty()
         assertTrue(comments.any { it.text == "Looking great!" })
 
         // Post story & log call
@@ -147,9 +191,9 @@ class TelegramRoomPersistenceTest {
         assertTrue(repository.observeStories().first().any { it.isMine && it.previewText == "Shipping Esosa v2!" })
 
         repository.logCall(
-            peerRoomId = "dm_maya_lin",
-            peerName = "Maya Lin",
-            avatarKey = "maya",
+            peerRoomId = directRoomId,
+            peerName = directRoom.title,
+            avatarKey = "",
             callType = com.example.data.model.CallType.VIDEO,
             direction = com.example.data.model.CallDirection.OUTGOING,
             durationSeconds = 95

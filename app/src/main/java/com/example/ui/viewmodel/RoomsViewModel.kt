@@ -305,6 +305,7 @@ class RoomsViewModel(
         chatKind: ChatKind = ChatKind.GROUP,
         initialMembers: List<String> = emptyList(),
         isPublic: Boolean = true,
+        selectOnCreate: Boolean = true,
         onCreated: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -313,7 +314,9 @@ class RoomsViewModel(
             val result = repository.createRoom(title, topic, chatKind, initialMembers, isPublic)
             _isBusy.value = false
             result.onSuccess { roomId ->
-                setSelectedRoom(roomId)
+                if (selectOnCreate) {
+                    setSelectedRoom(roomId)
+                }
                 onCreated(roomId)
             }.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Could not create chat."
@@ -501,8 +504,7 @@ class RoomsViewModel(
         val contactName = when (room.chatKind) {
             ChatKind.DIRECT -> room.title
             ChatKind.GROUP -> {
-                val candidate = room.memberNames.firstOrNull { it != "You" && it != myName }
-                candidate ?: "Liam Chen"
+                room.memberNames.firstOrNull { it != "You" && it != myName } ?: return
             }
             ChatKind.CHANNEL -> return
         }
@@ -754,7 +756,19 @@ class RoomsViewModel(
     }
 
     // ---- Voice & Video Calls ----
-    fun startCall(peerRoomId: String, peerName: String, avatarKey: String, callType: CallType) {
+    fun startCall(
+        peerRoomId: String,
+        peerName: String,
+        avatarKey: String,
+        callType: CallType,
+        hasMicPermission: Boolean = true
+    ) {
+        val rooms = (roomsState.value as? UiState.Success)?.data.orEmpty()
+        val targetRoom = rooms.firstOrNull { it.id == peerRoomId }
+        if (targetRoom?.isBlocked == true) {
+            showBanner("Unblock ${targetRoom.title} before placing a call")
+            return
+        }
         callConnectJob?.cancel()
         val call = ActiveCallState(
             callId = "call_${System.currentTimeMillis()}",
@@ -765,7 +779,8 @@ class RoomsViewModel(
             direction = CallDirection.OUTGOING,
             status = ActiveCallStatus.RINGING_OUTGOING,
             isCameraOn = callType == CallType.VIDEO,
-            isSpeakerOn = callType == CallType.VIDEO
+            isSpeakerOn = callType == CallType.VIDEO,
+            hasMicPermission = hasMicPermission
         )
         _activeCallState.value = call
         callConnectJob = viewModelScope.launch {
@@ -781,32 +796,97 @@ class RoomsViewModel(
         }
     }
 
+    fun startVoiceCallByEmail(email: String, hasMicPermission: Boolean = true) {
+        val normalized = email.trim().lowercase()
+        if (!ChatRepository.isValidEmail(normalized)) {
+            _actionError.value = "Please enter a valid email address."
+            return
+        }
+        val rooms = (roomsState.value as? UiState.Success)?.data.orEmpty()
+        val existing = rooms.firstOrNull {
+            it.chatKind == ChatKind.DIRECT &&
+                (it.handle.equals(normalized, ignoreCase = true) ||
+                    it.topic.equals(normalized, ignoreCase = true))
+        }
+        if (existing != null) {
+            startCall(
+                peerRoomId = existing.id,
+                peerName = existing.title,
+                avatarKey = existing.avatarKey,
+                callType = CallType.VOICE,
+                hasMicPermission = hasMicPermission
+            )
+            return
+        }
+        viewModelScope.launch {
+            _isBusy.value = true
+            val result = repository.createRoom(
+                rawTitle = normalized,
+                rawTopic = "",
+                chatKind = ChatKind.DIRECT
+            )
+            _isBusy.value = false
+            result.onSuccess { newRoomId ->
+                val createdName = ChatRepository.deriveDisplayNameFromEmail(normalized)
+                startCall(
+                    peerRoomId = newRoomId,
+                    peerName = createdName,
+                    avatarKey = "",
+                    callType = CallType.VOICE,
+                    hasMicPermission = hasMicPermission
+                )
+            }.onFailure { err ->
+                _actionError.value = err.localizedMessage ?: "Could not start voice call."
+            }
+        }
+    }
+
     fun simulateIncomingCall(
-        peerRoomId: String = "dm_maya_lin",
-        peerName: String = "Maya Lin",
-        avatarKey: String = "maya",
-        callType: CallType = CallType.VIDEO
+        peerRoomId: String? = null,
+        peerName: String? = null,
+        avatarKey: String? = null,
+        callType: CallType = CallType.VOICE,
+        hasMicPermission: Boolean = true
     ) {
+        val rooms = (roomsState.value as? UiState.Success)?.data.orEmpty()
+        val fallbackRoom = rooms.firstOrNull {
+            !it.isBlocked && (it.chatKind == ChatKind.DIRECT || it.chatKind == ChatKind.GROUP)
+        }
+        val targetRoomId = peerRoomId ?: fallbackRoom?.id
+        val targetName = peerName ?: fallbackRoom?.title
+        if (targetRoomId.isNullOrBlank() || targetName.isNullOrBlank()) {
+            showBanner("Add a contact first to test incoming calls")
+            return
+        }
+        val targetAvatar = avatarKey ?: fallbackRoom?.avatarKey.orEmpty()
+
         callConnectJob?.cancel()
         _activeCallState.value = ActiveCallState(
             callId = "call_in_${System.currentTimeMillis()}",
-            peerRoomId = peerRoomId,
-            peerName = peerName,
-            avatarKey = avatarKey,
+            peerRoomId = targetRoomId,
+            peerName = targetName,
+            avatarKey = targetAvatar,
             callType = callType,
             direction = CallDirection.INCOMING,
             status = ActiveCallStatus.RINGING_INCOMING,
             isCameraOn = callType == CallType.VIDEO,
-            isSpeakerOn = callType == CallType.VIDEO
+            isSpeakerOn = callType == CallType.VIDEO,
+            hasMicPermission = hasMicPermission
         )
     }
 
-    fun acceptIncomingCall() {
+    fun acceptIncomingCall(hasMicPermission: Boolean = true) {
         val current = _activeCallState.value ?: return
         _activeCallState.value = current.copy(
             status = ActiveCallStatus.CONNECTED,
+            hasMicPermission = hasMicPermission,
             connectedAtMillis = System.currentTimeMillis()
         )
+    }
+
+    fun updateCallMicPermission(granted: Boolean) {
+        val current = _activeCallState.value ?: return
+        _activeCallState.value = current.copy(hasMicPermission = granted)
     }
 
     fun toggleCallMute() {

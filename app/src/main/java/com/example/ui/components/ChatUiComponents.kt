@@ -147,8 +147,6 @@ private fun isYesterday(now: Calendar, target: Calendar): Boolean {
 }
 
 fun resolveAvatarDrawableRes(avatarKey: String): Int? = when (avatarKey) {
-    "maya" -> R.drawable.img_avatar_maya
-    "liam" -> R.drawable.img_avatar_liam
     "esosa" -> R.drawable.img_esosa_avatar
     "channel_banner" -> R.drawable.img_channel_banner
     else -> null

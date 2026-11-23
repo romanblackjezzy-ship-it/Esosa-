@@ -94,19 +94,15 @@ class ChatRepository(
 
     suspend fun ensureStarterChats(): Result<Unit> {
         return try {
+            dao.deleteMessagesForRoomIds(StarterSeedData.LEGACY_DEMO_ROOM_IDS)
+            dao.deleteRoomsByIds(StarterSeedData.LEGACY_DEMO_ROOM_IDS)
+            dao.deleteStoriesByIds(StarterSeedData.LEGACY_DEMO_STORY_IDS)
+            dao.deleteCallLogsByIds(StarterSeedData.LEGACY_DEMO_CALL_IDS)
+            dao.deleteChannelCommentsByIds(StarterSeedData.LEGACY_DEMO_COMMENT_IDS)
+
             val now = System.currentTimeMillis()
             if (dao.getRoomCount() == 0) {
                 dao.upsertRooms(StarterSeedData.starterRooms(now))
-                dao.upsertRoomMessages(StarterSeedData.starterMessages(now))
-            }
-            if (dao.getStoryCount() == 0) {
-                dao.upsertStories(StarterSeedData.starterStories(now))
-            }
-            if (dao.getCallLogCount() == 0) {
-                dao.upsertCallLogs(StarterSeedData.starterCallLogs(now))
-            }
-            if (dao.getChannelCommentCount() == 0) {
-                dao.upsertChannelComments(StarterSeedData.starterChannelComments(now))
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -357,12 +353,13 @@ class ChatRepository(
                 }
             }
 
+            val senderDisplayName = profile.displayName.ifBlank { "You" }
             dao.upsertRoomMessage(
                 RoomMessageEntity(
                     id = messageId,
                     roomId = room.id,
                     senderId = profile.userId,
-                    senderName = profile.displayName,
+                    senderName = senderDisplayName,
                     text = text,
                     imageUrl = null,
                     storagePath = null,
@@ -390,7 +387,7 @@ class ChatRepository(
             dao.updateRoomLastMessage(
                 roomId = room.id,
                 lastText = preview.take(240),
-                senderName = if (room.chatKind == ChatKind.SAVED || room.chatKind == ChatKind.CHANNEL) "" else profile.displayName,
+                senderName = if (room.chatKind == ChatKind.SAVED || room.chatKind == ChatKind.CHANNEL) "" else senderDisplayName,
                 isMine = true,
                 lastAt = now,
                 updatedAt = now
@@ -453,6 +450,7 @@ class ChatRepository(
         return try {
             val profile = profilePreferences.getProfile()
             val now = System.currentTimeMillis()
+            val senderDisplayName = profile.displayName.ifBlank { "You" }
             val cleanDuration = durationSec.coerceIn(1, 600)
             val messageId = "voice_${now}_${UUID.randomUUID().toString().take(8)}"
             dao.upsertRoomMessage(
@@ -460,7 +458,7 @@ class ChatRepository(
                     id = messageId,
                     roomId = room.id,
                     senderId = profile.userId,
-                    senderName = profile.displayName,
+                    senderName = senderDisplayName,
                     text = "Voice note",
                     imageUrl = null,
                     storagePath = null,
@@ -477,7 +475,7 @@ class ChatRepository(
             dao.updateRoomLastMessage(
                 roomId = room.id,
                 lastText = "🎤 Voice message ($formatted)",
-                senderName = if (room.chatKind == ChatKind.SAVED) "" else profile.displayName,
+                senderName = if (room.chatKind == ChatKind.SAVED) "" else senderDisplayName,
                 isMine = true,
                 lastAt = now,
                 updatedAt = now
@@ -520,6 +518,7 @@ class ChatRepository(
             }
             onProgress(0.75f)
             val profile = profilePreferences.getProfile()
+            val senderDisplayName = profile.displayName.ifBlank { "You" }
             val caption = rawCaption.trim().take(2000)
             val now = System.currentTimeMillis()
             val messageId = "msg_${now}_${UUID.randomUUID().toString().take(8)}"
@@ -530,7 +529,7 @@ class ChatRepository(
                     id = messageId,
                     roomId = room.id,
                     senderId = profile.userId,
-                    senderName = profile.displayName,
+                    senderName = senderDisplayName,
                     text = caption,
                     imageUrl = fileUri,
                     storagePath = savedFile.absolutePath,
@@ -544,7 +543,7 @@ class ChatRepository(
             dao.updateRoomLastMessage(
                 roomId = room.id,
                 lastText = previewText.take(240),
-                senderName = if (room.chatKind == ChatKind.SAVED) "" else profile.displayName,
+                senderName = if (room.chatKind == ChatKind.SAVED) "" else senderDisplayName,
                 isMine = true,
                 lastAt = now,
                 updatedAt = now
@@ -585,6 +584,7 @@ class ChatRepository(
     suspend fun forwardMessageToRoom(sourceMessage: RoomMessage, targetRoom: ChatRoom): Result<Unit> {
         return try {
             val profile = profilePreferences.getProfile()
+            val senderDisplayName = profile.displayName.ifBlank { "You" }
             val now = System.currentTimeMillis()
             val messageId = "fwd_${now}_${UUID.randomUUID().toString().take(8)}"
             dao.upsertRoomMessage(
@@ -592,7 +592,7 @@ class ChatRepository(
                     id = messageId,
                     roomId = targetRoom.id,
                     senderId = profile.userId,
-                    senderName = profile.displayName,
+                    senderName = senderDisplayName,
                     text = sourceMessage.text,
                     imageUrl = sourceMessage.imageUrl,
                     storagePath = null,
@@ -610,7 +610,7 @@ class ChatRepository(
             dao.updateRoomLastMessage(
                 roomId = targetRoom.id,
                 lastText = preview.take(240),
-                senderName = if (targetRoom.chatKind == ChatKind.SAVED) "" else profile.displayName,
+                senderName = if (targetRoom.chatKind == ChatKind.SAVED) "" else senderDisplayName,
                 isMine = true,
                 lastAt = now,
                 updatedAt = now
@@ -649,12 +649,13 @@ class ChatRepository(
             require(cleaned.isNotEmpty()) { "Comment cannot be empty." }
             val profile = profilePreferences.getProfile()
             val now = System.currentTimeMillis()
+            val senderDisplayName = profile.displayName.ifBlank { "You" }
             dao.upsertChannelComment(
                 ChannelCommentEntity(
                     id = "cmt_${now}_${UUID.randomUUID().toString().take(8)}",
                     postId = postId,
                     roomId = roomId,
-                    authorName = profile.displayName,
+                    authorName = senderDisplayName,
                     text = cleaned,
                     createdAtMillis = now
                 )
@@ -675,11 +676,13 @@ class ChatRepository(
         val cleaned = text.trim().take(240)
         require(cleaned.isNotEmpty()) { "Story update cannot be empty." }
         val profile = profilePreferences.getProfile()
+        val senderDisplayName = profile.displayName.ifBlank { "You" }
+        val handleName = profile.username.ifBlank { "you" }
         dao.upsertStory(
             StoryEntity(
                 id = "story_mine_${System.currentTimeMillis()}",
-                authorName = profile.displayName,
-                authorHandle = "@${profile.username}",
+                authorName = senderDisplayName,
+                authorHandle = "@$handleName",
                 avatarKey = profile.avatarKey,
                 previewText = cleaned,
                 accentSeed = "mine",

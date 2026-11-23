@@ -44,11 +44,11 @@ data class ActiveSession(
 data class UserProfile(
     val id: String = "local_me",
     val userId: String = "local_me",
-    val displayName: String = "Esosa User",
-    val username: String = "esosa_chat",
-    val bio: String = "Designing calm, private conversations",
+    val displayName: String = "",
+    val username: String = "",
+    val bio: String = "",
     val avatarKey: String = "default",
-    val phoneOrEmail: String = "+1 (555) 234-8910",
+    val phoneOrEmail: String = "",
     val authMethod: String = "phone",
     val isAuthenticated: Boolean = false,
     val notificationsEnabled: Boolean = true,
@@ -217,6 +217,7 @@ data class ActiveCallState(
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = false,
     val isCameraOn: Boolean = callType == CallType.VIDEO,
+    val hasMicPermission: Boolean = true,
     val startedAtMillis: Long = System.currentTimeMillis(),
     val connectedAtMillis: Long? = null
 )

@@ -692,7 +692,7 @@ fun AuthOnboardingScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                listOf("default", "maya", "liam", "esosa").forEach { preset ->
+                                listOf("default", "ocean", "emerald", "esosa").forEach { preset ->
                                     val selected = avatarKey == preset
                                     Box(
                                         modifier = Modifier

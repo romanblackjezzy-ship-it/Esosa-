@@ -15,6 +15,10 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.example.core.UiState
+import com.example.data.model.ActiveCallState
+import com.example.data.model.ActiveCallStatus
+import com.example.data.model.CallDirection
+import com.example.data.model.CallType
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.ChatWallpaper
@@ -22,6 +26,8 @@ import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.ui.EsosaTab
+import com.example.ui.screens.ActiveCallOverlay
+import com.example.ui.screens.CallsScreen
 import com.example.ui.screens.ChatInfoInspectorPanel
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.TelegramCreateChatDialog
@@ -378,5 +384,145 @@ class ChatFeaturesTest {
         composeTestRule.onNodeWithTag("close_full_screen_photo_button").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("full_screen_photo_dialog").assertDoesNotExist()
+    }
+
+    @Test
+    fun `chat list row displays real-time typing indicator when contact is composing`() {
+        val room = ChatRoom(
+            id = "dm_contact_1",
+            title = "Alex Mercer",
+            chatKind = ChatKind.DIRECT,
+            roomCode = "ALEX01",
+            lastMessageText = "Let's meet at noon",
+            lastMessageAtMillis = System.currentTimeMillis()
+        )
+        val typingMap = mapOf(
+            room.id to listOf(
+                RoomTypingStatus(
+                    id = "contact_alex",
+                    userId = "contact_alex",
+                    roomId = room.id,
+                    displayName = "Alex Mercer",
+                    typing = true
+                )
+            )
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                MessagesScreen(
+                    currentUserId = "local_me",
+                    roomsState = UiState.Success(listOf(room)),
+                    selectedRoomId = null,
+                    activeRoom = null,
+                    activeMessagesState = UiState.Success(emptyList()),
+                    roomTypingMap = typingMap,
+                    actionError = null,
+                    isBusy = false,
+                    onOpenRoom = {},
+                    onCreateRoom = { _, _, _ -> },
+                    onSendMessage = { _, _ -> },
+                    onDeleteMessage = { _, _ -> },
+                    onDeleteRoom = {},
+                    onClearError = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("room_card_dm_contact_1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Alex Mercer is typing").assertIsDisplayed()
+    }
+
+    @Test
+    fun `calls screen shows mic permission banner and voice call initiation dialog`() {
+        val contactRoom = ChatRoom(
+            id = "dm_sam",
+            title = "Sam Patel",
+            chatKind = ChatKind.DIRECT,
+            roomCode = "SAM101",
+            handle = "sam.patel@esosa.chat",
+            isOnline = true
+        )
+        var micRequested = false
+        var calledEmail: String? = null
+        var calledRoomType: CallType? = null
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                CallsScreen(
+                    callLogs = emptyList(),
+                    rooms = listOf(contactRoom),
+                    hasMicrophonePermission = false,
+                    onRequestMicPermission = { micRequested = true },
+                    onStartCall = { _, _, _, type -> calledRoomType = type },
+                    onStartVoiceCallByEmail = { email -> calledEmail = email },
+                    onSimulateIncomingCall = {},
+                    onDeleteCallLog = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("calls_mic_permission_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("calls_enable_mic_button").performClick()
+        assertEquals(true, micRequested)
+
+        composeTestRule.onNodeWithTag("new_voice_call_fab").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("start_voice_call_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dialog_voice_call_dm_sam").performClick()
+        assertEquals(CallType.VOICE, calledRoomType)
+
+        composeTestRule.onNodeWithTag("new_voice_call_fab").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("call_dialog_email_input").performTextInput("new.peer@esosa.chat")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("confirm_new_voice_call_button").performClick()
+        assertEquals("new.peer@esosa.chat", calledEmail)
+    }
+
+    @Test
+    fun `active voice call overlay shows microphone permission prompt and mute status`() {
+        var requestedMic = false
+        var currentCall = ActiveCallState(
+            callId = "call_voice_1",
+            peerRoomId = "dm_sam",
+            peerName = "Sam Patel",
+            avatarKey = "",
+            callType = CallType.VOICE,
+            direction = CallDirection.OUTGOING,
+            status = ActiveCallStatus.CONNECTED,
+            hasMicPermission = false,
+            connectedAtMillis = System.currentTimeMillis()
+        )
+
+        composeTestRule.setContent {
+            var state by remember { mutableStateOf(currentCall) }
+            EsosaTheme {
+                ActiveCallOverlay(
+                    callState = state,
+                    onAcceptIncoming = {},
+                    onToggleMute = { state = state.copy(isMuted = !state.isMuted) },
+                    onToggleSpeaker = { state = state.copy(isSpeakerOn = !state.isSpeakerOn) },
+                    onToggleCamera = {},
+                    onRequestMicPermission = {
+                        requestedMic = true
+                        state = state.copy(hasMicPermission = true)
+                    },
+                    onEndCall = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("call_mic_status_pill").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(true, requestedMic)
+        composeTestRule.onNodeWithText("Microphone active").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("call_mute_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Microphone muted").assertIsDisplayed()
     }
 }

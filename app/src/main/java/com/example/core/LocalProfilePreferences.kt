@@ -166,8 +166,8 @@ class LocalProfilePreferences(context: Context) {
                 ?.takeIf { it.isNotBlank() } ?: DEFAULT_USERNAME,
             bio = prefs.getString(KEY_BIO, DEFAULT_BIO) ?: DEFAULT_BIO,
             avatarKey = prefs.getString(KEY_AVATAR_KEY, "default") ?: "default",
-            phoneOrEmail = prefs.getString(KEY_PHONE_OR_EMAIL, "+1 (555) 234-8910")
-                ?.takeIf { it.isNotBlank() } ?: "+1 (555) 234-8910",
+            phoneOrEmail = prefs.getString(KEY_PHONE_OR_EMAIL, "")
+                ?.takeIf { it.isNotBlank() } ?: "",
             authMethod = prefs.getString(KEY_AUTH_METHOD, "phone") ?: "phone",
             isAuthenticated = prefs.getBoolean(KEY_IS_AUTHENTICATED, false),
             notificationsEnabled = prefs.getBoolean(KEY_NOTIFICATIONS_ENABLED, true),
@@ -195,9 +195,11 @@ class LocalProfilePreferences(context: Context) {
             buildList {
                 for (i in 0 until arr.length()) {
                     val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id")
+                    if (id == "sess_web" || id == "sess_tablet") continue
                     add(
                         ActiveSession(
-                            id = obj.optString("id"),
+                            id = id,
                             deviceName = obj.optString("deviceName"),
                             platform = obj.optString("platform"),
                             location = obj.optString("location"),
@@ -231,26 +233,10 @@ class LocalProfilePreferences(context: Context) {
         ActiveSession(
             id = "sess_current",
             deviceName = "Android Device (This Phone)",
-            platform = "Esosa Android 1.0",
-            location = "San Francisco, US",
+            platform = "Esosa Android",
+            location = "Current Device",
             lastActiveLabel = "Online",
             isCurrent = true
-        ),
-        ActiveSession(
-            id = "sess_web",
-            deviceName = "Chrome 131 • macOS",
-            platform = "Esosa Web Desktop",
-            location = "San Francisco, US",
-            lastActiveLabel = "Active 2h ago",
-            isCurrent = false
-        ),
-        ActiveSession(
-            id = "sess_tablet",
-            deviceName = "Pixel Tablet Studio",
-            platform = "Esosa Tablet",
-            location = "Seattle, US",
-            lastActiveLabel = "Yesterday",
-            isCurrent = false
         )
     )
 
