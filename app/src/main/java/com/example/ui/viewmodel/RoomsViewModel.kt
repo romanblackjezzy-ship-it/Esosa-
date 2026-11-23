@@ -986,6 +986,22 @@ class RoomsViewModel(
         }
     }
 
+    fun updateProfilePhoto(jpegBytes: ByteArray, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            _isBusy.value = true
+            repository.updateProfilePhoto(jpegBytes)
+                .onSuccess {
+                    _isBusy.value = false
+                    showBanner("Profile photo updated")
+                    onSuccess()
+                }
+                .onFailure {
+                    _isBusy.value = false
+                    _actionError.value = it.localizedMessage ?: "Could not upload profile photo."
+                }
+        }
+    }
+
     fun updateAvatarKey(avatarKey: String) {
         viewModelScope.launch {
             repository.updateAvatarKey(avatarKey)

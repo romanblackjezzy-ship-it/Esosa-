@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.tasks.await
 import java.util.UUID
 import kotlin.random.Random
 
@@ -305,6 +306,35 @@ class ChatRepository(
         return runFirestoreWrite {
             syncService.updateUserProfileFields(uid, mapOf("avatarKey" to avatarKey.take(64)))
         }
+    }
+
+    suspend fun updateProfilePhoto(jpegBytes: ByteArray): Result<String> {
+        val uid = currentUserId()
+        if (uid == LocalProfilePreferences.LOCAL_USER_ID || photoStorageService == null || syncService == null) {
+            return Result.failure(IllegalStateException("Sign in with Google to update cloud profile photo."))
+        }
+        val storagePath = "users/$uid/profile.jpg"
+        val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child(storagePath)
+        storageRef.putBytes(
+            jpegBytes,
+            com.google.firebase.storage.StorageMetadata.Builder().setContentType("image/jpeg").build()
+        ).await()
+        val downloadUrl = storageRef.downloadUrl.await().toString()
+        if (!downloadUrl.startsWith("https://")) {
+            throw IllegalStateException("Unexpected non-HTTPS download URL returned by Firebase Storage.")
+        }
+        profilePreferences.updatePhotoUrl(downloadUrl)
+        runFirestoreWrite {
+            syncService.updateUserProfileFields(uid, mapOf("photoUrl" to downloadUrl))
+        }.getOrThrow()
+
+        auth?.currentUser?.updateProfile(
+            com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                .setPhotoUri(Uri.parse(downloadUrl))
+                .build()
+        )?.await()
+
+        return Result.success(downloadUrl)
     }
 
     suspend fun updateNotificationsEnabled(enabled: Boolean): Result<Unit> {

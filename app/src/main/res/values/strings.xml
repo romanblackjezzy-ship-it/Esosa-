@@ -55,4 +55,7 @@
     <string name="voice_call_mic_active">Microphone active</string>
     <string name="voice_call_mic_muted">Microphone muted</string>
     <string name="voice_call_mic_unavailable">Microphone permission required</string>
+    <string name="profile_photo_take">Take Profile Photo</string>
+    <string name="profile_photo_uploading">Uploading profile photo…</string>
+    <string name="profile_photo_camera_permission">Camera permission is required to take a profile photo.</string>
 </resources>

@@ -141,6 +141,11 @@ class LocalProfilePreferences(context: Context) {
         _profileFlow.value = readProfile()
     }
 
+    fun updatePhotoUrl(url: String) {
+        prefs.edit().putString(KEY_PHOTO_URL, url.trim()).apply()
+        _profileFlow.value = readProfile()
+    }
+
     fun setNotificationsEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled).apply()
         _profileFlow.value = readProfile()
