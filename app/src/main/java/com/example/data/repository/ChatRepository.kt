@@ -1124,11 +1124,25 @@ class ChatRepository(
                 val remaining = currentUsers.filterNot { it == uid }
                 if (remaining.isEmpty()) next.remove(emoji) else next[emoji] = remaining
             } else {
+                if (!next.containsKey(emoji) && next.size >= EsosaReactions.MAX_TYPES_PER_MESSAGE) {
+                    return Result.failure(
+                        IllegalStateException("Maximum of ${EsosaReactions.MAX_TYPES_PER_MESSAGE} reaction emojis per message.")
+                    )
+                }
                 next[emoji] = (currentUsers + uid).distinct()
             }
             dao.updateRoomMessageReactions(messageId, ReactionsJsonCodec.encode(next))
             if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null) {
-                return runFirestoreWrite { syncService.updateMessageReactions(roomId, messageId, next) }
+                val room = dao.getRoomById(roomId)
+                if (room != null && room.ownerId.isNotBlank()) {
+                    val syncResult = runFirestoreWrite {
+                        syncService.updateMessageReactions(roomId, messageId, next)
+                    }
+                    if (syncResult.isFailure) {
+                        dao.updateRoomMessageReactions(messageId, entity.reactionsJson)
+                    }
+                    return syncResult
+                }
             }
             Result.success(Unit)
         } catch (e: CancellationException) {

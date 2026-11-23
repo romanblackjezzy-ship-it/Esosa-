@@ -100,7 +100,10 @@ data class ChatRoom(
 )
 
 object EsosaReactions {
-    val ALLOWED = listOf("👍", "❤️", "😂", "😮", "🔥", "👏")
+    val QUICK = listOf("👍", "❤️", "😂", "😮", "🔥", "👏")
+    val EXTRA = listOf("😢", "🎉", "🙏", "💯", "😍", "🤔", "🤯", "🤩", "🥳", "⚡")
+    val ALLOWED = QUICK + EXTRA
+    const val MAX_TYPES_PER_MESSAGE = 10
 }
 
 object EsosaStickers {

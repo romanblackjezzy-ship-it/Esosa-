@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,6 +183,10 @@ fun ConversationScreen(
     var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
     val listState = rememberLazyListState()
     val noCameraAppMessage = stringResource(R.string.room_photo_no_camera_app)
+
+    BackHandler(enabled = activePickerMessageId != null) {
+        activePickerMessageId = null
+    }
 
     LaunchedEffect(editingMessage?.id) {
         if (editingMessage != null) {
@@ -828,7 +833,13 @@ fun ConversationScreen(
                                                             activePickerMessageId =
                                                                 if (activePickerMessageId == msg.id) null else msg.id
                                                         },
-                                                        onOpenActionSheet = { actionSheetMessage = msg },
+                                                        onOpenActionSheet = {
+                                                            if (activePickerMessageId != null) {
+                                                                activePickerMessageId = null
+                                                            } else {
+                                                                actionSheetMessage = msg
+                                                            }
+                                                        },
                                                         onToggleReaction = { emoji ->
                                                             activePickerMessageId = null
                                                             onToggleReaction(msg.id, emoji)

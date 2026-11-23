@@ -4,11 +4,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import com.example.core.UiState
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
@@ -292,5 +294,70 @@ class ConversationScreenTest {
         composeTestRule.onNodeWithTag("media_attachment_section").assertIsDisplayed()
         composeTestRule.onNodeWithTag("media_attach_gallery").assertIsDisplayed()
         composeTestRule.onNodeWithTag("media_attach_schedule").assertIsDisplayed()
+    }
+
+    @Test
+    fun `long pressing a chat bubble opens emoji picker and triggers reaction callback`() {
+        val room = ChatRoom(
+            id = "room_react",
+            title = "Maya Lin",
+            chatKind = ChatKind.DIRECT,
+            roomCode = "REACT1"
+        )
+        val msg = RoomMessage(
+            id = "m_long_1",
+            roomId = room.id,
+            senderId = "u_maya",
+            senderName = "Maya Lin",
+            text = "Long press this message to react",
+            createdAtMillis = System.currentTimeMillis()
+        )
+        val reactionsRecorded = mutableListOf<Pair<String, String>>()
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                ConversationScreen(
+                    currentUserId = "local_me",
+                    room = room,
+                    messagesState = UiState.Success(listOf(msg)),
+                    typingUsers = emptyList(),
+                    highlightedMessageId = null,
+                    actionError = null,
+                    isSendingMessage = false,
+                    photoUploadProgress = null,
+                    photoUploadPreviewUri = null,
+                    onBack = {},
+                    onClearHighlight = {},
+                    onDraftChanged = { _, _ -> },
+                    onSendMessage = {},
+                    onSendCapturedPhoto = { _, _, cleanup -> cleanup() },
+                    onReportError = {},
+                    onToggleReaction = { msgId, emoji -> reactionsRecorded.add(msgId to emoji) },
+                    onDeleteMessage = {},
+                    onTogglePin = {},
+                    onDeleteRoom = {},
+                    onClearError = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("reaction_picker_m_long_1").assertDoesNotExist()
+
+        // Long press the message bubble to open the emoji picker
+        composeTestRule.onNodeWithText("Long press this message to react").performTouchInput { longClick() }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("reaction_picker_m_long_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("reaction_picker_expand_m_long_1").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("reaction_picker_extra_m_long_1").assertIsDisplayed()
+
+        // Tap an expanded emoji and confirm callback + picker dismissal
+        composeTestRule.onNodeWithTag("reaction_option_m_long_1_🎉").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf("m_long_1" to "🎉"), reactionsRecorded)
+        composeTestRule.onNodeWithTag("reaction_picker_m_long_1").assertDoesNotExist()
     }
 }

@@ -210,7 +210,7 @@ fun MessageActionSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                EsosaReactions.ALLOWED.forEach { emoji ->
+                EsosaReactions.QUICK.forEach { emoji ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         shape = CircleShape,

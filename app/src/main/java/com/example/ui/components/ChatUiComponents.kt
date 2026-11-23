@@ -33,9 +33,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -50,6 +52,9 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -552,6 +557,7 @@ fun MessageReactionsRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReactionPickerStrip(
     messageId: String,
@@ -559,40 +565,106 @@ fun ReactionPickerStrip(
     onSelectEmoji: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var expanded by remember(messageId) { mutableStateOf(false) }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(24.dp),
         tonalElevation = 6.dp,
-        shadowElevation = 4.dp,
+        shadowElevation = 6.dp,
+        border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = modifier.testTag("reaction_picker_$messageId")
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            EsosaReactions.ALLOWED.forEach { emoji ->
-                val isSelected = emoji in selectedEmojis
+        Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                EsosaReactions.QUICK.forEach { emoji ->
+                    ReactionEmojiOption(
+                        messageId = messageId,
+                        emoji = emoji,
+                        isSelected = emoji in selectedEmojis,
+                        onClick = { onSelectEmoji(emoji) }
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
                         .clip(CircleShape)
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
-                        )
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         .clickable(
                             role = Role.Button,
-                            onClickLabel = "React with $emoji"
-                        ) { onSelectEmoji(emoji) }
-                        .semantics { contentDescription = "React with $emoji" }
-                        .testTag("reaction_option_${messageId}_$emoji"),
+                            onClickLabel = if (expanded) "Show fewer emojis" else "More emojis"
+                        ) { expanded = !expanded }
+                        .semantics {
+                            contentDescription = if (expanded) "Show fewer emojis" else "More emojis"
+                        }
+                        .testTag("reaction_picker_expand_$messageId"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = emoji, fontSize = 18.sp)
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                    FlowRow(
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .testTag("reaction_picker_extra_$messageId"),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        EsosaReactions.EXTRA.forEach { emoji ->
+                            ReactionEmojiOption(
+                                messageId = messageId,
+                                emoji = emoji,
+                                isSelected = emoji in selectedEmojis,
+                                onClick = { onSelectEmoji(emoji) }
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ReactionEmojiOption(
+    messageId: String,
+    emoji: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(CircleShape)
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                else Color.Transparent
+            )
+            .clickable(
+                role = Role.Button,
+                onClickLabel = "React with $emoji",
+                onClick = onClick
+            )
+            .semantics { contentDescription = "React with $emoji" }
+            .testTag("reaction_option_${messageId}_$emoji"),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = emoji, fontSize = 18.sp)
     }
 }
 

@@ -79,7 +79,9 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -128,6 +130,7 @@ fun ConversationMessageBubble(
     modifier: Modifier = Modifier
 ) {
     val telegram = MaterialTheme.telegramColors
+    val hapticFeedback = LocalHapticFeedback.current
     val mySelectedEmojis = remember(message.reactions, currentUserId) {
         message.reactions.filterValues { currentUserId in it }.keys
     }
@@ -194,7 +197,13 @@ fun ConversationMessageBubble(
             horizontalAlignment = if (alignedEnd) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = bubbleMaxWidth)
         ) {
-            AnimatedVisibility(visible = showReactionPicker) {
+            AnimatedVisibility(
+                visible = showReactionPicker,
+                enter = fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                    scaleIn(initialScale = 0.88f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                    expandVertically(spring(stiffness = Spring.StiffnessMediumLow)),
+                exit = fadeOut() + scaleOut(targetScale = 0.9f) + shrinkVertically()
+            ) {
                 ReactionPickerStrip(
                     messageId = message.id,
                     selectedEmojis = mySelectedEmojis,
@@ -213,8 +222,11 @@ fun ConversationMessageBubble(
                     .clip(bubbleShape)
                     .combinedClickable(
                         onClick = onOpenActionSheet,
-                        onLongClick = onOpenActionSheet,
-                        onLongClickLabel = "Message actions"
+                        onLongClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onOpenReactionPicker()
+                        },
+                        onLongClickLabel = "React with emoji"
                     )
             ) {
                 Column(
@@ -283,7 +295,14 @@ fun ConversationMessageBubble(
                                 .heightIn(min = 140.dp, max = 260.dp)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                .clickable { onOpenFullScreenPhoto(message) }
+                                .combinedClickable(
+                                    onClick = { onOpenFullScreenPhoto(message) },
+                                    onLongClick = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onOpenReactionPicker()
+                                    },
+                                    onLongClickLabel = "React with emoji"
+                                )
                                 .testTag("room_message_image_${message.id}"),
                             contentAlignment = Alignment.Center
                         ) {
