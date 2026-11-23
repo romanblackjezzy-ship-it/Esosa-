@@ -48,46 +48,28 @@ class EsosaV2FeaturesTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `auth onboarding walks through welcome, credentials, otp, and profile setup`() {
-        var signedUpDisplayName = ""
-        var signedUpUsername = ""
-        var signedUpCredential = ""
-
+    fun `auth onboarding displays Google sign in and EU Africa phone country selector`() {
         composeTestRule.setContent {
             EsosaTheme {
                 AuthOnboardingScreen(
                     existingProfile = UserProfile(displayName = "Alex Mercer", username = "alex_mercer"),
-                    onCompleteSignUp = { _, credential, name, username, _, _ ->
-                        signedUpCredential = credential
-                        signedUpDisplayName = name
-                        signedUpUsername = username
-                    },
-                    onCompleteLogin = { _, _ -> }
+                    onAuthSuccess = { _ -> }
                 )
             }
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("auth_get_started_button").assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithTag("google_sign_in_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_toggle_phone_section").assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("auth_method_email").performClick()
-        composeTestRule.onNodeWithTag("auth_credential_input").performTextClearance()
-        composeTestRule.onNodeWithTag("auth_credential_input").performTextInput("maya@esosa.chat")
-        composeTestRule.onNodeWithTag("auth_send_otp_button").performClick()
+        composeTestRule.onNodeWithTag("auth_country_selector").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Germany").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("auth_autofill_otp_button").performClick()
-        composeTestRule.onNodeWithTag("auth_verify_otp_button").performClick()
+        composeTestRule.onNodeWithTag("auth_phone_input").performTextInput("1701234567")
         composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("auth_display_name_input").performTextClearance()
-        composeTestRule.onNodeWithTag("auth_display_name_input").performTextInput("Maya Sterling")
-        composeTestRule.onNodeWithTag("auth_finish_setup_button").performClick()
-
-        assertEquals("maya@esosa.chat", signedUpCredential)
-        assertEquals("Maya Sterling", signedUpDisplayName)
-        assertEquals("alex_mercer", signedUpUsername)
     }
 
     @Test

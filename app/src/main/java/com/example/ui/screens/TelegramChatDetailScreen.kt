@@ -130,18 +130,23 @@ fun TelegramChatDetailView(
 fun TelegramCreateChatDialog(
     isBusy: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, ChatKind) -> Unit
+    onConfirm: (String, String, ChatKind) -> Unit,
+    onJoinByCode: (String) -> Unit = {}
 ) {
     var title by remember { mutableStateOf("") }
     var topic by remember { mutableStateOf("") }
     var selectedKind by remember { mutableStateOf(ChatKind.DIRECT) }
+    var isJoinMode by remember { mutableStateOf(false) }
+    var inviteCode by remember { mutableStateOf("") }
     var isPublicChannel by remember { mutableStateOf(true) }
 
     val isEmailValid = ChatRepository.isValidEmail(title)
-    val canConfirm = if (selectedKind == ChatKind.DIRECT) {
-        isEmailValid && !isBusy
-    } else {
-        title.isNotBlank() && !isBusy
+    val cleanCode = inviteCode.trim().uppercase()
+    val isCodeValid = cleanCode.length in 4..16 && cleanCode.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+    val canConfirm = when {
+        isJoinMode -> isCodeValid && !isBusy
+        selectedKind == ChatKind.DIRECT -> isEmailValid && !isBusy
+        else -> title.isNotBlank() && !isBusy
     }
 
     AlertDialog(
@@ -153,21 +158,25 @@ fun TelegramCreateChatDialog(
             .widthIn(max = 560.dp),
         title = {
             Text(
-                if (selectedKind == ChatKind.DIRECT) "Add User by Email"
-                else "New Conversation"
+                when {
+                    isJoinMode -> "Join Room by Code"
+                    selectedKind == ChatKind.DIRECT -> "Add User by Email"
+                    else -> "New Conversation"
+                }
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     listOf(ChatKind.DIRECT, ChatKind.GROUP, ChatKind.CHANNEL).forEach { kind ->
                         FilterChip(
-                            selected = selectedKind == kind,
+                            selected = !isJoinMode && selectedKind == kind,
                             onClick = {
-                                if (selectedKind != kind) {
+                                if (isJoinMode || selectedKind != kind) {
+                                    isJoinMode = false
                                     selectedKind = kind
                                     title = ""
                                     topic = ""
@@ -177,8 +186,33 @@ fun TelegramCreateChatDialog(
                             modifier = Modifier.testTag("create_room_kind_${kind.id}")
                         )
                     }
+                    FilterChip(
+                        selected = isJoinMode,
+                        onClick = {
+                            isJoinMode = true
+                            inviteCode = ""
+                        },
+                        label = { Text("Join", maxLines = 1) },
+                        modifier = Modifier.testTag("create_room_kind_join")
+                    )
                 }
-                if (selectedKind == ChatKind.DIRECT) {
+                if (isJoinMode) {
+                    OutlinedTextField(
+                        value = inviteCode,
+                        onValueChange = { if (it.length <= 16) inviteCode = it.uppercase() },
+                        label = { Text("Invite Code") },
+                        placeholder = { Text("e.g. AB12CD") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("join_room_code_input")
+                    )
+                    Text(
+                        text = "Enter a shared 4–16 character room invite code to sync messages in real time.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (selectedKind == ChatKind.DIRECT) {
                     OutlinedTextField(
                         value = title,
                         onValueChange = { if (it.length <= 120) title = it },
@@ -243,16 +277,22 @@ fun TelegramCreateChatDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (selectedKind == ChatKind.DIRECT) {
-                        onConfirm(title.trim().lowercase(), "", ChatKind.DIRECT)
-                    } else {
-                        onConfirm(title, topic, selectedKind)
+                    when {
+                        isJoinMode -> onJoinByCode(cleanCode)
+                        selectedKind == ChatKind.DIRECT -> onConfirm(title.trim().lowercase(), "", ChatKind.DIRECT)
+                        else -> onConfirm(title, topic, selectedKind)
                     }
                 },
                 enabled = canConfirm,
                 modifier = Modifier.testTag("confirm_create_room_button")
             ) {
-                Text(if (selectedKind == ChatKind.DIRECT) "Add" else "Create")
+                Text(
+                    when {
+                        isJoinMode -> "Join"
+                        selectedKind == ChatKind.DIRECT -> "Add"
+                        else -> "Create"
+                    }
+                )
             }
         },
         dismissButton = {

@@ -15,6 +15,9 @@ interface EsosaDao {
     )
     fun observeRooms(): Flow<List<ChatRoomEntity>>
 
+    @Query("SELECT * FROM chat_rooms")
+    suspend fun observeRoomsOnce(): List<ChatRoomEntity>
+
     @Query("SELECT * FROM chat_rooms WHERE id = :roomId LIMIT 1")
     fun observeRoom(roomId: String): Flow<ChatRoomEntity?>
 

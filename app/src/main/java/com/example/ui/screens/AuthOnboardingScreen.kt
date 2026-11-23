@@ -1,15 +1,17 @@
 package com.example.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,21 +38,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,14 +63,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -76,18 +79,26 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.core.LocalProfilePreferences
-import com.example.data.model.ChatKind
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.example.R
 import com.example.data.model.UserProfile
 import com.example.ui.components.EsosaBrandLogo
-import com.example.ui.components.TelegramAvatarCircle
-
-private enum class OnboardingStep {
-    WELCOME,
-    CREDENTIALS,
-    OTP_VERIFY,
-    PROFILE_SETUP
-}
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+import com.google.firebase.Firebase
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.auth
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 data class CountryItem(val name: String, val code: String, val flag: String)
 
@@ -186,50 +197,153 @@ val euAndAfricanCountries = listOf(
     CountryItem("Japan", "+81", "🇯🇵")
 ).sortedBy { it.name }
 
+private tailrec fun Context.findActivityOrNull(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivityOrNull()
+    else -> null
+}
+
+fun attemptAutoSignIn(
+    context: Context,
+    credentialManager: CredentialManager,
+    onAuthSuccess: () -> Unit,
+    onUnauthenticated: () -> Unit,
+    scope: CoroutineScope
+) {
+    if (Firebase.auth.currentUser != null) {
+        onAuthSuccess()
+        return
+    }
+    val clientId = try {
+        context.getString(R.string.default_web_client_id)
+    } catch (_: Exception) {
+        onUnauthenticated()
+        return
+    }
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setFilterByAuthorizedAccounts(true)
+        .setServerClientId(clientId)
+        .setAutoSelectEnabled(true)
+        .build()
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
+
+    scope.launch {
+        try {
+            val activityContext = context.findActivityOrNull() ?: context
+            val cred = credentialManager.getCredential(activityContext, request).credential
+            if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
+                Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
+                onAuthSuccess()
+            } else {
+                onUnauthenticated()
+            }
+        } catch (_: Exception) {
+            onUnauthenticated()
+        }
+    }
+}
+
+fun onGoogleSignInClicked(
+    context: Context,
+    credentialManager: CredentialManager,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    scope: CoroutineScope,
+    onAuthCancelled: () -> Unit = {}
+) {
+    val clientId = try {
+        context.getString(R.string.default_web_client_id)
+    } catch (_: Exception) {
+        onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
+        return
+    }
+    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(signInOption)
+        .build()
+
+    scope.launch {
+        try {
+            val activityContext = context.findActivityOrNull() ?: context
+            val cred = credentialManager.getCredential(activityContext, request).credential
+            if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
+                Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
+                onAuthSuccess()
+            } else {
+                onAuthError("Unexpected Google credential response.")
+            }
+        } catch (e: GetCredentialCancellationException) {
+            Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
+            onAuthCancelled()
+        } catch (e: Exception) {
+            Log.e("Auth", "Google Sign-In failed", e)
+            onAuthError(e.localizedMessage ?: "Sign in failed. Please check your connection and try again.")
+        }
+    }
+}
+
+fun signOutFromGoogle(
+    credentialManager: CredentialManager,
+    scope: CoroutineScope,
+    onSignOutComplete: () -> Unit = {}
+) {
+    scope.launch {
+        withContext(NonCancellable) {
+            try {
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.w("Auth", "Failed to clear credential state: ${e.message}")
+            } finally {
+                Firebase.auth.signOut()
+                onSignOutComplete()
+            }
+        }
+    }
+}
+
 @Composable
 fun AuthOnboardingScreen(
     existingProfile: UserProfile,
-    onCompleteSignUp: (
-        authMethod: String,
-        phoneOrEmail: String,
-        displayName: String,
-        username: String,
-        bio: String,
-        avatarKey: String
-    ) -> Unit,
-    onCompleteLogin: (authMethod: String, phoneOrEmail: String) -> Unit,
+    onAuthSuccess: (optionalPhoneNumber: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var step by rememberSaveable { mutableStateOf(OnboardingStep.WELCOME) }
-    var isLoginMode by rememberSaveable { mutableStateOf(false) }
-    var authMethod by rememberSaveable { mutableStateOf("phone") }
-    var selectedCountryCode by rememberSaveable { mutableStateOf("+234") } // Default Nigeria or +1
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    var isLoading by remember { mutableStateOf(false) }
+    var authError by remember { mutableStateOf<String?>(null) }
+
+    var showPhoneSection by rememberSaveable { mutableStateOf(false) }
+    var selectedCountryName by rememberSaveable { mutableStateOf("Nigeria") }
     var showCountryPicker by remember { mutableStateOf(false) }
     var countrySearchQuery by remember { mutableStateOf("") }
-
-    val selectedCountry = euAndAfricanCountries.find { it.code == selectedCountryCode } ?: euAndAfricanCountries[0]
-
-    var credentialInput by rememberSaveable {
+    var localPhoneInput by rememberSaveable {
         mutableStateOf(
-            if (existingProfile.phoneOrEmail.contains("@")) existingProfile.phoneOrEmail
-            else ""
+            if (!existingProfile.phoneOrEmail.contains("@")) existingProfile.phoneOrEmail else ""
         )
     }
-    var otpDigits by rememberSaveable { mutableStateOf(listOf("", "", "", "", "", "")) }
-    var otpError by remember { mutableStateOf<String?>(null) }
-    var displayName by rememberSaveable { mutableStateOf(existingProfile.displayName) }
-    var username by rememberSaveable { mutableStateOf(existingProfile.username) }
-    var bio by rememberSaveable { mutableStateOf(existingProfile.bio) }
-    var avatarKey by rememberSaveable { mutableStateOf(existingProfile.avatarKey) }
 
-    if (step != OnboardingStep.WELCOME) {
+    val selectedCountry = remember(selectedCountryName) {
+        euAndAfricanCountries.find { it.name == selectedCountryName } ?: euAndAfricanCountries.first()
+    }
+
+    val formattedOptionalPhone = remember(localPhoneInput, selectedCountry) {
+        val cleaned = localPhoneInput.trim()
+        if (cleaned.isEmpty()) ""
+        else if (cleaned.startsWith("+")) cleaned
+        else "${selectedCountry.code} $cleaned"
+    }
+
+    if (showCountryPicker) {
         BackHandler {
-            step = when (step) {
-                OnboardingStep.CREDENTIALS -> OnboardingStep.WELCOME
-                OnboardingStep.OTP_VERIFY -> OnboardingStep.CREDENTIALS
-                OnboardingStep.PROFILE_SETUP -> OnboardingStep.OTP_VERIFY
-                OnboardingStep.WELCOME -> OnboardingStep.WELCOME
-            }
+            showCountryPicker = false
+            countrySearchQuery = ""
         }
     }
 
@@ -241,193 +355,147 @@ fun AuthOnboardingScreen(
             .imePadding(),
         contentAlignment = Alignment.Center
     ) {
-        AnimatedContent(
-            targetState = step,
-            transitionSpec = {
-                fadeIn() + slideInHorizontally { if (targetState.ordinal > initialState.ordinal) it / 3 else -it / 3 } togetherWith
-                    fadeOut() + slideOutHorizontally { if (targetState.ordinal > initialState.ordinal) -it / 3 else it / 3 }
-            },
-            label = "telegram_auth_transition"
-        ) { currentStep ->
-            when (currentStep) {
-                OnboardingStep.WELCOME -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Column(
-                            modifier = Modifier.widthIn(max = 440.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(80.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    EsosaBrandLogo(size = 46.dp)
-                                }
-                            }
-
-                            Text(
-                                text = "Esosa Messenger",
-                                style = MaterialTheme.typography.headlineLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = (-0.5).sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-
-                            Text(
-                                text = "Fast. Secure. Private messaging supporting all EU and African nations.",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(Modifier.height(4.dp))
-
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    FeatureHighlightRow(
-                                        icon = Icons.Filled.Lock,
-                                        title = "End-to-End Privacy",
-                                        subtitle = "Disappearing messages & 2-step PIN protection"
-                                    )
-                                    FeatureHighlightRow(
-                                        icon = Icons.Filled.Groups,
-                                        title = "Groups & Channels",
-                                        subtitle = "Admin controls, polls, comments and reactions"
-                                    )
-                                    FeatureHighlightRow(
-                                        icon = Icons.Filled.Call,
-                                        title = "Crystal-Clear Calls",
-                                        subtitle = "HD voice and video communication"
-                                    )
-                                }
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-
-                            Button(
-                                onClick = {
-                                    isLoginMode = false
-                                    step = OnboardingStep.CREDENTIALS
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp)
-                                    .testTag("auth_get_started_button")
-                            ) {
-                                Text(
-                                    "Start Messaging",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    isLoginMode = true
-                                    step = OnboardingStep.CREDENTIALS
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.5f.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .testTag("auth_login_button")
-                            ) {
-                                Text(
-                                    "Log In to Existing Account",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium)
-                                )
-                            }
-                        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Column(
+                modifier = Modifier.widthIn(max = 440.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(84.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        EsosaBrandLogo(size = 48.dp)
                     }
                 }
 
-                OnboardingStep.CREDENTIALS -> {
-                    val formattedAddress = if (authMethod == "phone") {
-                        "${selectedCountry.code} ${credentialInput.trim()}"
-                    } else {
-                        credentialInput.trim()
-                    }
-                    val isCredentialValid = if (authMethod == "phone") {
-                        credentialInput.count { it.isDigit() } >= 6
-                    } else {
-                        credentialInput.contains("@") && credentialInput.contains(".")
-                    }
+                Text(
+                    text = "Esosa Messenger",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
+                )
 
-                    TelegramAuthCardShell(
-                        title = if (isLoginMode) "Enter your account" else "Your phone or email",
-                        subtitle = if (authMethod == "phone") {
-                            "Select your country and enter your phone number to sign in or register."
-                        } else {
-                            "We will send a verification code to your email address."
-                        },
-                        onBack = { step = OnboardingStep.WELCOME }
+                Text(
+                    text = "Real-time cloud messaging, groups, channels, and HD voice calls synced securely with Cloud Firestore.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        FeatureHighlightRow(
+                            icon = Icons.Filled.CloudDone,
+                            title = "Real-Time Cloud Sync",
+                            subtitle = "Messages, typing status & profile saved across devices"
+                        )
+                        FeatureHighlightRow(
+                            icon = Icons.Filled.Groups,
+                            title = "Groups & Channels",
+                            subtitle = "Invite teammates by email or shareable room code"
+                        )
+                        FeatureHighlightRow(
+                            icon = Icons.Filled.Lock,
+                            title = "Google Account Security",
+                            subtitle = "Zero-trust per-user access control powered by Firebase Auth"
+                        )
+                        FeatureHighlightRow(
+                            icon = Icons.Filled.Call,
+                            title = "Crystal-Clear Calls",
+                            subtitle = "HD voice and video communication"
+                        )
+                    }
+                }
+
+                // Optional EU & African Phone Linker Card
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { showPhoneSection = !showPhoneSection }
+                                .padding(vertical = 4.dp)
+                                .testTag("auth_toggle_phone_section"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            FilterChip(
-                                selected = authMethod == "phone",
-                                onClick = {
-                                    authMethod = "phone"
-                                    if (credentialInput.contains("@")) credentialInput = ""
-                                },
-                                leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Phone Number") },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("auth_method_phone")
-                            )
-                            FilterChip(
-                                selected = authMethod == "email",
-                                onClick = {
-                                    authMethod = "email"
-                                    if (!credentialInput.contains("@")) credentialInput = ""
-                                },
-                                leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Email Address") },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("auth_method_email")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Phone,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "Link EU / Africa Phone Number (Optional)",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    Text(
+                                        text = if (formattedOptionalPhone.isNotBlank()) formattedOptionalPhone
+                                        else "All EU & African dial codes supported",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (showPhoneSection) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = if (showPhoneSection) "Collapse" else "Expand",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        if (authMethod == "phone") {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "Country (EU & Africa Supported)",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        AnimatedVisibility(
+                            visible = showPhoneSection,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(top = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.surface,
                                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable { showCountryPicker = true }
+                                        .testTag("auth_country_selector")
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(14.dp),
+                                        modifier = Modifier.padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
@@ -455,341 +523,113 @@ fun AuthOnboardingScreen(
                                         )
                                     }
                                 }
+
+                                OutlinedTextField(
+                                    value = localPhoneInput,
+                                    onValueChange = { if (it.length <= 24) localPhoneInput = it },
+                                    label = { Text("Phone Number") },
+                                    placeholder = { Text("801 234 5678") },
+                                    prefix = { Text("${selectedCountry.code} ") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Phone,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("auth_phone_input")
+                                )
                             }
                         }
+                    }
+                }
 
-                        OutlinedTextField(
-                            value = credentialInput,
-                            onValueChange = { if (it.length <= 80) credentialInput = it },
-                            label = { Text(if (authMethod == "phone") "Phone Number" else "Email Address") },
-                            placeholder = { Text(if (authMethod == "phone") "801 234 5678" else "you@domain.com") },
-                            prefix = if (authMethod == "phone") { { Text("${selectedCountry.code} ") } } else null,
-                            leadingIcon = if (authMethod == "email") { { Icon(Icons.Filled.Email, contentDescription = null) } } else null,
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = if (authMethod == "phone") KeyboardType.Phone else KeyboardType.Email,
-                                imeAction = ImeAction.Done
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_credential_input")
-                        )
-
-                        Spacer(Modifier.height(4.dp))
-
-                        val keyboardController = LocalSoftwareKeyboardController.current
-                        Button(
-                            onClick = {
-                                keyboardController?.hide()
-                                otpDigits = listOf("", "", "", "", "", "")
-                                otpError = null
-                                step = OnboardingStep.OTP_VERIFY
-                            },
-                            enabled = isCredentialValid,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("auth_send_otp_button")
+                if (authError != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_error_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Filled.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Text(
-                                "Continue",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                text = authError.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
+                    }
+                }
 
+                Button(
+                    onClick = {
+                        keyboardController?.hide()
+                        authError = null
+                        isLoading = true
+                        onGoogleSignInClicked(
+                            context = context,
+                            credentialManager = credentialManager,
+                            onAuthSuccess = {
+                                isLoading = false
+                                onAuthSuccess(formattedOptionalPhone)
+                            },
+                            onAuthError = { msg ->
+                                isLoading = false
+                                authError = msg
+                            },
+                            scope = scope,
+                            onAuthCancelled = {
+                                isLoading = false
+                            }
+                        )
+                    },
+                    enabled = !isLoading,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .testTag("google_sign_in_button")
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.5.dp
+                        )
+                        Spacer(Modifier.width(12.dp))
                         Text(
-                            text = "A secure verification code will be sent to $formattedAddress.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
+                            text = "Signing in…",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
                         )
-                    }
-                }
-
-                OnboardingStep.OTP_VERIFY -> {
-                    val destinationLabel = if (authMethod == "phone") {
-                        "${selectedCountry.code} ${credentialInput.trim()}"
                     } else {
-                        credentialInput.trim()
-                    }
-
-                    TelegramAuthCardShell(
-                        title = "Verify your code",
-                        subtitle = "We have sent a verification code to $destinationLabel",
-                        onBack = { step = OnboardingStep.CREDENTIALS }
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "Verification Code",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = "Code: ${LocalProfilePreferences.DEMO_OTP_CODE}",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                                AssistChip(
-                                    onClick = {
-                                        val code = LocalProfilePreferences.DEMO_OTP_CODE
-                                        otpDigits = code.map { it.toString() }
-                                        otpError = null
-                                    },
-                                    label = { Text("Auto-fill") },
-                                    modifier = Modifier.testTag("auth_autofill_otp_button")
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        val focusRequesters = remember { List(6) { FocusRequester() } }
-                        val keyboardController = LocalSoftwareKeyboardController.current
-
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                for (i in 0 until 6) {
-                                    OutlinedTextField(
-                                        value = otpDigits[i],
-                                        onValueChange = { rawInput ->
-                                            val filtered = rawInput.filter { it.isDigit() }
-                                            if (filtered.isNotEmpty()) {
-                                                val char = filtered.last().toString()
-                                                val updated = otpDigits.toMutableList()
-                                                updated[i] = char
-                                                otpDigits = updated
-                                                otpError = null
-
-                                                if (i < 5) {
-                                                    focusRequesters[i + 1].requestFocus()
-                                                } else {
-                                                    keyboardController?.hide()
-                                                }
-                                            } else {
-                                                val updated = otpDigits.toMutableList()
-                                                updated[i] = ""
-                                                otpDigits = updated
-                                                if (i > 0 && otpDigits[i].isEmpty()) {
-                                                    focusRequesters[i - 1].requestFocus()
-                                                }
-                                            }
-                                        },
-                                        singleLine = true,
-                                        textStyle = MaterialTheme.typography.titleLarge.copy(
-                                            textAlign = TextAlign.Center,
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        shape = RoundedCornerShape(12.dp),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier
-                                            .size(width = 46.dp, height = 56.dp)
-                                            .focusRequester(focusRequesters[i])
-                                            .testTag("auth_otp_digit_$i")
-                                    )
-                                }
-                            }
-
-                            if (otpError != null) {
-                                Text(
-                                    text = otpError.orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        val fullOtp = otpDigits.joinToString("")
-                        val isOtpComplete = fullOtp.length == 6
-
-                        Button(
-                            onClick = {
-                                if (fullOtp == LocalProfilePreferences.DEMO_OTP_CODE || fullOtp.length == 6) {
-                                    if (isLoginMode) {
-                                        onCompleteLogin(authMethod, destinationLabel)
-                                    } else {
-                                        step = OnboardingStep.PROFILE_SETUP
-                                    }
-                                } else {
-                                    otpError = "Please enter all 6 digits."
-                                }
-                            },
-                            enabled = isOtpComplete,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("auth_verify_otp_button")
-                        ) {
-                            Text("Verify Code", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-                        }
-
-                        TextButton(
-                            onClick = {
-                                otpDigits = listOf("", "", "", "", "", "")
-                                otpError = null
-                            },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("Didn't get the code? Resend")
-                        }
+                        Text(
+                            text = "Sign in with Google",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
                     }
                 }
 
-                OnboardingStep.PROFILE_SETUP -> {
-                    val destinationLabel = if (authMethod == "phone") {
-                        "${selectedCountry.code} ${credentialInput.trim()}"
-                    } else {
-                        credentialInput.trim()
-                    }
-
-                    TelegramAuthCardShell(
-                        title = "Your Profile",
-                        subtitle = "Enter your name and add a profile photo for your Esosa account.",
-                        onBack = { step = OnboardingStep.OTP_VERIFY }
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            TelegramAvatarCircle(
-                                title = displayName.ifBlank { "Esosa" },
-                                seedKey = avatarKey,
-                                chatKind = ChatKind.DIRECT,
-                                avatarKey = avatarKey,
-                                size = 80.dp
-                            )
-                            Text(
-                                text = "Choose Avatar Accent",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                listOf("default", "ocean", "emerald", "esosa").forEach { preset ->
-                                    val selected = avatarKey == preset
-                                    Box(
-                                        modifier = Modifier
-                                            .size(46.dp)
-                                            .clip(CircleShape)
-                                            .border(
-                                                BorderStroke(
-                                                    width = if (selected) 3.dp else 1.dp,
-                                                    color = if (selected) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.outlineVariant
-                                                ),
-                                                CircleShape
-                                            )
-                                            .padding(2.dp)
-                                            .clickable { avatarKey = preset }
-                                            .testTag("auth_avatar_$preset"),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        TelegramAvatarCircle(
-                                            title = displayName.ifBlank { "Esosa" },
-                                            seedKey = preset,
-                                            chatKind = ChatKind.DIRECT,
-                                            avatarKey = preset,
-                                            size = 40.dp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(4.dp))
-
-                        OutlinedTextField(
-                            value = displayName,
-                            onValueChange = { if (it.length <= 40) displayName = it },
-                            label = { Text("First Name (required)") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_display_name_input")
-                        )
-
-                        OutlinedTextField(
-                            value = username,
-                            onValueChange = { if (it.length <= 32) username = it.filter { ch -> !ch.isWhitespace() } },
-                            label = { Text("Username (optional)") },
-                            prefix = { Text("@") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_username_input")
-                        )
-
-                        OutlinedTextField(
-                            value = bio,
-                            onValueChange = { if (it.length <= 120) bio = it },
-                            label = { Text("Bio (optional)") },
-                            maxLines = 2,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_bio_input")
-                        )
-
-                        Spacer(Modifier.height(4.dp))
-
-                        Button(
-                            onClick = {
-                                onCompleteSignUp(
-                                    authMethod,
-                                    destinationLabel,
-                                    displayName,
-                                    username,
-                                    bio,
-                                    avatarKey
-                                )
-                            },
-                            enabled = displayName.isNotBlank(),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("auth_finish_setup_button")
-                        ) {
-                            Text(
-                                "Start Messaging",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = "Sign in with your Google Account to synchronize your chats, contacts, and profile in Cloud Firestore.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
             }
         }
 
-        // Country Selection Dialog (All EU & African Countries)
         if (showCountryPicker) {
             AlertDialog(
                 onDismissRequest = {
@@ -827,23 +667,25 @@ fun AuthOnboardingScreen(
                             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("country_search_input")
                         )
 
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            items(filteredCountries) { country ->
+                            items(filteredCountries, key = { "${it.name}_${it.code}" }) { country ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            selectedCountryCode = country.code
+                                            selectedCountryName = country.name
                                             showCountryPicker = false
                                             countrySearchQuery = ""
                                         },
-                                    color = if (selectedCountryCode == country.code)
+                                    color = if (selectedCountryName == country.name)
                                         MaterialTheme.colorScheme.primaryContainer
                                     else
                                         MaterialTheme.colorScheme.surface,
@@ -863,12 +705,13 @@ fun AuthOnboardingScreen(
                                             Text(text = country.flag, fontSize = 20.sp)
                                             Text(
                                                 text = country.name,
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (selectedCountryName == country.name) FontWeight.Bold else FontWeight.Normal
                                             )
                                         }
                                         Text(
                                             text = country.code,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.labelLarge,
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
@@ -878,78 +721,16 @@ fun AuthOnboardingScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        showCountryPicker = false
-                        countrySearchQuery = ""
-                    }) {
+                    OutlinedButton(
+                        onClick = {
+                            showCountryPicker = false
+                            countrySearchQuery = ""
+                        }
+                    ) {
                         Text("Close")
                     }
                 }
             )
-        }
-    }
-}
-
-@Composable
-private fun TelegramAuthCardShell(
-    title: String,
-    subtitle: String,
-    onBack: () -> Unit,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.widthIn(max = 440.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .testTag("auth_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    EsosaBrandLogo(size = 34.dp)
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.3).sp
-                        )
-                    )
-                }
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                content()
-            }
         }
     }
 }

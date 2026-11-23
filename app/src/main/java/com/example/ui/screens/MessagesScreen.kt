@@ -142,6 +142,7 @@ fun MessagesScreen(
     onOpenSearchResult: (String, String?) -> Unit = { roomId, _ -> onOpenRoom(roomId) },
     onClearHighlight: () -> Unit = {},
     onCreateRoom: (String, String, ChatKind) -> Unit,
+    onJoinRoomByCode: (String) -> Unit = {},
     onTogglePinRoom: (String) -> Unit = {},
     onToggleArchiveRoom: (String) -> Unit = {},
     onToggleMuteRoom: (String) -> Unit = {},
@@ -203,6 +204,7 @@ fun MessagesScreen(
                     onOpenRoom = { onOpenRoom(it) },
                     onOpenSearchResult = onOpenSearchResult,
                     onCreateRoom = onCreateRoom,
+                    onJoinRoomByCode = onJoinRoomByCode,
                     onTogglePinRoom = onTogglePinRoom,
                     onToggleArchiveRoom = onToggleArchiveRoom,
                     onToggleMuteRoom = onToggleMuteRoom,
@@ -398,6 +400,7 @@ fun MessagesScreen(
                     onOpenRoom = { onOpenRoom(it) },
                     onOpenSearchResult = onOpenSearchResult,
                     onCreateRoom = onCreateRoom,
+                    onJoinRoomByCode = onJoinRoomByCode,
                     onTogglePinRoom = onTogglePinRoom,
                     onToggleArchiveRoom = onToggleArchiveRoom,
                     onToggleMuteRoom = onToggleMuteRoom,
@@ -461,6 +464,7 @@ private fun TelegramChatsListView(
     onOpenRoom: (String) -> Unit,
     onOpenSearchResult: (String, String?) -> Unit,
     onCreateRoom: (String, String, ChatKind) -> Unit,
+    onJoinRoomByCode: (String) -> Unit = {},
     onTogglePinRoom: (String) -> Unit,
     onToggleArchiveRoom: (String) -> Unit,
     onToggleMuteRoom: (String) -> Unit,
@@ -793,6 +797,10 @@ private fun TelegramChatsListView(
             onDismiss = { showCreateDialog = false },
             onConfirm = { title, topic, kind ->
                 onCreateRoom(title, topic, kind)
+                showCreateDialog = false
+            },
+            onJoinByCode = { code ->
+                onJoinRoomByCode(code)
                 showCreateDialog = false
             }
         )

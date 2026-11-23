@@ -30,8 +30,8 @@
     <string name="room_photo_preview_close">Close photo preview</string>
     <string name="room_photo_no_camera_app">No camera app is available on this device.</string>
     <string name="telegram_saved_messages_title">Saved Messages</string>
-    <string name="telegram_saved_messages_subtitle">Cloudless local notes &amp; photos</string>
-    <string name="telegram_settings_profile_title">Local Profile</string>
+    <string name="telegram_saved_messages_subtitle">Personal cloud notes &amp; photos</string>
+    <string name="telegram_settings_profile_title">Cloud Profile</string>
     <string name="telegram_settings_edit_profile">Edit Profile</string>
     <string name="conversation_scroll_to_bottom">Scroll to latest messages</string>
     <string name="conversation_media_section_title">Attach Media &amp; Tools</string>

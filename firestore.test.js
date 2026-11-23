@@ -76,10 +76,15 @@ test("User profile isolation: owner can create/update/read; another user cannot 
     })
   );
 
-  // Partial update toggles notificationsEnabled cleanly
+  // Partial update toggles notificationsEnabled and extended profile fields cleanly
   await assertSucceeds(
     aliceDb.collection("users").doc(ALICE_UID).update({
       notificationsEnabled: false,
+      username: "alice_dev",
+      bio: "Building Esosa real-time sync",
+      avatarKey: "ocean",
+      themeMode: "dark",
+      language: "English",
       updatedAt: new Date(Date.now() - 1000),
     })
   );
@@ -209,7 +214,7 @@ test("Rooms, Invites, and Real-Time Messages: aligned queries, join by invite, a
     })
   );
 
-  // Tampering with message text or sender during reaction update fails; non-member reaction update fails
+  // Tampering with message text by non-sender (Alice on Bob's msg) or non-member reaction update fails
   await assertFails(
     aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
       text: "Edited message",
@@ -217,8 +222,36 @@ test("Rooms, Invites, and Real-Time Messages: aligned queries, join by invite, a
     })
   );
   await assertFails(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      text: "Non-sender hijack",
+      isEdited: true,
+    })
+  );
+  await assertFails(
     charlieDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
       reactions: { "😂": [CHARLIE_UID] },
+    })
+  );
+
+  // Original sender (Bob) can edit his own message text cleanly
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("room_1").collection("messages").doc("msg_1").update({
+      text: "Hey Alice! (updated)",
+      isEdited: true,
+    })
+  );
+
+  // Voice message metadata allowed
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("room_1").collection("messages").doc("msg_voice_1").set({
+      roomId: "room_1",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      text: "Voice note",
+      messageType: "voice",
+      voiceDurationSec: 12,
+      memberUids: [ALICE_UID, BOB_UID],
+      createdAt: new Date(Date.now() - 850),
     })
   );
 

@@ -25,6 +25,7 @@ import com.example.data.model.StoryItem
 import com.example.data.model.UserProfile
 import com.example.data.repository.ChatRepository
 import com.example.notifications.EsosaNotificationManager
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -109,7 +111,8 @@ class RoomsViewModel(
     private var callConnectJob: Job? = null
     private var bannerJob: Job? = null
     private var userTypingJob: Job? = null
-    private val contactReplyJobs = mutableMapOf<String, Job>()
+    private var activeTypingRoom: ChatRoom? = null
+    private var lastTypingSentAtMillis: Long = 0L
 
     val userProfile: StateFlow<UserProfile> = repository.observeUserProfile()
         .stateIn(
@@ -185,9 +188,81 @@ class RoomsViewModel(
         viewModelScope.launch {
             repository.ensureStarterChats()
         }
+        if (currentUserId != LocalProfilePreferences.LOCAL_USER_ID) {
+            viewModelScope.launch {
+                repository.observeRemoteProfileSync(currentUserId)
+                    .catch { error ->
+                        val fsErr = extractFirestoreException(error)
+                        if (fsErr == null && error is CancellationException) throw error
+                        Log.w(TAG, "Profile sync error", fsErr ?: error)
+                    }
+                    .collect { }
+            }
+            viewModelScope.launch {
+                repository.observeRemoteRoomsSync(currentUserId)
+                    .catch { error ->
+                        val fsErr = extractFirestoreException(error)
+                        if (fsErr == null && error is CancellationException) throw error
+                        val msg = (fsErr ?: error).localizedMessage ?: "Failed to sync chats"
+                        Log.w(TAG, "Rooms sync error: $msg", fsErr ?: error)
+                        _actionError.value = msg
+                    }
+                    .collect { }
+            }
+            viewModelScope.launch {
+                _selectedRoomId
+                    .flatMapLatest { roomId ->
+                        if (roomId.isNullOrBlank()) emptyFlow()
+                        else repository.observeRemoteRoomMessagesSync(roomId, currentUserId)
+                            .catch { error ->
+                                val fsErr = extractFirestoreException(error)
+                                if (fsErr == null && error is CancellationException) throw error
+                                Log.w(TAG, "Room message sync error for $roomId", fsErr ?: error)
+                            }
+                    }
+                    .collect { }
+            }
+            viewModelScope.launch {
+                _selectedRoomId
+                    .flatMapLatest { roomId ->
+                        if (roomId.isNullOrBlank()) {
+                            flowOf<Pair<String?, List<RoomTypingStatus>>>(null to emptyList())
+                        } else {
+                            repository.observeRemoteRoomTyping(roomId, currentUserId)
+                                .map<List<RoomTypingStatus>, Pair<String?, List<RoomTypingStatus>>> { roomId to it }
+                                .catch { error ->
+                                    val fsErr = extractFirestoreException(error)
+                                    if (fsErr == null && error is CancellationException) throw error
+                                    Log.w(TAG, "Typing sync error for $roomId", fsErr ?: error)
+                                    emit(roomId to emptyList())
+                                }
+                        }
+                    }
+                    .collect { (roomId, remoteTypers) ->
+                        if (!roomId.isNullOrBlank()) {
+                            val updated = _roomTypingMap.value.toMutableMap()
+                            if (remoteTypers.isEmpty()) updated.remove(roomId)
+                            else updated[roomId] = remoteTypers
+                            _roomTypingMap.value = updated
+                        }
+                    }
+            }
+        }
     }
 
+    private fun extractFirestoreException(error: Throwable): FirebaseFirestoreException? =
+        generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+
     private fun setSelectedRoom(roomId: String?) {
+        val previousTypingRoom = activeTypingRoom
+        if (previousTypingRoom != null && previousTypingRoom.id != roomId) {
+            userTypingJob?.cancel()
+            activeTypingRoom = null
+            lastTypingSentAtMillis = 0L
+            viewModelScope.launch { repository.updateTypingStatus(previousTypingRoom, isTyping = false) }
+        }
         _selectedRoomId.value = roomId
         _replyingToMessage.value = null
         _editingMessage.value = null
@@ -293,8 +368,37 @@ class RoomsViewModel(
         showBanner("Signed in to Esosa")
     }
 
+    fun saveProfileSetup(
+        displayName: String,
+        username: String,
+        bio: String,
+        avatarKey: String,
+        phoneNumber: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.saveProfileSetupToFirestore(
+                displayName = displayName,
+                username = username,
+                bio = bio,
+                avatarKey = avatarKey,
+                phoneNumber = phoneNumber
+            ).onSuccess {
+                showBanner("Profile synced to cloud")
+            }.onFailure { err ->
+                _actionError.value = err.localizedMessage ?: "Could not save profile."
+            }
+        }
+    }
+
     fun logout() {
+        val previousTypingRoom = activeTypingRoom
+        userTypingJob?.cancel()
+        activeTypingRoom = null
+        lastTypingSentAtMillis = 0L
         _selectedRoomId.value = null
+        if (previousTypingRoom != null) {
+            viewModelScope.launch { repository.updateTypingStatus(previousTypingRoom, isTyping = false) }
+        }
         repository.logout()
     }
 
@@ -320,6 +424,22 @@ class RoomsViewModel(
                 onCreated(roomId)
             }.onFailure { err ->
                 _actionError.value = err.localizedMessage ?: "Could not create chat."
+            }
+        }
+    }
+
+    fun joinRoomByCode(code: String, onJoined: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            _isBusy.value = true
+            _actionError.value = null
+            val result = repository.joinRoomByCode(code)
+            _isBusy.value = false
+            result.onSuccess { roomId ->
+                setSelectedRoom(roomId)
+                showBanner("Joined cloud room")
+                onJoined(roomId)
+            }.onFailure { err ->
+                _actionError.value = err.localizedMessage ?: "Could not join room."
             }
         }
     }
@@ -468,102 +588,24 @@ class RoomsViewModel(
         if (room == null) return
         userTypingJob?.cancel()
         if (draft.isNotBlank()) {
+            val now = System.currentTimeMillis()
+            val shouldPublishActive = activeTypingRoom?.id != room.id || (now - lastTypingSentAtMillis) > 4_000L
+            activeTypingRoom = room
             userTypingJob = viewModelScope.launch {
-                delay(3000)
-            }
-        }
-    }
-
-    fun simulateContactTyping(
-        roomId: String,
-        contactName: String = "",
-        durationMillis: Long = 3200L
-    ) {
-        viewModelScope.launch {
-            val room = (roomsState.value as? UiState.Success)?.data?.firstOrNull { it.id == roomId }
-            val name = when {
-                contactName.isNotBlank() -> contactName
-                room != null && room.chatKind == ChatKind.DIRECT -> room.title
-                room != null && room.memberNames.isNotEmpty() ->
-                    room.memberNames.firstOrNull { it != "You" && it != userProfile.value.displayName } ?: room.title
-                else -> "Contact"
-            }
-            val contactId = "contact_${name.lowercase().replace(" ", "_")}"
-            setTyping(roomId, contactId, name, isTyping = true)
-            try {
-                delay(durationMillis)
-            } finally {
-                setTyping(roomId, contactId, name, isTyping = false)
-            }
-        }
-    }
-
-    fun triggerContactComposingAndReply(room: ChatRoom, userMessageText: String) {
-        if (room.chatKind == ChatKind.SAVED || room.isBlocked) return
-        val myName = userProfile.value.displayName
-        val contactName = when (room.chatKind) {
-            ChatKind.DIRECT -> room.title
-            ChatKind.GROUP -> {
-                room.memberNames.firstOrNull { it != "You" && it != myName } ?: return
-            }
-            ChatKind.CHANNEL -> return
-        }
-        val contactId = "contact_${contactName.lowercase().replace(" ", "_")}"
-
-        contactReplyJobs[room.id]?.cancel()
-        contactReplyJobs[room.id] = viewModelScope.launch {
-            try {
-                delay(750)
-                setTyping(room.id, contactId, contactName, isTyping = true)
-                delay(2600)
-                setTyping(room.id, contactId, contactName, isTyping = false)
-
-                val replyText = generateContactReply(userMessageText, contactName)
-                repository.receiveContactMessage(
-                    room = room,
-                    text = replyText,
-                    senderId = contactId,
-                    senderName = contactName
-                )
-
-                if (_selectedRoomId.value != room.id || !_isOnMessagesScreen.value) {
-                    notificationManager.showIncomingMessageNotification(
-                        roomId = room.id,
-                        roomTitle = room.title,
-                        senderName = contactName,
-                        messageText = replyText
-                    )
+                if (shouldPublishActive) {
+                    lastTypingSentAtMillis = now
+                    repository.updateTypingStatus(room, isTyping = true)
                 }
-            } catch (_: CancellationException) {
-                setTyping(room.id, contactId, contactName, isTyping = false)
+                delay(2800)
+                activeTypingRoom = null
+                lastTypingSentAtMillis = 0L
+                repository.updateTypingStatus(room, isTyping = false)
             }
-        }
-    }
-
-    private fun generateContactReply(input: String, contactName: String): String {
-        val lower = input.lowercase().trim()
-        return when {
-            lower.contains("hello") || lower.contains("hi") || lower.contains("hey") ->
-                "Hey! Good to hear from you."
-            lower.contains("photo") || lower.contains("image") || lower.contains("pic") ->
-                "Looks great! Thanks for sharing."
-            lower.contains("where") || lower.contains("when") || lower.contains("time") ->
-                "Let me double-check the schedule and confirm in a bit!"
-            lower.contains("thank") ->
-                "You're welcome! Anytime."
-            lower.contains("voice") ->
-                "Got your voice note! Listening right now."
-            lower.contains("ok") || lower.contains("sure") || lower.contains("deal") ->
-                "Perfect! Talk to you soon."
-            else -> {
-                val responses = listOf(
-                    "Got it, thanks for the update!",
-                    "Sounds good to me!",
-                    "Noted! I'll take a look right away.",
-                    "Awesome, appreciate you letting me know.",
-                    "Received! Working on this now."
-                )
-                responses[(input.hashCode().let { if (it < 0) -it else it }) % responses.size]
+        } else if (activeTypingRoom?.id == room.id) {
+            activeTypingRoom = null
+            lastTypingSentAtMillis = 0L
+            viewModelScope.launch {
+                repository.updateTypingStatus(room, isTyping = false)
             }
         }
     }
@@ -577,10 +619,14 @@ class RoomsViewModel(
         if (text.isBlank() || _isSendingMessage.value) return
         val editing = _editingMessage.value
         val replyingTo = _replyingToMessage.value
+        userTypingJob?.cancel()
+        activeTypingRoom = null
+        lastTypingSentAtMillis = 0L
         viewModelScope.launch {
             _actionError.value = null
             _isSendingMessage.value = true
             try {
+                repository.updateTypingStatus(room, isTyping = false)
                 val result = if (editing != null) {
                     repository.editRoomMessage(room.id, editing.id, text)
                 } else {
@@ -596,8 +642,6 @@ class RoomsViewModel(
                     _replyingToMessage.value = null
                     if (scheduledForMillis != null) {
                         showBanner("Message scheduled")
-                    } else if (editing == null) {
-                        triggerContactComposingAndReply(room, text)
                     }
                     onSent()
                 }.onFailure { err ->
@@ -611,9 +655,7 @@ class RoomsViewModel(
 
     fun sendVoiceNote(room: ChatRoom, durationSec: Int) {
         viewModelScope.launch {
-            repository.sendVoiceNote(room, durationSec).onSuccess {
-                triggerContactComposingAndReply(room, "Voice message (${durationSec}s)")
-            }.onFailure {
+            repository.sendVoiceNote(room, durationSec).onFailure {
                 _actionError.value = it.localizedMessage ?: "Could not save voice note."
             }
         }
@@ -626,17 +668,15 @@ class RoomsViewModel(
                 rawText = text,
                 messageType = if (isGif) "gif" else "sticker",
                 attachmentName = label
-            ).onSuccess {
-                triggerContactComposingAndReply(room, if (isGif) "GIF" else "Sticker")
+            ).onFailure {
+                _actionError.value = it.localizedMessage ?: "Could not send attachment."
             }
         }
     }
 
     fun sendDocumentAttachment(room: ChatRoom, uri: Uri) {
         viewModelScope.launch {
-            repository.sendDocumentAttachment(room, uri).onSuccess {
-                triggerContactComposingAndReply(room, "Attached file")
-            }.onFailure {
+            repository.sendDocumentAttachment(room, uri).onFailure {
                 _actionError.value = it.localizedMessage ?: "Failed to attach file."
             }
         }
@@ -690,7 +730,6 @@ class RoomsViewModel(
                     }
                 )
                 result.onSuccess {
-                    triggerContactComposingAndReply(room, if (caption.isNotBlank()) caption else "Photo")
                     onSent()
                 }.onFailure { err ->
                     _actionError.value = err.localizedMessage ?: "Failed to save photo."
@@ -729,7 +768,11 @@ class RoomsViewModel(
         viewModelScope.launch {
             _isBusy.value = true
             clearTypingForRoom(room.id)
-            contactReplyJobs[room.id]?.cancel()
+            if (activeTypingRoom?.id == room.id) {
+                userTypingJob?.cancel()
+                activeTypingRoom = null
+                lastTypingSentAtMillis = 0L
+            }
             val result = repository.deleteRoom(room)
             _isBusy.value = false
             result.onSuccess {
@@ -934,15 +977,41 @@ class RoomsViewModel(
 
     // ---- Settings & Profile ----
     fun updateLocalProfile(displayName: String, username: String, bio: String) {
-        repository.updateLocalProfile(displayName, username, bio)
-        showBanner("Profile saved")
+        viewModelScope.launch {
+            repository.updateLocalProfile(displayName, username, bio).onSuccess {
+                showBanner("Profile synced to cloud")
+            }.onFailure {
+                _actionError.value = it.localizedMessage ?: "Could not save profile."
+            }
+        }
     }
 
-    fun updateAvatarKey(avatarKey: String) = repository.updateAvatarKey(avatarKey)
-    fun setNotificationsEnabled(enabled: Boolean) = repository.updateNotificationsEnabled(enabled)
-    fun updateThemeMode(mode: AppThemeMode) = repository.updateThemeMode(mode)
+    fun updateAvatarKey(avatarKey: String) {
+        viewModelScope.launch {
+            repository.updateAvatarKey(avatarKey)
+        }
+    }
+
+    fun setNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateNotificationsEnabled(enabled)
+        }
+    }
+
+    fun updateThemeMode(mode: AppThemeMode) {
+        viewModelScope.launch {
+            repository.updateThemeMode(mode)
+        }
+    }
+
     fun updateWallpaper(wallpaper: ChatWallpaper) = repository.updateWallpaper(wallpaper)
-    fun updateLanguage(language: String) = repository.updateLanguage(language)
+
+    fun updateLanguage(language: String) {
+        viewModelScope.launch {
+            repository.updateLanguage(language)
+        }
+    }
+
     fun setTwoStepPin(enabled: Boolean, pin: String) = repository.setTwoStepPin(enabled, pin)
     fun setContactSyncEnabled(enabled: Boolean) = repository.setContactSyncEnabled(enabled)
     fun setReadReceiptsEnabled(enabled: Boolean) = repository.setReadReceiptsEnabled(enabled)

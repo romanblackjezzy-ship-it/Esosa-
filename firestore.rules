@@ -28,6 +28,13 @@ service cloud.firestore {
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
              data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
              (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             (!('username' in data) || (data.username is string && data.username.size() <= 40)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 200)) &&
+             (!('avatarKey' in data) || (data.avatarKey is string && data.avatarKey.size() <= 64)) &&
+             (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 40)) &&
+             (!('authMethod' in data) || data.authMethod in ['google', 'phone', 'email']) &&
+             (!('themeMode' in data) || data.themeMode in ['system', 'light', 'dark']) &&
+             (!('language' in data) || (data.language is string && data.language.size() <= 40)) &&
              data.notificationsEnabled is bool &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -36,6 +43,14 @@ service cloud.firestore {
     function isValidRoom(data) {
       return data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
              data.topic is string && data.topic.size() <= 160 &&
+             (!('chatKind' in data) || data.chatKind in ['saved', 'direct', 'group', 'channel']) &&
+             (!('handle' in data) || (data.handle is string && data.handle.size() <= 120)) &&
+             (!('isPublic' in data) || data.isPublic is bool) &&
+             (!('disappearingSeconds' in data) || (data.disappearingSeconds is int && data.disappearingSeconds >= 0 && data.disappearingSeconds <= 604800)) &&
+             (!('pinnedMessageId' in data) || (data.pinnedMessageId is string && data.pinnedMessageId.size() <= 128)) &&
+             (!('pinnedMessageText' in data) || (data.pinnedMessageText is string && data.pinnedMessageText.size() <= 160)) &&
+             (!('memberNames' in data) || (data.memberNames is list && data.memberNames.size() <= 25)) &&
+             (!('adminNames' in data) || (data.adminNames is list && data.adminNames.size() <= 25)) &&
              data.roomCode is string && data.roomCode.size() >= 4 && data.roomCode.size() <= 16 &&
              data.roomCode.matches('^[A-Za-z0-9_\\-]+$') &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
@@ -62,8 +77,16 @@ service cloud.firestore {
              (!('senderPhotoUrl' in data) || (data.senderPhotoUrl is string && data.senderPhotoUrl.size() <= 500)) &&
              (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
-             (!('messageType' in data) || data.messageType in ['text', 'image']) &&
-             data.text is string && data.text.size() <= 2000 &&
+             (!('messageType' in data) || data.messageType in ['text', 'image', 'voice', 'document', 'sticker', 'gif']) &&
+             (!('replyToMessageId' in data) || (data.replyToMessageId is string && data.replyToMessageId.size() <= 128)) &&
+             (!('replyToSenderName' in data) || (data.replyToSenderName is string && data.replyToSenderName.size() <= 80)) &&
+             (!('replyToPreviewText' in data) || (data.replyToPreviewText is string && data.replyToPreviewText.size() <= 160)) &&
+             (!('forwardedFromName' in data) || (data.forwardedFromName is string && data.forwardedFromName.size() <= 80)) &&
+             (!('voiceDurationSec' in data) || (data.voiceDurationSec is int && data.voiceDurationSec >= 0 && data.voiceDurationSec <= 600)) &&
+             (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 120)) &&
+             (!('attachmentSizeLabel' in data) || (data.attachmentSizeLabel is string && data.attachmentSizeLabel.size() <= 40)) &&
+             (!('isEdited' in data) || data.isEdited is bool) &&
+             data.text is string && data.text.size() <= 4000 &&
              (data.text.size() >= 1 || ('imageUrl' in data)) &&
              data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 25 &&
              data.memberUids[0] is string &&
@@ -129,7 +152,7 @@ service cloud.firestore {
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'email', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
                        isValidUserProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -138,7 +161,7 @@ service cloud.firestore {
                        isValidUserProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'notificationsEnabled', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'notificationsEnabled', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
 
@@ -259,7 +282,7 @@ service cloud.firestore {
                        (request.auth.uid in incoming().memberUids) &&
                        incoming().memberUids.size() == 1 &&
                        incoming().keys().hasAll(['title', 'topic', 'roomCode', 'ownerId', 'memberUids', 'lastMessageText', 'lastMessageSenderName', 'lastMessageAt', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['title', 'topic', 'roomCode', 'ownerId', 'memberUids', 'lastMessageText', 'lastMessageSenderName', 'lastMessageAt', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['title', 'topic', 'chatKind', 'handle', 'isPublic', 'disappearingSeconds', 'pinnedMessageId', 'pinnedMessageText', 'memberNames', 'adminNames', 'roomCode', 'ownerId', 'memberUids', 'lastMessageText', 'lastMessageSenderName', 'lastMessageAt', 'createdAt', 'updatedAt']);
 
       allow update: if isSignedIn() &&
                        isValidId(roomId) &&
@@ -271,7 +294,7 @@ service cloud.firestore {
                          (
                            (request.auth.uid in existing().memberUids) &&
                            incoming().memberUids == existing().memberUids &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topic', 'lastMessageText', 'lastMessageSenderName', 'lastMessageAt', 'updatedAt'])
+                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topic', 'chatKind', 'handle', 'isPublic', 'disappearingSeconds', 'pinnedMessageId', 'pinnedMessageText', 'memberNames', 'adminNames', 'lastMessageText', 'lastMessageSenderName', 'lastMessageAt', 'updatedAt'])
                          ) ||
                          // Action: New user joins room using invite code
                          (
@@ -308,7 +331,7 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().memberUids) &&
                          incoming().keys().hasAll(['roomId', 'senderId', 'senderName', 'text', 'memberUids', 'createdAt']) &&
-                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'imageUrl', 'storagePath', 'messageType', 'memberUids', 'reactions', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderPhotoUrl', 'text', 'imageUrl', 'storagePath', 'messageType', 'replyToMessageId', 'replyToSenderName', 'replyToPreviewText', 'forwardedFromName', 'voiceDurationSec', 'attachmentName', 'attachmentSizeLabel', 'isEdited', 'memberUids', 'reactions', 'createdAt']) &&
                          exists(/databases/$(database)/documents/rooms/$(roomId)) &&
                          (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids) &&
                          incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
@@ -321,14 +344,23 @@ service cloud.firestore {
                          incoming().roomId == existing().roomId &&
                          incoming().senderId == existing().senderId &&
                          incoming().senderName == existing().senderName &&
-                         incoming().text == existing().text &&
                          incoming().memberUids == existing().memberUids &&
                          incoming().createdAt == existing().createdAt &&
                          (!('senderPhotoUrl' in existing()) ? !('senderPhotoUrl' in incoming()) : incoming().senderPhotoUrl == existing().senderPhotoUrl) &&
                          (!('imageUrl' in existing()) ? !('imageUrl' in incoming()) : incoming().imageUrl == existing().imageUrl) &&
                          (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
                          (!('messageType' in existing()) ? !('messageType' in incoming()) : incoming().messageType == existing().messageType) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
+                         (
+                           (
+                             incoming().text == existing().text &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['reactions'])
+                           ) || (
+                             existing().senderId == request.auth.uid &&
+                             incoming().text.size() >= 1 &&
+                             incoming().isEdited == true &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isEdited'])
+                           )
+                         );
 
         allow delete: if isSignedIn() && isValidId(roomId) && isValidId(messageId) && existing().senderId == request.auth.uid;
       }

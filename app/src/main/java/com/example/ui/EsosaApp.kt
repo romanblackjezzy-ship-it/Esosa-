@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -59,8 +60,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -86,6 +90,7 @@ import com.example.data.local.EsosaDatabase
 import com.example.data.media.VoiceCallAudioController
 import com.example.data.model.CallType
 import com.example.data.model.InAppInstallStage
+import com.example.data.remote.FirestoreChatSyncService
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
@@ -98,9 +103,15 @@ import com.example.ui.screens.AuthOnboardingScreen
 import com.example.ui.screens.CallsScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.attemptAutoSignIn
+import com.example.ui.screens.signOutFromGoogle
 import com.example.ui.theme.EsosaTheme
 import com.example.ui.viewmodel.AppUpdateViewModel
 import com.example.ui.viewmodel.RoomsViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
 
 enum class EsosaTab(
     val label: String,
@@ -120,21 +131,40 @@ fun EsosaApp(
     initialShowUpdatePrompt: Boolean = false
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+    val profilePreferences = remember(context) { LocalProfilePreferences(context) }
+    val topLevelProfile by profilePreferences.profileFlow.collectAsStateWithLifecycle()
 
-    val roomsViewModel: RoomsViewModel = viewModel(
-        key = "telegram_rooms_local",
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[APPLICATION_KEY])
-                val dao = EsosaDatabase.getInstance(app).esosaDao()
-                RoomsViewModel(
-                    repository = ChatRepository(app, dao),
-                    notificationManager = EsosaNotificationManager(app),
-                    selectionPreferences = ThreadSelectionPreferences(app)
-                )
-            }
+    val firestoreDb = remember(context) {
+        FirebaseFirestore.getInstance(context.applicationContext.getString(R.string.firestore_database_id))
+    }
+
+    var firebaseUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    var isCheckingAutoSignIn by remember { mutableStateOf(Firebase.auth.currentUser == null) }
+    var pendingOptionalPhone by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) {
+        val listener = FirebaseAuth.AuthStateListener { authState ->
+            firebaseUser = authState.currentUser
         }
-    )
+        Firebase.auth.addAuthStateListener(listener)
+        onDispose { Firebase.auth.removeAuthStateListener(listener) }
+    }
+
+    LaunchedEffect(Unit) {
+        if (Firebase.auth.currentUser == null) {
+            attemptAutoSignIn(
+                context = context,
+                credentialManager = credentialManager,
+                onAuthSuccess = { isCheckingAutoSignIn = false },
+                onUnauthenticated = { isCheckingAutoSignIn = false },
+                scope = scope
+            )
+        } else {
+            isCheckingAutoSignIn = false
+        }
+    }
 
     val appUpdateViewModel: AppUpdateViewModel = viewModel(
         key = "app_update_checker",
@@ -174,7 +204,6 @@ fun EsosaApp(
         }
     }
 
-    val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val showUpdateDialog by appUpdateViewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val installStage by appUpdateViewModel.installStage.collectAsStateWithLifecycle()
@@ -202,25 +231,91 @@ fun EsosaApp(
         }
     }
 
-    EsosaTheme(themeMode = userProfile.themeMode) {
+    EsosaTheme(themeMode = topLevelProfile.themeMode) {
         Box(modifier = Modifier.fillMaxSize()) {
-            if (!userProfile.isAuthenticated) {
-                AuthOnboardingScreen(
-                    existingProfile = userProfile,
-                    onCompleteSignUp = { method, phoneOrEmail, name, username, bio, avatar ->
-                        roomsViewModel.completeOnboarding(method, phoneOrEmail, name, username, bio, avatar)
-                    },
-                    onCompleteLogin = { method, phoneOrEmail ->
-                        roomsViewModel.signInExisting(method, phoneOrEmail)
+            val signedInUser = firebaseUser
+            when {
+                signedInUser == null && isCheckingAutoSignIn -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            EsosaBrandLogo(size = 56.dp)
+                            CircularProgressIndicator()
+                        }
                     }
-                )
-            } else {
-                EsosaChatShell(
-                    initialRoomId = initialRoomId,
-                    initialTab = initialTab,
-                    roomsViewModel = roomsViewModel,
-                    appUpdateViewModel = appUpdateViewModel
-                )
+                }
+
+                signedInUser == null -> {
+                    AuthOnboardingScreen(
+                        existingProfile = topLevelProfile,
+                        onAuthSuccess = { optionalPhone ->
+                            pendingOptionalPhone = optionalPhone
+                            firebaseUser = Firebase.auth.currentUser
+                        }
+                    )
+                }
+
+                else -> {
+                    key(signedInUser.uid) {
+                        val userRepository = remember(signedInUser.uid, firestoreDb) {
+                            val app = context.applicationContext
+                            ChatRepository(
+                                appContext = app,
+                                dao = EsosaDatabase.getInstance(app).esosaDao(),
+                                profilePreferences = profilePreferences,
+                                syncService = FirestoreChatSyncService(firestoreDb, Firebase.auth),
+                                auth = Firebase.auth
+                            )
+                        }
+
+                        val roomsViewModel: RoomsViewModel = viewModel(
+                            key = "esosa_rooms_${signedInUser.uid}",
+                            factory = viewModelFactory {
+                                initializer {
+                                    val app = checkNotNull(this[APPLICATION_KEY])
+                                    RoomsViewModel(
+                                        repository = userRepository,
+                                        notificationManager = EsosaNotificationManager(app),
+                                        selectionPreferences = ThreadSelectionPreferences(app)
+                                    )
+                                }
+                            }
+                        )
+
+                        LaunchedEffect(signedInUser.uid) {
+                            userRepository.syncSignedInUser(signedInUser)
+                            val optionalPhone = pendingOptionalPhone.trim()
+                            if (optionalPhone.isNotBlank()) {
+                                val latest = profilePreferences.getProfile()
+                                userRepository.saveProfileSetupToFirestore(
+                                    displayName = latest.displayName,
+                                    username = latest.username,
+                                    bio = latest.bio,
+                                    avatarKey = latest.avatarKey,
+                                    phoneNumber = optionalPhone
+                                )
+                                pendingOptionalPhone = ""
+                            }
+                        }
+
+                        EsosaChatShell(
+                            initialRoomId = initialRoomId,
+                            initialTab = initialTab,
+                            roomsViewModel = roomsViewModel,
+                            appUpdateViewModel = appUpdateViewModel,
+                            onSignOut = {
+                                signOutFromGoogle(credentialManager, scope) {
+                                    roomsViewModel.logout()
+                                }
+                            }
+                        )
+                    }
+                }
             }
 
             GlassUpdatePromptOverlay(
@@ -278,7 +373,8 @@ private fun EsosaChatShell(
     initialRoomId: String?,
     initialTab: String?,
     roomsViewModel: RoomsViewModel,
-    appUpdateViewModel: AppUpdateViewModel
+    appUpdateViewModel: AppUpdateViewModel,
+    onSignOut: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -540,7 +636,7 @@ private fun EsosaChatShell(
 
                         when (selectedTab) {
                             EsosaTab.MESSAGES -> MessagesScreen(
-                                currentUserId = LocalProfilePreferences.LOCAL_USER_ID,
+                                currentUserId = roomsViewModel.currentUserId,
                                 roomsState = roomsState,
                                 selectedRoomId = selectedRoomId,
                                 activeRoom = activeRoom,
@@ -569,6 +665,9 @@ private fun EsosaChatShell(
                                 onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
                                 onCreateRoom = { title, topic, kind ->
                                     roomsViewModel.createRoom(title, topic, kind)
+                                },
+                                onJoinRoomByCode = { code ->
+                                    roomsViewModel.joinRoomByCode(code)
                                 },
                                 onTogglePinRoom = { roomsViewModel.togglePinRoom(it) },
                                 onToggleArchiveRoom = { roomsViewModel.toggleArchiveRoom(it) },
@@ -692,7 +791,7 @@ private fun EsosaChatShell(
                                 onTerminateSession = { roomsViewModel.terminateSession(it) },
                                 onTerminateAllOtherSessions = { roomsViewModel.terminateAllOtherSessions() },
                                 onUnblockRoom = { roomsViewModel.setRoomBlocked(it, false) },
-                                onLogout = { roomsViewModel.logout() },
+                                onLogout = onSignOut,
                                 onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
                                 onSaveGithubRepo = { repo -> appUpdateViewModel.saveGithubRepository(repo) },
                                 onSaveRemoteManifestUrl = { url -> appUpdateViewModel.saveRemoteManifestUrl(url) },
