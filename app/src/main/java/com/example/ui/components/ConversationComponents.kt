@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
@@ -92,6 +93,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.example.R
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
@@ -275,20 +277,61 @@ fun ConversationMessageBubble(
 
                     val photoUrl = message.imageUrl
                     if (!photoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = photoUrl,
-                            contentDescription = message.text.ifBlank {
-                                "${message.senderName} ${stringResource(R.string.room_photo_message_label)}"
-                            },
-                            contentScale = ContentScale.Crop,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 140.dp, max = 260.dp)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                 .clickable { onOpenFullScreenPhoto(message) }
-                                .testTag("room_message_image_${message.id}")
-                        )
+                                .testTag("room_message_image_${message.id}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SubcomposeAsyncImage(
+                                model = photoUrl,
+                                contentDescription = message.text.ifBlank {
+                                    "${message.senderName} ${stringResource(R.string.room_photo_message_label)}"
+                                },
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 140.dp, max = 260.dp),
+                                loading = {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().height(160.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(28.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                    }
+                                },
+                                error = {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(140.dp)
+                                            .padding(12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.BrokenImage,
+                                            contentDescription = stringResource(R.string.room_photo_load_failed),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = stringResource(R.string.room_photo_load_failed),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            )
+                        }
                         if (message.text.isNotBlank()) Spacer(Modifier.height(6.dp))
                     }
 
@@ -1098,11 +1141,36 @@ fun FullScreenPhotoDialog(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = imageUrl,
                     contentDescription = message.text.ifBlank { stringResource(R.string.room_photo_message_label) },
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().align(Alignment.Center)
+                    modifier = Modifier.fillMaxSize().align(Alignment.Center),
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    error = {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.BrokenImage,
+                                contentDescription = stringResource(R.string.room_photo_load_failed),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.room_photo_load_failed),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White
+                            )
+                        }
+                    }
                 )
                 IconButton(
                     onClick = onDismiss,

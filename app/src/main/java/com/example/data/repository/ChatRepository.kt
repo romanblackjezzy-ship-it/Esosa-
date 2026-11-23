@@ -29,6 +29,7 @@ import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
 import com.example.data.model.StoryItem
 import com.example.data.model.UserProfile
+import com.example.data.remote.FirebasePhotoStorageService
 import com.example.data.remote.FirestoreChatRoomDto
 import com.example.data.remote.FirestoreChatSyncService
 import com.example.data.remote.FirestoreRoomMessageDto
@@ -51,7 +52,8 @@ class ChatRepository(
     private val dao: EsosaDao = EsosaDatabase.getInstance(appContext).esosaDao(),
     private val profilePreferences: LocalProfilePreferences = LocalProfilePreferences(appContext),
     private val syncService: FirestoreChatSyncService? = null,
-    private val auth: FirebaseAuth? = null
+    private val auth: FirebaseAuth? = null,
+    private val photoStorageService: FirebasePhotoStorageService? = null
 ) {
     fun currentUserId(): String =
         auth?.currentUser?.uid
@@ -832,18 +834,42 @@ class ChatRepository(
         onProgress: (Float) -> Unit = {}
     ): Result<Unit> {
         return try {
-            onProgress(0.25f)
-            val savedFile = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.saveUriToLocalChatPhotos(appContext, photoUri)
+            onProgress(0.08f)
+            val jpegBytes = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(appContext, photoUri)
             }
-            onProgress(0.75f)
+            onProgress(0.14f)
             val profile = profilePreferences.getProfile()
             val uid = currentUserId()
             val senderDisplayName = profile.displayName.ifBlank { "You" }
             val caption = rawCaption.trim().take(2000)
             val now = System.currentTimeMillis()
             val messageId = "msg_${now}_${UUID.randomUUID().toString().take(8)}"
-            val fileUri = Uri.fromFile(savedFile).toString()
+
+            val isCloudSyncedRoom = uid != LocalProfilePreferences.LOCAL_USER_ID &&
+                syncService != null &&
+                room.ownerId.isNotBlank()
+
+            val imageUrl: String
+            val storagePath: String
+            if (isCloudSyncedRoom && photoStorageService != null) {
+                val uploaded = photoStorageService.uploadRoomPhoto(
+                    roomId = room.id,
+                    messageId = messageId,
+                    senderUid = uid,
+                    jpegBytes = jpegBytes,
+                    onProgress = onProgress
+                )
+                imageUrl = uploaded.downloadUrl
+                storagePath = uploaded.storagePath
+            } else {
+                val savedFile = withContext(Dispatchers.IO) {
+                    CameraPhotoHelper.saveJpegBytesToLocalChatPhotos(appContext, jpegBytes)
+                }
+                imageUrl = Uri.fromFile(savedFile).toString()
+                storagePath = savedFile.absolutePath
+                onProgress(0.85f)
+            }
 
             val entity = RoomMessageEntity(
                 id = messageId,
@@ -851,8 +877,8 @@ class ChatRepository(
                 senderId = uid,
                 senderName = senderDisplayName,
                 text = caption,
-                imageUrl = fileUri,
-                storagePath = savedFile.absolutePath,
+                imageUrl = imageUrl,
+                storagePath = storagePath,
                 messageType = "image",
                 reactionsJson = "{}",
                 isRead = true,
@@ -868,9 +894,9 @@ class ChatRepository(
                 lastAt = now,
                 updatedAt = now
             )
-            if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && room.ownerId.isNotBlank()) {
+            val syncResult = if (isCloudSyncedRoom) {
                 runFirestoreWrite {
-                    syncService.sendMessage(
+                    syncService!!.sendMessage(
                         uid = uid,
                         room = room,
                         message = entity.toDomain(),
@@ -878,9 +904,11 @@ class ChatRepository(
                         lastMessagePreview = previewText
                     )
                 }
+            } else {
+                Result.success(Unit)
             }
             onProgress(1f)
-            Result.success(Unit)
+            syncResult
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1118,8 +1146,15 @@ class ChatRepository(
         return try {
             val existing = dao.getRoomMessageById(messageId)
             val photoPath = storagePath ?: existing?.storagePath
+            val uid = currentUserId()
             withContext(Dispatchers.IO) {
                 CameraPhotoHelper.deleteLocalPhotoIfOwned(appContext, photoPath)
+            }
+            if (uid != LocalProfilePreferences.LOCAL_USER_ID &&
+                existing?.senderId == uid &&
+                FirebasePhotoStorageService.isRemoteRoomPhotoPath(photoPath)
+            ) {
+                runCatching { photoStorageService?.deletePhotoIfOwned(photoPath) }
             }
             dao.deleteRoomMessageById(messageId)
 
@@ -1155,7 +1190,6 @@ class ChatRepository(
                     )
                 }
             }
-            val uid = currentUserId()
             if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && existing?.senderId == uid) {
                 return runFirestoreWrite { syncService.deleteMessage(roomId, messageId) }
             }
@@ -1170,13 +1204,21 @@ class ChatRepository(
     suspend fun deleteRoom(room: ChatRoom): Result<Unit> {
         return try {
             val messages = dao.getMessagesForRoom(room.id)
+            val uid = currentUserId()
             withContext(Dispatchers.IO) {
                 messages.forEach { msg ->
                     CameraPhotoHelper.deleteLocalPhotoIfOwned(appContext, msg.storagePath)
                 }
             }
+            val storage = photoStorageService
+            if (uid != LocalProfilePreferences.LOCAL_USER_ID && storage != null) {
+                messages.forEach { msg ->
+                    if (msg.senderId == uid && FirebasePhotoStorageService.isRemoteRoomPhotoPath(msg.storagePath)) {
+                        runCatching { storage.deletePhotoIfOwned(msg.storagePath) }
+                    }
+                }
+            }
             dao.deleteRoomById(room.id)
-            val uid = currentUserId()
             if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && room.ownerId.isNotBlank()) {
                 return runFirestoreWrite { syncService.deleteOrLeaveRoom(uid, room) }
             }

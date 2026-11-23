@@ -90,6 +90,7 @@ import com.example.data.local.EsosaDatabase
 import com.example.data.media.VoiceCallAudioController
 import com.example.data.model.CallType
 import com.example.data.model.InAppInstallStage
+import com.example.data.remote.FirebasePhotoStorageService
 import com.example.data.remote.FirestoreChatSyncService
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
@@ -112,6 +113,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.storage
 
 enum class EsosaTab(
     val label: String,
@@ -269,7 +271,8 @@ fun EsosaApp(
                                 dao = EsosaDatabase.getInstance(app).esosaDao(),
                                 profilePreferences = profilePreferences,
                                 syncService = FirestoreChatSyncService(firestoreDb, Firebase.auth),
-                                auth = Firebase.auth
+                                auth = Firebase.auth,
+                                photoStorageService = FirebasePhotoStorageService(Firebase.storage)
                             )
                         }
 

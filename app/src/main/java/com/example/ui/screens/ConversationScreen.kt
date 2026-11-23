@@ -59,6 +59,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -67,6 +68,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -195,6 +199,23 @@ fun ConversationScreen(
         }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val cameraGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED
+                if (cameraGranted && showCameraDeniedBanner) {
+                    showCameraDeniedBanner = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -204,7 +225,10 @@ fun ConversationScreen(
         pendingCaptureFile = null
         if (success && capturedUri != null) {
             val caption = draft.trim()
-            if (caption.isNotEmpty()) draft = ""
+            if (caption.isNotEmpty()) {
+                draft = ""
+                onDraftChanged(room, "")
+            }
             activePickerMessageId = null
             onSendCapturedPhoto(capturedUri, caption) { capturedFile?.delete() }
         } else {
@@ -217,7 +241,10 @@ fun ConversationScreen(
     ) { uri ->
         if (uri != null) {
             val caption = draft.trim()
-            if (caption.isNotEmpty()) draft = ""
+            if (caption.isNotEmpty()) {
+                draft = ""
+                onDraftChanged(room, "")
+            }
             showMediaSection = false
             onSendCapturedPhoto(uri, caption) {}
         }

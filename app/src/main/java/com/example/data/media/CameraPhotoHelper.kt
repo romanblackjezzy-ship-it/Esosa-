@@ -39,6 +39,13 @@ object CameraPhotoHelper {
             maxDimension = maxDimension,
             quality = quality
         )
+        return saveJpegBytesToLocalChatPhotos(context, jpegBytes)
+    }
+
+    fun saveJpegBytesToLocalChatPhotos(
+        context: Context,
+        jpegBytes: ByteArray
+    ): File {
         val dir = File(context.filesDir, "chat_photos").apply {
             if (!exists()) mkdirs()
         }
@@ -48,6 +55,32 @@ object CameraPhotoHelper {
             out.flush()
         }
         return destFile
+    }
+
+    fun compressUriToJpegBytesWithSizeCap(
+        context: Context,
+        uri: Uri,
+        maxBytes: Int = 9_500_000
+    ): ByteArray {
+        val attempts = listOf(
+            1600 to 84,
+            1280 to 72,
+            1024 to 58
+        )
+        var lastBytes = ByteArray(0)
+        for ((dimension, quality) in attempts) {
+            val encoded = compressUriToJpegBytes(
+                context = context,
+                uri = uri,
+                maxDimension = dimension,
+                quality = quality
+            )
+            lastBytes = encoded
+            if (encoded.size <= maxBytes) {
+                return encoded
+            }
+        }
+        return lastBytes
     }
 
     fun deleteLocalPhotoIfOwned(context: Context, storagePath: String?) {
