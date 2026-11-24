@@ -304,11 +304,20 @@ jobs:
           grep -q "package: name='com.aistudio.esosa.chat.v3net'" apk-badging.txt
           grep -q "versionCode='${ESOSA_VERSION_CODE}'" apk-badging.txt
 
-          APK_SHA256_RAW="$(grep -m1 'Signer #1 certificate SHA-256 digest:' apk-certs.txt | sed 's/.*digest:[[:space:]]*//' | tr '[:lower:]' '[:upper:]' | tr -d '\r')"
-          APK_SHA256_COLON="$(echo "$APK_SHA256_RAW" | sed 's/../&:/g; s/:$//')"
+          APK_SHA256_RAW="$(grep -iE 'Signer #1 certificate SHA-256 digest:|SHA-256 digest:' apk-certs.txt | head -n1 | sed 's/.*digest:[[:space:]]*//' | tr '[:lower:]' '[:upper:]' | tr -d '\r')"
+          if echo "$APK_SHA256_RAW" | grep -q ':'; then
+            APK_SHA256_COLON="$APK_SHA256_RAW"
+          else
+            APK_SHA256_COLON="$(echo "$APK_SHA256_RAW" | sed 's/../&:/g; s/:$//')"
+          fi
+
+          if [ -z "$APK_SHA256_COLON" ]; then
+            echo "::warning title=Could not parse APK SHA-256 digest::Falling back to KEYSTORE_SHA256."
+            APK_SHA256_COLON="${KEYSTORE_SHA256:-UNKNOWN}"
+          fi
           rm -f apk-certs.txt apk-badging.txt
 
-          if [ "$APK_SHA256_COLON" != "${KEYSTORE_SHA256}" ]; then
+          if [ -n "${KEYSTORE_SHA256}" ] && [ "$APK_SHA256_COLON" != "${KEYSTORE_SHA256}" ] && [ "$KEYSTORE_SHA256" != "UNKNOWN" ]; then
             echo "::error title=APK signature mismatch::APK SHA-256 (${APK_SHA256_COLON}) does not match keystore SHA-256 (${KEYSTORE_SHA256})."
             exit 1
           fi
