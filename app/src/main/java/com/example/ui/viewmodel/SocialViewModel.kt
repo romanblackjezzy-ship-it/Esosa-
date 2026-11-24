@@ -10,14 +10,19 @@ import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
 import com.example.data.model.UserFollowEdge
 import com.example.data.repository.SocialRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -28,22 +33,27 @@ class SocialViewModel(
     val currentUserId: String
         get() = repository.currentUserId
 
-    val postsState: StateFlow<UiState<List<SocialPost>>> = repository.observePosts()
-        .map<List<SocialPost>, UiState<List<SocialPost>>> { UiState.Success(it) }
-        .catch { err -> emit(UiState.Error(err.localizedMessage ?: "Failed to load feed")) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = UiState.Loading
-        )
+    private val _manualPostsFlow = MutableSharedFlow<List<SocialPost>>(extraBufferCapacity = 1)
+    private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
 
-    val stories: StateFlow<List<SocialStory>> = repository.observeStories()
-        .catch { emit(emptyList()) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = emptyList()
-        )
+    val postsState: StateFlow<UiState<List<SocialPost>>> =
+        merge(repository.observePosts(), _manualPostsFlow)
+            .map<List<SocialPost>, UiState<List<SocialPost>>> { UiState.Success(it) }
+            .catch { err -> emit(UiState.Error(err.localizedMessage ?: "Failed to load feed")) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = UiState.Loading
+            )
+
+    val stories: StateFlow<List<SocialStory>> =
+        merge(repository.observeStories(), _manualStoriesFlow)
+            .catch { emit(emptyList()) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = emptyList()
+            )
 
     val savedPostIds: StateFlow<Set<String>> = repository.observeSavedPostIds(repository.currentUserId)
         .catch { emit(emptySet()) }
@@ -74,8 +84,38 @@ class SocialViewModel(
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
+    private val _isRefreshingFeed = MutableStateFlow(false)
+    val isRefreshingFeed: StateFlow<Boolean> = _isRefreshingFeed.asStateFlow()
+
     private val _statusBanner = MutableStateFlow<String?>(null)
     val statusBanner: StateFlow<String?> = _statusBanner.asStateFlow()
+
+    fun refreshFeed() {
+        if (_isRefreshingFeed.value) return
+        viewModelScope.launch {
+            _isRefreshingFeed.value = true
+            try {
+                coroutineScope {
+                    val postsDeferred = async { repository.fetchLatestPosts() }
+                    val storiesDeferred = async {
+                        runCatching { repository.fetchLatestStories() }.getOrNull()
+                    }
+                    val latestPosts = postsDeferred.await()
+                    val latestStories = storiesDeferred.await()
+                    _manualPostsFlow.tryEmit(latestPosts)
+                    if (latestStories != null) {
+                        _manualStoriesFlow.tryEmit(latestStories)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showStatusBanner(e.localizedMessage ?: "Could not refresh feed from Firestore.")
+            } finally {
+                _isRefreshingFeed.value = false
+            }
+        }
+    }
 
     fun observeCommentsForPost(postId: String) {
         if (commentObserverJobs[postId]?.isActive == true) return

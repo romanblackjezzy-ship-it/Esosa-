@@ -589,6 +589,7 @@ private fun EsosaSocialShell(
     val isPublishingSocial by socialViewModel.isPublishing.collectAsStateWithLifecycle()
     val socialUploadProgress by socialViewModel.uploadProgress.collectAsStateWithLifecycle()
     val socialActionError by socialViewModel.actionError.collectAsStateWithLifecycle()
+    val isRefreshingFeed by socialViewModel.isRefreshingFeed.collectAsStateWithLifecycle()
     val socialBanner by socialViewModel.statusBanner.collectAsStateWithLifecycle()
 
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
@@ -927,6 +928,8 @@ private fun EsosaSocialShell(
                                     savedPostIds = savedPostIds,
                                     followEdges = followEdges,
                                     unreadDmCount = unreadDmCount,
+                                    isRefreshing = isRefreshingFeed,
+                                    onRefreshFeed = { socialViewModel.refreshFeed() },
                                     onOpenDirectMessages = { secondaryRoute = EsosaSecondaryRoute.MESSAGES },
                                     onAddStoryClick = {
                                         createFormat = CreateFormat.STORY

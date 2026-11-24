@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,6 +37,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +67,7 @@ import com.example.ui.components.InstagramUserAvatar
 import com.example.ui.theme.InstagramBlue
 import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramHeartRed
+import com.example.ui.theme.InstagramWhite
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,9 +90,14 @@ fun InstagramHomeScreen(
     onToggleFollow: (targetUid: String, targetUsername: String) -> Unit,
     onShareToDm: (SocialPost) -> Unit,
     onDeletePost: (SocialPost) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isRefreshing: Boolean = false,
+    onRefreshFeed: () -> Unit = {}
 ) {
     var showActivitySheet by remember { mutableStateOf(false) }
+    val feedListState = rememberLazyListState()
+    val storiesListState = rememberLazyListState()
+    val pullToRefreshState = rememberPullToRefreshState()
 
     val followingSet = remember(followEdges, currentUid) {
         followEdges.filter { it.followerId == currentUid }.map { it.targetUid }.toSet()
@@ -97,6 +107,9 @@ fun InstagramHomeScreen(
     }
     val otherStories = remember(stories, currentUid) {
         stories.filter { it.authorId != currentUid }
+    }
+    val storiesByAuthor = remember(stories) {
+        stories.associateBy { it.authorId }
     }
     val posts = (postsState as? UiState.Success)?.data.orEmpty()
 
@@ -169,122 +182,158 @@ fun InstagramHomeScreen(
             }
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(bottom = 16.dp)
-        ) {
-            // Stories Tray
-            item(key = "stories_tray") {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    item(key = "your_story") {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(72.dp)
-                                .clickable {
-                                    if (myLatestStory != null) {
-                                        onOpenStory(myLatestStory)
-                                    } else {
-                                        onAddStoryClick()
-                                    }
-                                }
-                                .testTag("your_story_chip")
-                        ) {
-                            InstagramUserAvatar(
-                                displayName = userProfile.displayName.ifBlank { "You" },
-                                photoUrl = userProfile.photoUrl,
-                                seedKey = currentUid,
-                                size = 68.dp,
-                                showStoryRing = myLatestStory != null,
-                                isStoryViewed = false,
-                                showAddBadge = myLatestStory == null
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = "Your story",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                                color = MaterialTheme.colorScheme.onBackground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    items(otherStories, key = { it.id }) { story ->
-                        val viewed = story.isViewedBy(currentUid)
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(72.dp)
-                                .clickable { onOpenStory(story) }
-                                .testTag("home_story_${story.id}")
-                        ) {
-                            InstagramUserAvatar(
-                                displayName = story.authorUsername,
-                                photoUrl = story.authorPhotoUrl,
-                                seedKey = story.authorId,
-                                size = 68.dp,
-                                showStoryRing = true,
-                                isStoryViewed = viewed
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = story.authorUsername,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                                color = if (viewed) MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.onBackground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = InstagramHairline.copy(alpha = 0.8f)
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefreshFeed,
+            state = pullToRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    containerColor = InstagramWhite,
+                    color = InstagramBlue,
+                    modifier = Modifier.align(Alignment.TopCenter)
                 )
-            }
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .testTag("home_pull_to_refresh")
+        ) {
+            LazyColumn(
+                state = feedListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("home_feed_list"),
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                // Stories Tray
+                item(key = "stories_tray", contentType = "stories_tray") {
+                    LazyRow(
+                        state = storiesListState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_stories_row"),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item(key = "your_story") {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .clickable {
+                                        if (myLatestStory != null) {
+                                            onOpenStory(myLatestStory)
+                                        } else {
+                                            onAddStoryClick()
+                                        }
+                                    }
+                                    .testTag("your_story_chip")
+                            ) {
+                                InstagramUserAvatar(
+                                    displayName = userProfile.displayName.ifBlank { "You" },
+                                    photoUrl = userProfile.photoUrl,
+                                    seedKey = currentUid,
+                                    size = 68.dp,
+                                    showStoryRing = myLatestStory != null,
+                                    isStoryViewed = false,
+                                    showAddBadge = myLatestStory == null
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    text = "Your story",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
 
-            when (postsState) {
-                is UiState.Loading -> {
-                    item(key = "feed_loading") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 64.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = InstagramBlue)
+                        items(otherStories, key = { it.id }) { story ->
+                            val viewed = story.isViewedBy(currentUid)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .clickable { onOpenStory(story) }
+                                    .testTag("home_story_${story.id}")
+                            ) {
+                                InstagramUserAvatar(
+                                    displayName = story.authorUsername,
+                                    photoUrl = story.authorPhotoUrl,
+                                    seedKey = story.authorId,
+                                    size = 68.dp,
+                                    showStoryRing = true,
+                                    isStoryViewed = viewed
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    text = story.authorUsername,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                                    color = if (viewed) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = InstagramHairline.copy(alpha = 0.8f)
+                    )
                 }
 
-                is UiState.Error -> {
-                    item(key = "feed_error") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Unable to refresh feed",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = postsState.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
+                when (postsState) {
+                    is UiState.Loading -> {
+                        item(key = "feed_loading", contentType = "feed_loading") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 64.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = InstagramBlue)
+                            }
                         }
                     }
-                }
+
+                    is UiState.Error -> {
+                        item(key = "feed_error", contentType = "feed_error") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Unable to refresh feed",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = postsState.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                Button(
+                                    onClick = onRefreshFeed,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = InstagramBlue,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.testTag("home_feed_retry_button")
+                                ) {
+                                    Text("Try again")
+                                }
+                            }
+                        }
+                    }
 
                 is UiState.Success -> {
                     if (posts.isEmpty()) {
@@ -341,12 +390,20 @@ fun InstagramHomeScreen(
                             }
                         }
                     } else {
-                        items(posts, key = { it.id }) { post ->
+                        items(
+                            items = posts,
+                            key = { it.id },
+                            contentType = { "post" }
+                        ) { post ->
+                            val authorStory = storiesByAuthor[post.authorId]
                             InstagramPostCard(
                                 post = post,
                                 currentUid = currentUid,
                                 isSaved = savedPostIds.contains(post.id),
                                 isFollowingAuthor = followingSet.contains(post.authorId),
+                                authorHasStory = authorStory != null,
+                                isAuthorStoryViewed = authorStory?.isViewedBy(currentUid) ?: false,
+                                onAuthorStoryClick = authorStory?.let { story -> { onOpenStory(story) } },
                                 onToggleLike = { onToggleLike(post) },
                                 onDoubleTapLike = { onDoubleTapLike(post) },
                                 onOpenComments = { onOpenComments(post) },
@@ -360,6 +417,7 @@ fun InstagramHomeScreen(
                 }
             }
         }
+    }
     }
 
     if (showActivitySheet) {

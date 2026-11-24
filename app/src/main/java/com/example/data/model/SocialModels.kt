@@ -25,6 +25,7 @@ data class SocialPost(
     val authorPhotoUrl: String = "",
     val mediaType: SocialMediaType = SocialMediaType.PHOTO,
     val imageUrl: String = "",
+    val videoUrl: String = "",
     val storagePath: String? = null,
     val caption: String = "",
     val location: String = "",
@@ -35,6 +36,13 @@ data class SocialPost(
     val createdAtMillis: Long = 0L
 ) {
     fun isLikedBy(uid: String): Boolean = uid.isNotBlank() && likedByUids.contains(uid)
+
+    val hasVideo: Boolean
+        get() = videoUrl.isNotBlank() ||
+            imageUrl.contains(".mp4", ignoreCase = true) ||
+            imageUrl.contains(".mov", ignoreCase = true) ||
+            imageUrl.contains(".webm", ignoreCase = true) ||
+            imageUrl.contains(".m3u8", ignoreCase = true)
 }
 
 data class PostComment(

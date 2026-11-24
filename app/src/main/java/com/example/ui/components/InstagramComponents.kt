@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import android.net.Uri
+import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -37,6 +40,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
@@ -45,6 +50,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -64,6 +70,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +85,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -90,9 +98,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.R
 import com.example.data.model.ChatKind
 import com.example.data.model.PostComment
@@ -104,6 +114,7 @@ import com.example.ui.theme.InstagramBlue
 import com.example.ui.theme.InstagramBlueDeep
 import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramHeartRed
+import com.example.ui.theme.InstagramMutedText
 import com.example.ui.theme.InstagramStoryGradient
 import com.example.ui.theme.TelegramAvatarPairs
 import kotlinx.coroutines.delay
@@ -213,16 +224,23 @@ fun InstagramPostCard(
     onToggleFollow: () -> Unit,
     onShareToDm: () -> Unit,
     onDeletePost: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    authorHasStory: Boolean = false,
+    isAuthorStoryViewed: Boolean = false,
+    onAuthorStoryClick: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val isLiked = post.isLikedBy(currentUid)
     val isMine = post.authorId == currentUid
     var showDoubleTapHeart by remember(post.id) { mutableStateOf(false) }
     var expandCaption by remember(post.id) { mutableStateOf(false) }
+    var isCaptionTruncated by remember(post.id, post.caption) { mutableStateOf(false) }
     var showMoreMenu by remember(post.id) { mutableStateOf(false) }
+    var isVideoMuted by remember(post.id) { mutableStateOf(true) }
+    var isVideoPaused by remember(post.id) { mutableStateOf(false) }
 
     val likeScale by animateFloatAsState(
-        targetValue = if (isLiked) 1.0f else 0.94f,
+        targetValue = if (isLiked) 1.08f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -254,7 +272,10 @@ fun InstagramPostCard(
                 displayName = post.authorDisplayName,
                 photoUrl = post.authorPhotoUrl,
                 seedKey = post.authorId,
-                size = 34.dp
+                size = if (authorHasStory) 38.dp else 34.dp,
+                showStoryRing = authorHasStory,
+                isStoryViewed = isAuthorStoryViewed,
+                onClick = if (authorHasStory) onAuthorStoryClick else null
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -266,7 +287,8 @@ fun InstagramPostCard(
                     ),
                     color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("post_author_username_${post.id}")
                 )
                 val subtitle = when {
                     post.location.isNotBlank() -> post.location
@@ -364,14 +386,25 @@ fun InstagramPostCard(
             }
         }
 
-        // Full-bleed media with double-tap heart animation
+        // Full-bleed image or video media with double-tap heart animation
+        val imageRequest = remember(post.imageUrl, context) {
+            ImageRequest.Builder(context)
+                .data(post.imageUrl)
+                .crossfade(true)
+                .build()
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(post.aspectRatio.coerceIn(0.75f, 1.35f))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .pointerInput(post.id) {
+                .pointerInput(post.id, post.hasVideo) {
                     detectTapGestures(
+                        onTap = {
+                            if (post.hasVideo) {
+                                isVideoPaused = !isVideoPaused
+                            }
+                        },
                         onDoubleTap = {
                             showDoubleTapHeart = true
                             onDoubleTapLike()
@@ -381,11 +414,66 @@ fun InstagramPostCard(
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
-                model = post.imageUrl,
+                model = imageRequest,
                 contentDescription = post.caption.ifBlank { "Post by ${post.authorUsername}" },
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+
+            if (post.hasVideo) {
+                val activeVideoUrl = post.videoUrl.ifBlank { post.imageUrl }
+                FeedInlineVideoLayer(
+                    videoUrl = activeVideoUrl,
+                    isMuted = isVideoMuted,
+                    isPaused = isVideoPaused,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                if (isVideoPaused) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = "Paused",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = { isVideoMuted = !isVideoMuted },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("post_video_mute_toggle_${post.id}")
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isVideoMuted) {
+                                    Icons.AutoMirrored.Filled.VolumeOff
+                                } else {
+                                    Icons.AutoMirrored.Filled.VolumeUp
+                                },
+                                contentDescription = if (isVideoMuted) "Unmute video" else "Mute video",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
             if (post.mediaType == SocialMediaType.REEL) {
                 Surface(
@@ -401,7 +489,7 @@ fun InstagramPostCard(
                         horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.PlayArrow,
+                            imageVector = if (post.hasVideo && !isVideoPaused) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                             contentDescription = "Reel",
                             tint = Color.White,
                             modifier = Modifier.size(14.dp)
@@ -502,12 +590,13 @@ fun InstagramPostCard(
             }
         }
 
-        // Likes, inline bold username + caption, view comments, timestamp
+        // Likes, inline bold username + caption with 'more', view comments, timestamp
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
-                .padding(bottom = 12.dp),
+                .padding(bottom = 12.dp)
+                .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
@@ -516,30 +605,34 @@ fun InstagramPostCard(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.5.sp
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.testTag("post_likes_count_${post.id}")
             )
 
             if (post.caption.isNotBlank()) {
-                val annotatedCaption = buildAnnotatedString {
-                    withStyle(
-                        SpanStyle(
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    ) {
-                        append(post.authorUsername)
-                        append("  ")
-                    }
-                    val words = post.caption.split(" ")
-                    words.forEachIndexed { idx, token ->
-                        if (token.startsWith("#") || token.startsWith("@")) {
-                            withStyle(SpanStyle(color = InstagramBlueDeep)) {
+                val captionTextColor = MaterialTheme.colorScheme.onBackground
+                val annotatedCaption = remember(post.id, post.authorUsername, post.caption, captionTextColor) {
+                    buildAnnotatedString {
+                        withStyle(
+                            SpanStyle(
+                                fontWeight = FontWeight.SemiBold,
+                                color = captionTextColor
+                            )
+                        ) {
+                            append(post.authorUsername)
+                            append("  ")
+                        }
+                        val words = post.caption.split(" ")
+                        words.forEachIndexed { idx, token ->
+                            if (token.startsWith("#") || token.startsWith("@")) {
+                                withStyle(SpanStyle(color = InstagramBlueDeep)) {
+                                    append(token)
+                                }
+                            } else {
                                 append(token)
                             }
-                        } else {
-                            append(token)
+                            if (idx < words.lastIndex) append(" ")
                         }
-                        if (idx < words.lastIndex) append(" ")
                     }
                 }
                 Text(
@@ -549,10 +642,35 @@ fun InstagramPostCard(
                         lineHeight = 18.sp
                     ),
                     color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = if (expandCaption) 12 else 2,
+                    maxLines = if (expandCaption) Int.MAX_VALUE else 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { expandCaption = !expandCaption }
+                    onTextLayout = { layoutResult ->
+                        if (!expandCaption) {
+                            isCaptionTruncated = layoutResult.hasVisualOverflow
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expandCaption = !expandCaption }
+                        .testTag("post_caption_text_${post.id}")
                 )
+
+                val showMoreAction = !expandCaption &&
+                    (isCaptionTruncated || post.caption.length > 90 || post.caption.count { it == '\n' } >= 2)
+                if (showMoreAction) {
+                    Text(
+                        text = "more",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = InstagramMutedText,
+                        modifier = Modifier
+                            .clickable { expandCaption = true }
+                            .padding(vertical = 2.dp)
+                            .testTag("post_caption_more_${post.id}")
+                    )
+                }
             }
 
             if (post.commentCount > 0) {
@@ -569,7 +687,8 @@ fun InstagramPostCard(
             Text(
                 text = SocialFormatters.formatTimeAgo(post.createdAtMillis),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("post_timestamp_${post.id}")
             )
         }
 
@@ -578,6 +697,54 @@ fun InstagramPostCard(
             color = InstagramHairline.copy(alpha = 0.7f)
         )
     }
+}
+
+@Composable
+private fun FeedInlineVideoLayer(
+    videoUrl: String,
+    isMuted: Boolean,
+    isPaused: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    DisposableEffect(videoUrl) {
+        onDispose {
+            mediaPlayerRef = null
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            VideoView(ctx).apply {
+                setOnPreparedListener { mp ->
+                    mediaPlayerRef = mp
+                    mp.isLooping = true
+                    val volume = if (isMuted) 0f else 1f
+                    mp.setVolume(volume, volume)
+                    if (!isPaused) {
+                        start()
+                    }
+                }
+                setOnErrorListener { _, _, _ -> true }
+                setVideoURI(Uri.parse(videoUrl))
+            }
+        },
+        update = { videoView ->
+            mediaPlayerRef?.let { mp ->
+                runCatching {
+                    val vol = if (isMuted) 0f else 1f
+                    mp.setVolume(vol, vol)
+                }
+            }
+            if (isPaused && videoView.isPlaying) {
+                videoView.pause()
+            } else if (!isPaused && !videoView.isPlaying) {
+                videoView.start()
+            }
+        },
+        modifier = modifier
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

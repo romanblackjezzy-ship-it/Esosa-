@@ -63,5 +63,12 @@ class SocialModelsTest {
             FirebasePhotoStorageService.socialMediaStoragePath("uid_alice", "post", "p1")
         )
         assertTrue(FirebasePhotoStorageService.isRemoteDeletablePath("users/uid_alice/post_p1.jpg"))
+
+        val videoPost = SocialPost(id = "v1", videoUrl = "https://cdn.example.com/clip.mp4")
+        val mp4ImagePost = SocialPost(id = "v2", imageUrl = "https://cdn.example.com/reel.mp4")
+        val imagePost = SocialPost(id = "i1", imageUrl = "https://cdn.example.com/photo.jpg")
+        assertTrue(videoPost.hasVideo)
+        assertTrue(mp4ImagePost.hasVideo)
+        assertFalse(imagePost.hasVideo)
     }
 }

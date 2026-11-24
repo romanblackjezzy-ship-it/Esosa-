@@ -10,6 +10,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -51,6 +52,34 @@ class FirestoreSocialService(
                 trySend(list)
             }
         awaitClose { reg.remove() }
+    }
+
+    suspend fun fetchLatestPosts(limitCount: Long = 100L): List<SocialPost> {
+        return try {
+            val snap = db.collection(POSTS_COLLECTION)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(limitCount)
+                .get(Source.SERVER)
+                .await()
+            snap.documents.mapNotNull(::parsePost)
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.LIST, POSTS_COLLECTION, auth)
+            throw e
+        }
+    }
+
+    suspend fun fetchLatestStories(limitCount: Long = 50L): List<SocialStory> {
+        return try {
+            val snap = db.collection(STORIES_COLLECTION)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(limitCount)
+                .get(Source.SERVER)
+                .await()
+            snap.documents.mapNotNull(::parseStory)
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.LIST, STORIES_COLLECTION, auth)
+            throw e
+        }
     }
 
     fun observeComments(postId: String): Flow<List<PostComment>> = callbackFlow {
@@ -356,7 +385,9 @@ class FirestoreSocialService(
     private fun parsePost(doc: DocumentSnapshot): SocialPost? {
         if (!doc.exists()) return null
         val authorId = doc.getString("authorId") ?: return null
-        val imageUrl = doc.getString("imageUrl") ?: return null
+        val videoUrl = doc.getString("videoUrl").orEmpty()
+        val imageUrl = doc.getString("imageUrl").orEmpty()
+        if (imageUrl.isBlank() && videoUrl.isBlank()) return null
         return SocialPost(
             id = doc.id,
             authorId = authorId,
@@ -364,7 +395,8 @@ class FirestoreSocialService(
             authorDisplayName = doc.getString("authorDisplayName").orEmpty().ifBlank { "Esosa Creator" },
             authorPhotoUrl = doc.getString("authorPhotoUrl").orEmpty(),
             mediaType = SocialMediaType.fromId(doc.getString("mediaType")),
-            imageUrl = imageUrl,
+            imageUrl = imageUrl.ifBlank { videoUrl },
+            videoUrl = videoUrl,
             storagePath = doc.getString("storagePath"),
             caption = doc.getString("caption").orEmpty(),
             location = doc.getString("location").orEmpty(),

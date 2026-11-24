@@ -37,6 +37,10 @@ class SocialRepository(
 
     fun observeFollows(): Flow<List<UserFollowEdge>> = socialService.observeFollows()
 
+    suspend fun fetchLatestPosts(): List<SocialPost> = socialService.fetchLatestPosts()
+
+    suspend fun fetchLatestStories(): List<SocialStory> = socialService.fetchLatestStories()
+
     suspend fun publishPostOrReel(
         imageUri: Uri,
         mediaType: SocialMediaType,
