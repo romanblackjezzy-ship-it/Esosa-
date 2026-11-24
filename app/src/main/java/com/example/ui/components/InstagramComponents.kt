@@ -963,6 +963,20 @@ fun InstagramCommentsSheet(
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.5.sp),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = "Reply",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.5.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .clickable {
+                                            draft = "@${comment.authorUsername} "
+                                        }
+                                        .testTag("comment_reply_${comment.id}")
+                                )
                             }
                             if (comment.authorId == currentUid || post.authorId == currentUid) {
                                 IconButton(
