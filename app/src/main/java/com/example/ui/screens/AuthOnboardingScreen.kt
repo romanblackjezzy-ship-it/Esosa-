@@ -67,12 +67,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,6 +110,8 @@ import com.example.ui.theme.EsosaOnlineGreen
 import com.example.ui.theme.InstagramBlack
 import com.example.ui.theme.InstagramBlue
 import com.example.ui.theme.InstagramBlueDeep
+import com.example.ui.viewmodel.SignInViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.theme.InstagramBlueSoft
 import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramMutedText
@@ -322,9 +326,19 @@ fun AuthOnboardingScreen(
     var usernameInput by rememberSaveable { mutableStateOf(existingProfile.username) }
     var resetEmailInput by rememberSaveable { mutableStateOf(emailInput) }
 
-    var isGoogleLoading by remember { mutableStateOf(false) }
+    val signInViewModel: SignInViewModel = viewModel()
+    val isGoogleLoading by signInViewModel.isLoading.collectAsStateWithLifecycle()
+    val signInError by signInViewModel.errorMessage.collectAsStateWithLifecycle()
+
     var isResetSending by remember { mutableStateOf(false) }
     var statusBanner by remember { mutableStateOf<AuthStatusBanner?>(null) }
+
+    LaunchedEffect(signInError) {
+        if (signInError != null) {
+            statusBanner = AuthStatusBanner(signInError!!, AuthBannerTone.ERROR)
+            signInViewModel.clearError()
+        }
+    }
 
     if (screenMode != AuthScreenMode.LOGIN) {
         BackHandler {
@@ -347,21 +361,11 @@ fun AuthOnboardingScreen(
     fun triggerGoogleAuth() {
         keyboardController?.hide()
         statusBanner = null
-        isGoogleLoading = true
-        onGoogleSignInClicked(
+        signInViewModel.signInWithGoogle(
             context = context,
             credentialManager = credentialManager,
-            onAuthSuccess = {
-                isGoogleLoading = false
+            onSuccess = {
                 onAuthSuccess(pendingMetadata)
-            },
-            onAuthError = { msg ->
-                isGoogleLoading = false
-                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
-            },
-            scope = scope,
-            onAuthCancelled = {
-                isGoogleLoading = false
             }
         )
     }
