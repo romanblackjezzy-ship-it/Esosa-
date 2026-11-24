@@ -32,11 +32,13 @@ android {
   // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val envKeyPath = System.getenv("KEYSTORE_PATH")
+      val fallbackPath = if (file("${rootDir}/my-upload-key.jks").exists()) "${rootDir}/my-upload-key.jks" else "${rootDir}/debug.keystore"
+      val keystorePath = envKeyPath ?: fallbackPath
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("STORE_PASSWORD") ?: "android"
+      keyAlias = if (envKeyPath != null || file("${rootDir}/my-upload-key.jks").exists()) "upload" else "androiddebugkey"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -52,12 +54,8 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio. Fall back to debugConfig if release keystore file is absent.
-      signingConfig = if (file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks").exists()) {
-        signingConfigs.getByName("release")
-      } else {
-        signingConfigs.getByName("debugConfig")
-      }
+      // AI Studio.
+      signingConfig = signingConfigs.getByName("release")
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
