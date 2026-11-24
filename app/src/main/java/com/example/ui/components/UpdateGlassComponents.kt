@@ -324,10 +324,17 @@ fun GlassUpdatePromptOverlay(
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                                val cleanNotes = if (update.releaseNotes.contains("Automated build of", ignoreCase = true) ||
+                                    update.releaseNotes.contains("Signing SHA-256", ignoreCase = true) ||
+                                    update.releaseNotes.contains("Download the", ignoreCase = true)) {
+                                    "Performance improvements and security enhancements for Esosa."
+                                } else {
+                                    update.releaseNotes.ifBlank {
+                                        "Performance improvements and security enhancements for Esosa."
+                                    }
+                                }
                                 Text(
-                                    text = update.releaseNotes.ifBlank {
-                                        "Performance improvements, reliability upgrades, and security enhancements."
-                                    },
+                                    text = cleanNotes,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
