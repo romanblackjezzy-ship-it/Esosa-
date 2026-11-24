@@ -62,6 +62,12 @@ jobs:
           gradle-version: 9.3.1
           cache-disabled: true
 
+      - name: Restore cached CI signing keystore (fallback)
+        uses: actions/cache@v4
+        with:
+          path: .ci-keystore
+          key: esosa-ci-debug-keystore-v1
+
       - name: Prepare versioning, signing keystore, and Firebase config
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,9 +138,23 @@ jobs:
             KEYSTORE_SOURCE="repo_base64"
           elif [ -s debug.keystore ]; then
             KEYSTORE_SOURCE="repo_file"
+          elif [ -s .ci-keystore/debug.keystore ]; then
+            cp .ci-keystore/debug.keystore debug.keystore
+            KEYSTORE_SOURCE="ci_cache"
           else
-            echo "::error title=Missing signing keystore::Neither debug.keystore.base64 nor ANDROID_DEBUG_KEYSTORE_BASE64 was found. Refusing to generate a random signing key because doing so causes 'package conflicts with an existing package' on user devices."
-            exit 1
+            mkdir -p .ci-keystore
+            keytool -genkeypair -v \
+              -keystore .ci-keystore/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            cp .ci-keystore/debug.keystore debug.keystore
+            KEYSTORE_SOURCE="ci_generated"
+            echo "::warning title=Initialized CI signing keystore::Neither debug.keystore.base64 nor ANDROID_DEBUG_KEYSTORE_BASE64 was found. Generated and cached a consistent CI debug.keystore. Set the ANDROID_DEBUG_KEYSTORE_BASE64 repository secret if you need signatures to match an external keystore."
           fi
 
           if ! keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey > keystore-info.txt 2>&1; then

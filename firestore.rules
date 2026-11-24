@@ -149,10 +149,12 @@ service cloud.firestore {
              (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
              data.mediaType in ['photo', 'reel'] &&
              data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*') &&
+             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^https://.*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
              data.caption is string && data.caption.size() <= 2200 &&
              (!('location' in data) || (data.location is string && data.location.size() <= 120)) &&
              (!('audioLabel' in data) || (data.audioLabel is string && data.audioLabel.size() <= 120)) &&
+             (!('taggedUsernames' in data) || (data.taggedUsernames is list && data.taggedUsernames.size() <= 20)) &&
              (!('aspectRatio' in data) || ((data.aspectRatio is float || data.aspectRatio is int) && data.aspectRatio >= 0.4 && data.aspectRatio <= 2.5)) &&
              data.likedByUids is list && data.likedByUids.size() <= 1000 &&
              data.commentCount is int && data.commentCount >= 0 &&
@@ -513,7 +515,7 @@ service cloud.firestore {
                        incoming().likedByUids.size() == 0 &&
                        incoming().commentCount == 0 &&
                        incoming().keys().hasAll(['authorId', 'authorUsername', 'authorDisplayName', 'mediaType', 'imageUrl', 'caption', 'likedByUids', 'commentCount', 'createdAt']) &&
-                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorDisplayName', 'authorPhotoUrl', 'mediaType', 'imageUrl', 'storagePath', 'caption', 'location', 'audioLabel', 'aspectRatio', 'likedByUids', 'commentCount', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorDisplayName', 'authorPhotoUrl', 'mediaType', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'location', 'audioLabel', 'taggedUsernames', 'aspectRatio', 'likedByUids', 'commentCount', 'createdAt']) &&
                        isValidSocialPost(incoming());
 
       allow update: if isSignedIn() &&
@@ -525,6 +527,7 @@ service cloud.firestore {
                        incoming().mediaType == existing().mediaType &&
                        incoming().imageUrl == existing().imageUrl &&
                        incoming().createdAt == existing().createdAt &&
+                       (!('videoUrl' in existing()) ? !('videoUrl' in incoming()) : incoming().videoUrl == existing().videoUrl) &&
                        (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
                        (!('authorPhotoUrl' in existing()) ? !('authorPhotoUrl' in incoming()) : incoming().authorPhotoUrl == existing().authorPhotoUrl) &&
                        (
@@ -550,10 +553,10 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly(['commentCount']) &&
                            incoming().commentCount == existing().commentCount + 1
                          ) ||
-                         // Author edits caption/location/audioLabel
+                         // Author edits caption/location/audioLabel/taggedUsernames
                          (
                            existing().authorId == request.auth.uid &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'location', 'audioLabel'])
+                           incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'location', 'audioLabel', 'taggedUsernames'])
                          )
                        );
 

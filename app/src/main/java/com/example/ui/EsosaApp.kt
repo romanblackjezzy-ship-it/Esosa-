@@ -961,39 +961,59 @@ private fun EsosaSocialShell(
                                     modifier = Modifier.weight(1f)
                                 )
 
-                                EsosaTab.CREATE -> InstagramCreateScreen(
-                                    initialFormat = createFormat,
-                                    isPublishing = isPublishingSocial,
-                                    uploadProgress = socialUploadProgress,
-                                    actionError = socialActionError,
-                                    onPublishPostOrReel = { uri, type, caption, location, audio, ratio ->
-                                        socialViewModel.publishPostOrReel(
-                                            imageUri = uri,
-                                            mediaType = type,
-                                            caption = caption,
-                                            location = location,
-                                            audioLabel = audio,
-                                            aspectRatio = ratio,
-                                            onPublished = {
-                                                selectedTab = if (type == com.example.data.model.SocialMediaType.REEL) {
-                                                    EsosaTab.REELS
-                                                } else {
-                                                    EsosaTab.HOME
+                                EsosaTab.CREATE -> {
+                                    val suggestedTagUsernames = remember(postsState, followEdges, userProfile.username) {
+                                        val currentHandle = userProfile.username.trim().removePrefix("@")
+                                        val fromPosts = (postsState as? UiState.Success)?.data.orEmpty().map { it.authorUsername }
+                                        val fromFollows = followEdges.map { it.targetUsername }
+                                        (fromFollows + fromPosts)
+                                            .map { it.trim().removePrefix("@") }
+                                            .filter { it.isNotBlank() && it != currentHandle }
+                                            .distinct()
+                                            .take(15)
+                                    }
+                                    InstagramCreateScreen(
+                                        initialFormat = createFormat,
+                                        isPublishing = isPublishingSocial,
+                                        uploadProgress = socialUploadProgress,
+                                        actionError = socialActionError,
+                                        suggestedUsernames = suggestedTagUsernames,
+                                        onPublishPostOrReel = { uri, type, caption, location, audio, ratio, isVideo, cropSpec, filter, taggedUsernames ->
+                                            socialViewModel.publishPostOrReel(
+                                                imageUri = uri,
+                                                mediaType = type,
+                                                caption = caption,
+                                                location = location,
+                                                audioLabel = audio,
+                                                aspectRatio = ratio,
+                                                isVideo = isVideo,
+                                                cropSpec = cropSpec,
+                                                filter = filter,
+                                                taggedUsernames = taggedUsernames,
+                                                onPublished = {
+                                                    selectedTab = if (type == com.example.data.model.SocialMediaType.REEL) {
+                                                        EsosaTab.REELS
+                                                    } else {
+                                                        EsosaTab.HOME
+                                                    }
                                                 }
-                                            }
-                                        )
-                                    },
-                                    onPublishStory = { uri, caption ->
-                                        socialViewModel.publishStory(
-                                            imageUri = uri,
-                                            caption = caption,
-                                            onPublished = { selectedTab = EsosaTab.HOME }
-                                        )
-                                    },
-                                    onClearError = { socialViewModel.clearError() },
-                                    onCancel = { selectedTab = EsosaTab.HOME },
-                                    modifier = Modifier.weight(1f)
-                                )
+                                            )
+                                        },
+                                        onPublishStory = { uri, caption, isVideo, cropSpec, filter ->
+                                            socialViewModel.publishStory(
+                                                imageUri = uri,
+                                                caption = caption,
+                                                isVideo = isVideo,
+                                                cropSpec = cropSpec,
+                                                filter = filter,
+                                                onPublished = { selectedTab = EsosaTab.HOME }
+                                            )
+                                        },
+                                        onClearError = { socialViewModel.clearError() },
+                                        onCancel = { selectedTab = EsosaTab.HOME },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
 
                                 EsosaTab.REELS -> InstagramReelsScreen(
                                     currentUid = socialViewModel.currentUserId,

@@ -154,6 +154,53 @@ class FirebasePhotoStorageService(
         }
     }
 
+    suspend fun uploadSocialVideo(
+        uid: String,
+        mediaId: String,
+        videoBytes: ByteArray,
+        contentType: String = VIDEO_MP4_CONTENT_TYPE,
+        onProgress: (Float) -> Unit = {}
+    ): UploadedPhoto {
+        require(uid.isNotBlank()) { "Sign in to publish video." }
+        require(mediaId.isNotBlank()) { "Media ID is required." }
+        require(videoBytes.isNotEmpty()) { "Selected video is empty." }
+        if (videoBytes.size.toLong() >= MAX_VIDEO_UPLOAD_BYTES) {
+            throw IllegalArgumentException("Selected video exceeds the 25 MB upload limit.")
+        }
+
+        val storagePath = socialVideoStoragePath(uid, mediaId)
+        val metadata = StorageMetadata.Builder()
+            .setContentType(contentType)
+            .setCustomMetadata("userId", uid)
+            .build()
+
+        val mediaRef = storage.reference.child(storagePath)
+        return try {
+            val uploadTask = mediaRef.putBytes(videoBytes, metadata)
+            uploadTask.addOnProgressListener { snapshot ->
+                val total = snapshot.totalByteCount
+                if (total > 0L) {
+                    val fraction = (snapshot.bytesTransferred.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    onProgress(0.15f + fraction * 0.75f)
+                }
+            }
+            uploadTask.await()
+            onProgress(0.95f)
+            val downloadUrl = mediaRef.downloadUrl.await().toString()
+            if (!downloadUrl.startsWith("https://")) {
+                throw IllegalStateException("Unexpected non-HTTPS download URL returned by Firebase Storage.")
+            }
+            UploadedPhoto(
+                downloadUrl = downloadUrl,
+                storagePath = storagePath
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: StorageException) {
+            throw IOException(mapStorageErrorMessage(e), e)
+        }
+    }
+
     suspend fun deletePhotoIfOwned(storagePath: String?) {
         if (!isRemoteDeletablePath(storagePath)) return
         val path = storagePath ?: return
@@ -187,7 +234,9 @@ class FirebasePhotoStorageService(
 
     companion object {
         const val MAX_UPLOAD_BYTES = 10L * 1024L * 1024L
+        const val MAX_VIDEO_UPLOAD_BYTES = 25L * 1024L * 1024L
         private const val IMAGE_JPEG_CONTENT_TYPE = "image/jpeg"
+        private const val VIDEO_MP4_CONTENT_TYPE = "video/mp4"
 
         fun roomPhotoStoragePath(roomId: String, messageId: String): String =
             "rooms/$roomId/photos/$messageId.jpg"
@@ -197,6 +246,9 @@ class FirebasePhotoStorageService(
 
         fun socialMediaStoragePath(uid: String, prefix: String, mediaId: String): String =
             "users/$uid/${prefix}_$mediaId.jpg"
+
+        fun socialVideoStoragePath(uid: String, mediaId: String): String =
+            "users/$uid/video_$mediaId.mp4"
 
         fun isRemoteRoomPhotoPath(path: String?): Boolean =
             !path.isNullOrBlank() && path.startsWith("rooms/")

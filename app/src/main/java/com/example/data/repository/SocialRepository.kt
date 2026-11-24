@@ -4,7 +4,9 @@ import android.content.Context
 import android.net.Uri
 import com.example.core.LocalProfilePreferences
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.model.MediaCropSpec
 import com.example.data.model.PostComment
+import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
@@ -48,6 +50,10 @@ class SocialRepository(
         location: String,
         audioLabel: String,
         aspectRatio: Float,
+        isVideo: Boolean = false,
+        cropSpec: MediaCropSpec = MediaCropSpec(targetAspectRatio = aspectRatio),
+        filter: PostFilter = PostFilter.NORMAL,
+        taggedUsernames: List<String> = emptyList(),
         onProgress: (Float) -> Unit
     ) {
         val user = auth.currentUser ?: throw IllegalStateException("Please sign in with Google to post.")
@@ -58,39 +64,99 @@ class SocialRepository(
         val photoUrl = profile.photoUrl.ifBlank { user.photoUrl?.toString().orEmpty() }
         val postId = "post_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
 
-        onProgress(0.08f)
-        val jpegBytes = withContext(Dispatchers.IO) {
-            CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(appContext, imageUri)
+        val effectiveAspectRatio = cropSpec.targetAspectRatio.coerceIn(0.5f, 2.0f)
+        val resolvedIsVideo = isVideo || withContext(Dispatchers.IO) {
+            CameraPhotoHelper.isVideoUri(appContext, imageUri)
         }
-        onProgress(0.15f)
-        val uploaded = photoStorageService.uploadSocialMedia(
-            uid = uid,
-            mediaId = postId,
-            prefix = if (mediaType == SocialMediaType.REEL) "reel" else "post",
-            jpegBytes = jpegBytes,
-            onProgress = onProgress
-        )
 
-        socialService.createPost(
-            postId = postId,
-            authorId = uid,
-            authorUsername = username,
-            authorDisplayName = displayName,
-            authorPhotoUrl = photoUrl,
-            mediaType = mediaType,
-            imageUrl = uploaded.downloadUrl,
-            storagePath = uploaded.storagePath,
-            caption = caption.trim(),
-            location = location.trim(),
-            audioLabel = audioLabel.trim(),
-            aspectRatio = aspectRatio
-        )
+        if (resolvedIsVideo) {
+            onProgress(0.08f)
+            val posterBytes = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.extractVideoThumbnailJpegBytes(
+                    context = appContext,
+                    videoUri = imageUri,
+                    filter = filter
+                )
+            }
+            onProgress(0.16f)
+            val uploadedPoster = photoStorageService.uploadSocialMedia(
+                uid = uid,
+                mediaId = postId,
+                prefix = "post_poster",
+                jpegBytes = posterBytes,
+                onProgress = { p -> onProgress(0.16f + p * 0.18f) }
+            )
+            onProgress(0.35f)
+            val videoBytes = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.readVideoBytesWithSizeCap(appContext, imageUri)
+            }
+            val uploadedVideo = photoStorageService.uploadSocialVideo(
+                uid = uid,
+                mediaId = postId,
+                videoBytes = videoBytes,
+                onProgress = { p -> onProgress(0.35f + p * 0.58f) }
+            )
+
+            socialService.createPost(
+                postId = postId,
+                authorId = uid,
+                authorUsername = username,
+                authorDisplayName = displayName,
+                authorPhotoUrl = photoUrl,
+                mediaType = mediaType,
+                imageUrl = uploadedPoster.downloadUrl,
+                videoUrl = uploadedVideo.downloadUrl,
+                storagePath = uploadedPoster.storagePath,
+                caption = caption.trim(),
+                location = location.trim(),
+                audioLabel = audioLabel.trim(),
+                taggedUsernames = taggedUsernames,
+                aspectRatio = effectiveAspectRatio
+            )
+        } else {
+            onProgress(0.08f)
+            val jpegBytes = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+                    context = appContext,
+                    uri = imageUri,
+                    cropSpec = cropSpec,
+                    filter = filter
+                )
+            }
+            onProgress(0.15f)
+            val uploaded = photoStorageService.uploadSocialMedia(
+                uid = uid,
+                mediaId = postId,
+                prefix = if (mediaType == SocialMediaType.REEL) "reel" else "post",
+                jpegBytes = jpegBytes,
+                onProgress = onProgress
+            )
+
+            socialService.createPost(
+                postId = postId,
+                authorId = uid,
+                authorUsername = username,
+                authorDisplayName = displayName,
+                authorPhotoUrl = photoUrl,
+                mediaType = mediaType,
+                imageUrl = uploaded.downloadUrl,
+                storagePath = uploaded.storagePath,
+                caption = caption.trim(),
+                location = location.trim(),
+                audioLabel = audioLabel.trim(),
+                taggedUsernames = taggedUsernames,
+                aspectRatio = effectiveAspectRatio
+            )
+        }
         onProgress(1f)
     }
 
     suspend fun publishStory(
         imageUri: Uri?,
         caption: String,
+        isVideo: Boolean = false,
+        cropSpec: MediaCropSpec = MediaCropSpec(targetAspectRatio = 0.75f),
+        filter: PostFilter = PostFilter.NORMAL,
         onProgress: (Float) -> Unit
     ) {
         val user = auth.currentUser ?: throw IllegalStateException("Please sign in with Google to share a story.")
@@ -104,8 +170,24 @@ class SocialRepository(
         var storagePath: String? = null
         if (imageUri != null) {
             onProgress(0.08f)
+            val resolvedVideo = isVideo || withContext(Dispatchers.IO) {
+                CameraPhotoHelper.isVideoUri(appContext, imageUri)
+            }
             val jpegBytes = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(appContext, imageUri)
+                if (resolvedVideo) {
+                    CameraPhotoHelper.extractVideoThumbnailJpegBytes(
+                        context = appContext,
+                        videoUri = imageUri,
+                        filter = filter
+                    )
+                } else {
+                    CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+                        context = appContext,
+                        uri = imageUri,
+                        cropSpec = cropSpec,
+                        filter = filter
+                    )
+                }
             }
             onProgress(0.15f)
             val uploaded = photoStorageService.uploadSocialMedia(
@@ -185,6 +267,13 @@ class SocialRepository(
         socialService.deletePost(post.id)
         runCatching {
             photoStorageService.deletePhotoIfOwned(post.storagePath)
+        }
+        if (post.videoUrl.isNotBlank() && post.authorId.isNotBlank()) {
+            runCatching {
+                photoStorageService.deletePhotoIfOwned(
+                    FirebasePhotoStorageService.socialVideoStoragePath(post.authorId, post.id)
+                )
+            }
         }
     }
 

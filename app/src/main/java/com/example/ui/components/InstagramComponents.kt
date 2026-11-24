@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -236,6 +237,7 @@ fun InstagramPostCard(
     var expandCaption by remember(post.id) { mutableStateOf(false) }
     var isCaptionTruncated by remember(post.id, post.caption) { mutableStateOf(false) }
     var showMoreMenu by remember(post.id) { mutableStateOf(false) }
+    var showTaggedPeople by remember(post.id) { mutableStateOf(false) }
     var isVideoMuted by remember(post.id) { mutableStateOf(true) }
     var isVideoPaused by remember(post.id) { mutableStateOf(false) }
 
@@ -506,6 +508,59 @@ fun InstagramPostCard(
                 }
             }
 
+            if (post.taggedUsernames.isNotEmpty()) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showTaggedPeople,
+                    enter = fadeIn() + scaleIn(initialScale = 0.92f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.92f),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 12.dp, end = 52.dp, bottom = 52.dp)
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.78f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("post_tagged_overlay_${post.id}")
+                    ) {
+                        Text(
+                            text = post.taggedUsernames.joinToString("  ") { "@${it.removePrefix("@")}" },
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            ),
+                            color = Color.White,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = { showTaggedPeople = !showTaggedPeople },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("post_tagged_badge_${post.id}")
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Person,
+                                contentDescription = "View tagged people",
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             androidx.compose.animation.AnimatedVisibility(
                 visible = showDoubleTapHeart,
                 enter = scaleIn(
@@ -671,6 +726,22 @@ fun InstagramPostCard(
                             .testTag("post_caption_more_${post.id}")
                     )
                 }
+            }
+
+            if (post.taggedUsernames.isNotEmpty()) {
+                Text(
+                    text = "With " + post.taggedUsernames.joinToString(", ") { "@${it.removePrefix("@")}" },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = InstagramBlueDeep,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clickable { showTaggedPeople = !showTaggedPeople }
+                        .testTag("post_tagged_summary_${post.id}")
+                )
             }
 
             if (post.commentCount > 0) {

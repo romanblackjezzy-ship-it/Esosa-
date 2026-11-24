@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.UiState
+import com.example.data.model.MediaCropSpec
 import com.example.data.model.PostComment
+import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
@@ -135,6 +137,10 @@ class SocialViewModel(
         location: String,
         audioLabel: String,
         aspectRatio: Float,
+        isVideo: Boolean = false,
+        cropSpec: MediaCropSpec = MediaCropSpec(targetAspectRatio = aspectRatio),
+        filter: PostFilter = PostFilter.NORMAL,
+        taggedUsernames: List<String> = emptyList(),
         onPublished: () -> Unit
     ) {
         if (_isPublishing.value) return
@@ -150,6 +156,10 @@ class SocialViewModel(
                     location = location,
                     audioLabel = audioLabel,
                     aspectRatio = aspectRatio,
+                    isVideo = isVideo,
+                    cropSpec = cropSpec,
+                    filter = filter,
+                    taggedUsernames = taggedUsernames,
                     onProgress = { progress -> _uploadProgress.value = progress }
                 )
             }.onSuccess {
@@ -170,6 +180,9 @@ class SocialViewModel(
     fun publishStory(
         imageUri: Uri?,
         caption: String,
+        isVideo: Boolean = false,
+        cropSpec: MediaCropSpec = MediaCropSpec(targetAspectRatio = 0.75f),
+        filter: PostFilter = PostFilter.NORMAL,
         onPublished: () -> Unit
     ) {
         if (_isPublishing.value) return
@@ -181,6 +194,9 @@ class SocialViewModel(
                 repository.publishStory(
                     imageUri = imageUri,
                     caption = caption,
+                    isVideo = isVideo,
+                    cropSpec = cropSpec,
+                    filter = filter,
                     onProgress = { progress -> if (imageUri != null) _uploadProgress.value = progress }
                 )
             }.onSuccess {

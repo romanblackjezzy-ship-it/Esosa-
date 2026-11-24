@@ -141,10 +141,12 @@ class FirestoreSocialService(
         authorPhotoUrl: String,
         mediaType: SocialMediaType,
         imageUrl: String,
+        videoUrl: String = "",
         storagePath: String?,
         caption: String,
         location: String,
         audioLabel: String,
+        taggedUsernames: List<String> = emptyList(),
         aspectRatio: Float
     ) {
         val payload = hashMapOf<String, Any>(
@@ -159,6 +161,9 @@ class FirestoreSocialService(
             "commentCount" to 0,
             "createdAt" to FieldValue.serverTimestamp()
         )
+        if (videoUrl.isNotBlank()) {
+            payload["videoUrl"] = videoUrl.take(2000)
+        }
         if (authorPhotoUrl.isNotBlank()) {
             payload["authorPhotoUrl"] = authorPhotoUrl.take(2000)
         }
@@ -170,6 +175,14 @@ class FirestoreSocialService(
         }
         if (audioLabel.isNotBlank()) {
             payload["audioLabel"] = audioLabel.trim().take(120)
+        }
+        val cleanTags = taggedUsernames
+            .map { it.trim().removePrefix("@").take(32) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(20)
+        if (cleanTags.isNotEmpty()) {
+            payload["taggedUsernames"] = cleanTags
         }
         val path = "$POSTS_COLLECTION/$postId"
         try {
@@ -401,6 +414,7 @@ class FirestoreSocialService(
             caption = doc.getString("caption").orEmpty(),
             location = doc.getString("location").orEmpty(),
             audioLabel = doc.getString("audioLabel").orEmpty(),
+            taggedUsernames = parseStringList(doc.get("taggedUsernames")),
             aspectRatio = (doc.get("aspectRatio") as? Number)?.toFloat()?.coerceIn(0.5f, 2.0f) ?: 1f,
             likedByUids = parseStringList(doc.get("likedByUids")),
             commentCount = (doc.get("commentCount") as? Number)?.toInt()?.coerceAtLeast(0) ?: 0,
