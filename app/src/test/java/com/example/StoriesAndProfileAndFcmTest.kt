@@ -1,0 +1,254 @@
+package com.example
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import com.example.core.UiState
+import com.example.data.model.SocialMediaType
+import com.example.data.model.SocialPost
+import com.example.data.model.SocialStory
+import com.example.data.model.StoryReply
+import com.example.data.model.UserFollowEdge
+import com.example.data.model.UserProfile
+import com.example.notifications.FcmPushParser
+import com.example.ui.components.SocialStoryViewerDialog
+import com.example.ui.screens.InstagramProfileScreen
+import com.example.ui.theme.EsosaTheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36], qualifiers = "w411dp-h891dp-xxhdpi")
+class StoriesAndProfileAndFcmTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun `FcmPushParser parses new_message, post_like, and story_reply payloads accurately`() {
+        val messageAction = FcmPushParser.parse(
+            data = mapOf(
+                "type" to "new_message",
+                "roomId" to "room_42",
+                "roomTitle" to "Design Sync",
+                "senderName" to "Maya",
+                "messageText" to "Check out the latest mockups"
+            )
+        )
+        assertTrue(messageAction is FcmPushParser.PushAction.NewMessage)
+        messageAction as FcmPushParser.PushAction.NewMessage
+        assertEquals("room_42", messageAction.roomId)
+        assertEquals("Design Sync", messageAction.roomTitle)
+        assertEquals("Maya", messageAction.senderName)
+        assertEquals("Check out the latest mockups", messageAction.messageText)
+
+        val likeAction = FcmPushParser.parse(
+            data = mapOf(
+                "type" to "post_like",
+                "postId" to "post_99",
+                "likerUsername" to "leo.motion",
+                "postPreview" to "Golden hour shot"
+            )
+        )
+        assertTrue(likeAction is FcmPushParser.PushAction.PostLike)
+        likeAction as FcmPushParser.PushAction.PostLike
+        assertEquals("post_99", likeAction.postId)
+        assertEquals("leo.motion", likeAction.likerUsername)
+        assertEquals("Golden hour shot", likeAction.postPreview)
+
+        val replyAction = FcmPushParser.parse(
+            data = mapOf(
+                "type" to "story_reply",
+                "storyId" to "story_7",
+                "senderUsername" to "zoe",
+                "replyText" to "Love this!"
+            )
+        )
+        assertTrue(replyAction is FcmPushParser.PushAction.StoryReply)
+        replyAction as FcmPushParser.PushAction.StoryReply
+        assertEquals("story_7", replyAction.storyId)
+        assertEquals("zoe", replyAction.senderUsername)
+        assertEquals("Love this!", replyAction.replyText)
+    }
+
+    @Test
+    fun `SocialStory hasVideo reflects videoUrl and video file extensions`() {
+        val photoStory = SocialStory(
+            id = "s1",
+            authorId = "u1",
+            imageUrl = "https://firebasestorage.googleapis.com/v0/b/esosa/o/story.jpg"
+        )
+        val videoStory = SocialStory(
+            id = "s2",
+            authorId = "u1",
+            imageUrl = "https://firebasestorage.googleapis.com/v0/b/esosa/o/poster.jpg",
+            videoUrl = "https://firebasestorage.googleapis.com/v0/b/esosa/o/clip.mp4"
+        )
+        assertFalse(photoStory.hasVideo)
+        assertTrue(videoStory.hasVideo)
+    }
+
+    @Test
+    fun `story viewer shows multi-segment progress bars, video mute toggle, navigation zones, and sends replies`() {
+        val story1 = SocialStory(
+            id = "s_photo",
+            authorId = "author_maya",
+            authorUsername = "maya.studio",
+            imageUrl = "https://example.com/story_1.jpg",
+            caption = "First segment caption",
+            createdAtMillis = System.currentTimeMillis() - 60_000L
+        )
+        val story2 = SocialStory(
+            id = "s_video",
+            authorId = "author_maya",
+            authorUsername = "maya.studio",
+            imageUrl = "https://example.com/story_2_poster.jpg",
+            videoUrl = "https://example.com/story_2.mp4",
+            caption = "Second segment video",
+            createdAtMillis = System.currentTimeMillis() - 30_000L
+        )
+        val sentReplies = mutableListOf<Pair<String, String>>()
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                SocialStoryViewerDialog(
+                    stories = listOf(story1, story2),
+                    initialStoryIndex = 0,
+                    currentUid = "viewer_alex",
+                    repliesByStory = mapOf(
+                        "s_photo" to listOf(
+                            StoryReply(
+                                id = "r1",
+                                storyId = "s_photo",
+                                storyAuthorId = "author_maya",
+                                authorId = "viewer_alex",
+                                authorUsername = "alex_mercer",
+                                text = "So clean!"
+                            )
+                        )
+                    ),
+                    onSendReply = { story, text -> sentReplies += (story.id to text) },
+                    onDeleteStory = {},
+                    onDismiss = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_progress_segments").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_progress_bar_0").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_progress_bar_1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("First segment caption").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_replies_list").assertIsDisplayed()
+
+        // Tap next zone to advance to video story segment
+        composeTestRule.onNodeWithTag("story_next_zone").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Second segment video").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_video_mute_toggle").assertIsDisplayed()
+
+        // Reply on second story
+        composeTestRule.onNodeWithTag("story_reply_input").performTextInput("Awesome clip!")
+        composeTestRule.onNodeWithTag("story_reply_send_button").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf("s_video" to "Awesome clip!"), sentReplies)
+    }
+
+    @Test
+    fun `InstagramProfileScreen displays counts, edit profile, and switches between Posts, Reels, and Tagged tabs`() {
+        val myUid = "me_uid"
+        val myPhotoPost = SocialPost(
+            id = "p_photo",
+            authorId = myUid,
+            authorUsername = "alex_mercer",
+            authorDisplayName = "Alex Mercer",
+            mediaType = SocialMediaType.PHOTO,
+            imageUrl = "https://example.com/photo.jpg",
+            caption = "Studio mornings"
+        )
+        val myReelPost = SocialPost(
+            id = "p_reel",
+            authorId = myUid,
+            authorUsername = "alex_mercer",
+            authorDisplayName = "Alex Mercer",
+            mediaType = SocialMediaType.REEL,
+            imageUrl = "https://example.com/reel.jpg",
+            videoUrl = "https://example.com/reel.mp4",
+            caption = "Behind the edit"
+        )
+        val taggedByFriendPost = SocialPost(
+            id = "p_tagged",
+            authorId = "friend_uid",
+            authorUsername = "maya.studio",
+            authorDisplayName = "Maya Lin",
+            mediaType = SocialMediaType.PHOTO,
+            imageUrl = "https://example.com/tagged.jpg",
+            caption = "Photo walk",
+            taggedUsernames = listOf("alex_mercer")
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                InstagramProfileScreen(
+                    currentUid = myUid,
+                    userProfile = UserProfile(
+                        id = myUid,
+                        displayName = "Alex Mercer",
+                        username = "alex_mercer",
+                        bio = "Design & Mobile Engineer"
+                    ),
+                    postsState = UiState.Success(listOf(myPhotoPost, myReelPost, taggedByFriendPost)),
+                    savedPostIds = emptySet(),
+                    followEdges = listOf(
+                        UserFollowEdge("f1", "u_a", myUid, "alex_mercer"),
+                        UserFollowEdge("f2", "u_b", myUid, "alex_mercer"),
+                        UserFollowEdge("f3", myUid, "u_c", "maya.studio")
+                    ),
+                    onOpenCreate = {},
+                    onSelectPost = {},
+                    onOpenMessages = {},
+                    onOpenCalls = {},
+                    onOpenSettings = {},
+                    onUpdateLocalProfile = { _, _, _ -> },
+                    onUpdateProfilePhoto = { _, _ -> },
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("alex_mercer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Design & Mobile Engineer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("posts").assertIsDisplayed()
+        composeTestRule.onNodeWithText("followers").assertIsDisplayed()
+        composeTestRule.onNodeWithText("following").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_edit_button").assertIsDisplayed()
+
+        // Posts tab shows myPhotoPost & myReelPost, not taggedByFriendPost
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_photo").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_reel").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_tagged").assertDoesNotExist()
+
+        // Switch to Reels tab
+        composeTestRule.onNodeWithTag("profile_tab_reels").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_reel").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_photo").assertDoesNotExist()
+
+        // Switch to Tagged tab
+        composeTestRule.onNodeWithTag("profile_tab_tagged").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_tagged").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_grid_tile_p_reel").assertDoesNotExist()
+    }
+}

@@ -10,6 +10,7 @@ import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.example.data.remote.FirebasePhotoStorageService
 import com.example.data.remote.FirestoreSocialService
@@ -32,6 +33,9 @@ class SocialRepository(
     fun observePosts(): Flow<List<SocialPost>> = socialService.observePosts()
 
     fun observeStories(): Flow<List<SocialStory>> = socialService.observeStories()
+
+    fun observeStoryReplies(story: SocialStory): Flow<List<StoryReply>> =
+        socialService.observeStoryReplies(story, currentUserId)
 
     fun observeComments(postId: String): Flow<List<PostComment>> = socialService.observeComments(postId)
 
@@ -167,20 +171,45 @@ class SocialRepository(
         val storyId = "story_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
 
         var imageUrl: String? = null
+        var videoUrl: String? = null
         var storagePath: String? = null
         if (imageUri != null) {
             onProgress(0.08f)
             val resolvedVideo = isVideo || withContext(Dispatchers.IO) {
                 CameraPhotoHelper.isVideoUri(appContext, imageUri)
             }
-            val jpegBytes = withContext(Dispatchers.IO) {
-                if (resolvedVideo) {
+            if (resolvedVideo) {
+                val posterBytes = withContext(Dispatchers.IO) {
                     CameraPhotoHelper.extractVideoThumbnailJpegBytes(
                         context = appContext,
                         videoUri = imageUri,
                         filter = filter
                     )
-                } else {
+                }
+                onProgress(0.16f)
+                val uploadedPoster = photoStorageService.uploadSocialMedia(
+                    uid = uid,
+                    mediaId = storyId,
+                    prefix = "story_poster",
+                    jpegBytes = posterBytes,
+                    onProgress = { p -> onProgress(0.16f + p * 0.18f) }
+                )
+                imageUrl = uploadedPoster.downloadUrl
+                storagePath = uploadedPoster.storagePath
+
+                onProgress(0.35f)
+                val videoBytes = withContext(Dispatchers.IO) {
+                    CameraPhotoHelper.readVideoBytesWithSizeCap(appContext, imageUri)
+                }
+                val uploadedVideo = photoStorageService.uploadSocialVideo(
+                    uid = uid,
+                    mediaId = storyId,
+                    videoBytes = videoBytes,
+                    onProgress = { p -> onProgress(0.35f + p * 0.58f) }
+                )
+                videoUrl = uploadedVideo.downloadUrl
+            } else {
+                val jpegBytes = withContext(Dispatchers.IO) {
                     CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
                         context = appContext,
                         uri = imageUri,
@@ -188,22 +217,22 @@ class SocialRepository(
                         filter = filter
                     )
                 }
+                onProgress(0.15f)
+                val uploaded = photoStorageService.uploadSocialMedia(
+                    uid = uid,
+                    mediaId = storyId,
+                    prefix = "story",
+                    jpegBytes = jpegBytes,
+                    onProgress = onProgress
+                )
+                imageUrl = uploaded.downloadUrl
+                storagePath = uploaded.storagePath
             }
-            onProgress(0.15f)
-            val uploaded = photoStorageService.uploadSocialMedia(
-                uid = uid,
-                mediaId = storyId,
-                prefix = "story",
-                jpegBytes = jpegBytes,
-                onProgress = onProgress
-            )
-            imageUrl = uploaded.downloadUrl
-            storagePath = uploaded.storagePath
         }
 
         val cleanCaption = caption.trim()
-        require(!imageUrl.isNullOrBlank() || cleanCaption.isNotBlank()) {
-            "Add a photo or caption for your story."
+        require(!imageUrl.isNullOrBlank() || !videoUrl.isNullOrBlank() || cleanCaption.isNotBlank()) {
+            "Add a photo, video, or caption for your story."
         }
         socialService.createStory(
             storyId = storyId,
@@ -211,10 +240,28 @@ class SocialRepository(
             authorUsername = username,
             authorPhotoUrl = photoUrl,
             imageUrl = imageUrl,
+            videoUrl = videoUrl,
             storagePath = storagePath,
             caption = cleanCaption
         )
         onProgress(1f)
+    }
+
+    suspend fun sendStoryReply(story: SocialStory, text: String) {
+        val user = auth.currentUser ?: return
+        val uid = user.uid
+        val profile = profilePreferences.getProfile()
+        val username = resolveUsername(profile.username, profile.displayName, user.email, uid)
+        val photoUrl = profile.photoUrl.ifBlank { user.photoUrl?.toString().orEmpty() }
+        val replyId = "sr_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+        socialService.addStoryReply(
+            story = story,
+            replyId = replyId,
+            authorId = uid,
+            authorUsername = username,
+            authorPhotoUrl = photoUrl,
+            text = text
+        )
     }
 
     suspend fun toggleLike(post: SocialPost) {
@@ -281,6 +328,13 @@ class SocialRepository(
         socialService.deleteStory(story.id)
         runCatching {
             photoStorageService.deletePhotoIfOwned(story.storagePath)
+        }
+        if (story.videoUrl.isNotBlank() && story.authorId.isNotBlank()) {
+            runCatching {
+                photoStorageService.deletePhotoIfOwned(
+                    FirebasePhotoStorageService.socialVideoStoragePath(story.authorId, story.id)
+                )
+            }
         }
     }
 

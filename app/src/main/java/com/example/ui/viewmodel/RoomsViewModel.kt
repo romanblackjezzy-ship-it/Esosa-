@@ -133,11 +133,43 @@ class RoomsViewModel(
     val channelComments: StateFlow<Map<String, List<ChannelComment>>> = repository.observeAllChannelComments()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    private var hasInitializedRoomNotificationBaseline = false
+    private val lastNotifiedRoomMessageAt = mutableMapOf<String, Long>()
+
     val roomsState: StateFlow<UiState<List<ChatRoom>>> = repository.observeRooms()
         .onEach { rooms ->
             val currentSelected = _selectedRoomId.value
             if (currentSelected != null && rooms.none { it.id == currentSelected }) {
                 setSelectedRoom(null)
+            }
+            if (!hasInitializedRoomNotificationBaseline) {
+                hasInitializedRoomNotificationBaseline = true
+                rooms.forEach { room ->
+                    lastNotifiedRoomMessageAt[room.id] = room.lastMessageAtMillis
+                }
+            } else {
+                val notificationsEnabled = userProfile.value.notificationsEnabled
+                rooms.forEach { room ->
+                    val prevMillis = lastNotifiedRoomMessageAt[room.id] ?: 0L
+                    if (room.lastMessageAtMillis > prevMillis) {
+                        lastNotifiedRoomMessageAt[room.id] = room.lastMessageAtMillis
+                        val viewingThisRoom = _isOnMessagesScreen.value && _selectedRoomId.value == room.id
+                        if (!room.lastMessageIsMine &&
+                            room.lastMessageText.isNotBlank() &&
+                            !room.isMuted &&
+                            !viewingThisRoom &&
+                            notificationsEnabled
+                        ) {
+                            notificationManager.showIncomingMessageNotification(
+                                roomId = room.id,
+                                roomTitle = room.title,
+                                senderName = room.lastMessageSenderName.ifBlank { room.title },
+                                messageText = room.lastMessageText
+                            )
+                            showBanner("${room.lastMessageSenderName.ifBlank { room.title }}: ${room.lastMessageText.take(64)}")
+                        }
+                    }
+                }
             }
         }
         .map<List<ChatRoom>, UiState<List<ChatRoom>>> { UiState.Success(it) }

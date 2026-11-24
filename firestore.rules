@@ -35,6 +35,8 @@ service cloud.firestore {
              (!('authMethod' in data) || data.authMethod in ['google', 'phone', 'email']) &&
              (!('themeMode' in data) || data.themeMode in ['system', 'light', 'dark']) &&
              (!('language' in data) || (data.language is string && data.language.size() <= 40)) &&
+             (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 512)) &&
+             (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 10)) &&
              data.notificationsEnabled is bool &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -175,10 +177,21 @@ service cloud.firestore {
              data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
              (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
              (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
+             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^https://.*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
              data.caption is string && data.caption.size() <= 300 &&
-             (('imageUrl' in data) || data.caption.size() >= 1) &&
+             (('imageUrl' in data) || ('videoUrl' in data) || data.caption.size() >= 1) &&
              data.viewedByUids is list && data.viewedByUids.size() <= 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidStoryReply(data) {
+      return isValidId(data.storyId) &&
+             data.storyAuthorId is string && data.storyAuthorId.size() >= 1 && data.storyAuthorId.size() <= 128 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
+             (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
@@ -206,7 +219,7 @@ service cloud.firestore {
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'email', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'fcmToken', 'fcmTokens', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
                        isValidUserProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -215,7 +228,7 @@ service cloud.firestore {
                        isValidUserProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'notificationsEnabled', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'fcmToken', 'fcmTokens', 'notificationsEnabled', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
 
@@ -597,7 +610,7 @@ service cloud.firestore {
                        incoming().authorId == request.auth.uid &&
                        incoming().viewedByUids.size() == 0 &&
                        incoming().keys().hasAll(['authorId', 'authorUsername', 'caption', 'viewedByUids', 'createdAt']) &&
-                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'storagePath', 'caption', 'viewedByUids', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'viewedByUids', 'createdAt']) &&
                        isValidSocialStory(incoming());
 
       allow update: if isSignedIn() &&
@@ -608,6 +621,7 @@ service cloud.firestore {
                        incoming().caption == existing().caption &&
                        incoming().createdAt == existing().createdAt &&
                        (!('imageUrl' in existing()) ? !('imageUrl' in incoming()) : incoming().imageUrl == existing().imageUrl) &&
+                       (!('videoUrl' in existing()) ? !('videoUrl' in incoming()) : incoming().videoUrl == existing().videoUrl) &&
                        (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids']) &&
                        !(request.auth.uid in existing().viewedByUids) &&
@@ -616,6 +630,35 @@ service cloud.firestore {
                        incoming().viewedByUids.size() == existing().viewedByUids.size() + 1;
 
       allow delete: if isSignedIn() && isValidId(storyId) && existing().authorId == request.auth.uid;
+
+      match /replies/{replyId} {
+        allow get: if isSignedIn() &&
+                      isValidId(storyId) &&
+                      isValidId(replyId) &&
+                      (existing().authorId == request.auth.uid || existing().storyAuthorId == request.auth.uid);
+
+        allow list: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       (existing().authorId == request.auth.uid || existing().storyAuthorId == request.auth.uid);
+
+        allow create: if isSignedIn() &&
+                         isValidId(storyId) &&
+                         isValidId(replyId) &&
+                         exists(/databases/$(database)/documents/stories/$(storyId)) &&
+                         incoming().storyId == storyId &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().storyAuthorId == get(/databases/$(database)/documents/stories/$(storyId)).data.authorId &&
+                         incoming().keys().hasAll(['storyId', 'storyAuthorId', 'authorId', 'authorUsername', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['storyId', 'storyAuthorId', 'authorId', 'authorUsername', 'authorPhotoUrl', 'text', 'createdAt']) &&
+                         isValidStoryReply(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() &&
+                         isValidId(storyId) &&
+                         isValidId(replyId) &&
+                         (existing().authorId == request.auth.uid || existing().storyAuthorId == request.auth.uid);
+      }
     }
 
     // 7. Follow Graph

@@ -14,6 +14,8 @@ import com.example.ui.EsosaApp
 class MainActivity : ComponentActivity() {
 
     private var deepLinkRoomId by mutableStateOf<String?>(null)
+    private var deepLinkPostId by mutableStateOf<String?>(null)
+    private var deepLinkStoryId by mutableStateOf<String?>(null)
     private var deepLinkTab by mutableStateOf<String?>(null)
     private var deepLinkShowUpdatePrompt by mutableStateOf(false)
 
@@ -26,6 +28,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             EsosaApp(
                 initialRoomId = deepLinkRoomId,
+                initialPostId = deepLinkPostId,
+                initialStoryId = deepLinkStoryId,
                 initialTab = deepLinkTab,
                 initialShowUpdatePrompt = deepLinkShowUpdatePrompt
             )
@@ -39,6 +43,8 @@ class MainActivity : ComponentActivity() {
 
     private fun extractDeepLinks(intent: Intent?) {
         deepLinkRoomId = intent?.getStringExtra(EsosaNotificationManager.EXTRA_ROOM_ID)
+        deepLinkPostId = intent?.getStringExtra(EsosaNotificationManager.EXTRA_POST_ID)
+        deepLinkStoryId = intent?.getStringExtra(EsosaNotificationManager.EXTRA_STORY_ID)
         deepLinkTab = intent?.getStringExtra(EsosaNotificationManager.EXTRA_TARGET_TAB)
         deepLinkShowUpdatePrompt =
             intent?.getBooleanExtra(EsosaNotificationManager.EXTRA_SHOW_UPDATE_DIALOG, false) ?: false

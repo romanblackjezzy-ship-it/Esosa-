@@ -9,6 +9,9 @@
     <string name="notification_updates_channel_id">esosa_updates</string>
     <string name="notification_updates_channel_name">App Updates</string>
     <string name="notification_updates_channel_description">Alerts when a newer version of Esosa is available to download</string>
+    <string name="notification_social_channel_id">esosa_social</string>
+    <string name="notification_social_channel_name">Likes &amp; Stories</string>
+    <string name="notification_social_channel_description">Notifications when someone likes your post or replies to your story</string>
     <string name="update_dialog_title">New Update Available</string>
     <string name="update_download_action">Download Update</string>
     <string name="update_later_action">Later</string>

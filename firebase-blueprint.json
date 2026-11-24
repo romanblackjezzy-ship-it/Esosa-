@@ -16,7 +16,9 @@
         "authMethod": { "type": "string", "enum": ["google", "phone", "email"], "description": "Primary auth method" },
         "themeMode": { "type": "string", "enum": ["system", "light", "dark"], "description": "Preferred app theme" },
         "language": { "type": "string", "description": "Preferred UI language" },
-        "notificationsEnabled": { "type": "boolean", "description": "Whether incoming message notifications are enabled" },
+        "fcmToken": { "type": "string", "description": "Latest Firebase Cloud Messaging registration token" },
+        "fcmTokens": { "type": "array", "description": "Registered device FCM tokens for push notifications" },
+        "notificationsEnabled": { "type": "boolean", "description": "Whether incoming message and social notifications are enabled" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -217,13 +219,29 @@
         "authorId": { "type": "string", "description": "Author UID" },
         "authorUsername": { "type": "string", "description": "Author handle" },
         "authorPhotoUrl": { "type": "string", "description": "Optional author avatar URL" },
-        "imageUrl": { "type": "string", "description": "Optional HTTPS image URL for photo stories" },
+        "imageUrl": { "type": "string", "description": "Optional HTTPS image/poster URL for photo or video stories" },
+        "videoUrl": { "type": "string", "description": "Optional HTTPS video URL for short video stories" },
         "storagePath": { "type": "string", "description": "Optional Firebase Storage path" },
         "caption": { "type": "string", "description": "Story caption or status text" },
         "viewedByUids": { "type": "array", "description": "UIDs that have viewed the story" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["authorId", "authorUsername", "caption", "viewedByUids", "createdAt"]
+    },
+    "StoryReply": {
+      "title": "StoryReply",
+      "description": "Direct reply sent on an Instagram-style Story.",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string", "description": "Parent story ID" },
+        "storyAuthorId": { "type": "string", "description": "Story creator UID for access control" },
+        "authorId": { "type": "string", "description": "Reply sender UID" },
+        "authorUsername": { "type": "string", "description": "Reply sender username" },
+        "authorPhotoUrl": { "type": "string", "description": "Optional reply sender avatar URL" },
+        "text": { "type": "string", "description": "Reply message or reaction text" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["storyId", "storyAuthorId", "authorId", "authorUsername", "text", "createdAt"]
     },
     "SavedPostRef": {
       "title": "SavedPostRef",
@@ -269,6 +287,10 @@
     "/stories/{storyId}": {
       "schema": { "$ref": "#/entities/SocialStory" },
       "description": "Community stories shown in the top Home strip."
+    },
+    "/stories/{storyId}/replies/{replyId}": {
+      "schema": { "$ref": "#/entities/StoryReply" },
+      "description": "Private replies to a story readable only by the story creator and reply author."
     },
     "/follows/{followId}": {
       "schema": { "$ref": "#/entities/UserFollowRef" },

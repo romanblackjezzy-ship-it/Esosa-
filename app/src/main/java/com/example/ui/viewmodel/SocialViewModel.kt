@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.LocalProfilePreferences
 import com.example.core.UiState
 import com.example.data.model.MediaCropSpec
 import com.example.data.model.PostComment
@@ -10,8 +11,10 @@ import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.example.data.repository.SocialRepository
+import com.example.notifications.EsosaNotificationManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -25,11 +28,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SocialViewModel(
-    private val repository: SocialRepository
+    private val repository: SocialRepository,
+    private val notificationManager: EsosaNotificationManager? = null,
+    private val profilePreferences: LocalProfilePreferences? = null
 ) : ViewModel() {
 
     val currentUserId: String
@@ -38,8 +44,38 @@ class SocialViewModel(
     private val _manualPostsFlow = MutableSharedFlow<List<SocialPost>>(extraBufferCapacity = 1)
     private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
 
+    private var hasInitializedLikeBaseline = false
+    private val knownLikesByMyPost = mutableMapOf<String, Set<String>>()
+
     val postsState: StateFlow<UiState<List<SocialPost>>> =
         merge(repository.observePosts(), _manualPostsFlow)
+            .onEach { posts ->
+                val uid = currentUserId
+                val myPosts = posts.filter { it.authorId == uid }
+                if (!hasInitializedLikeBaseline) {
+                    hasInitializedLikeBaseline = true
+                    myPosts.forEach { post ->
+                        knownLikesByMyPost[post.id] = post.likedByUids.toSet()
+                    }
+                } else {
+                    val notificationsEnabled = profilePreferences?.getProfile()?.notificationsEnabled ?: true
+                    myPosts.forEach { post ->
+                        val previous = knownLikesByMyPost[post.id] ?: emptySet()
+                        val currentSet = post.likedByUids.toSet()
+                        val newLikers = currentSet - previous - uid
+                        knownLikesByMyPost[post.id] = currentSet
+                        if (newLikers.isNotEmpty() && notificationsEnabled) {
+                            val label = if (newLikers.size == 1) "Someone" else "${newLikers.size} people"
+                            notificationManager?.showPostLikeNotification(
+                                postId = post.id,
+                                likerUsername = label,
+                                postPreview = post.caption
+                            )
+                            showStatusBanner("$label liked your post")
+                        }
+                    }
+                }
+            }
             .map<List<SocialPost>, UiState<List<SocialPost>>> { UiState.Success(it) }
             .catch { err -> emit(UiState.Error(err.localizedMessage ?: "Failed to load feed")) }
             .stateIn(
@@ -76,6 +112,10 @@ class SocialViewModel(
     private val _commentsByPost = MutableStateFlow<Map<String, List<PostComment>>>(emptyMap())
     val commentsByPost: StateFlow<Map<String, List<PostComment>>> = _commentsByPost.asStateFlow()
     private val commentObserverJobs = mutableMapOf<String, Job>()
+
+    private val _repliesByStory = MutableStateFlow<Map<String, List<StoryReply>>>(emptyMap())
+    val repliesByStory: StateFlow<Map<String, List<StoryReply>>> = _repliesByStory.asStateFlow()
+    private val storyReplyObserverJobs = mutableMapOf<String, Job>()
 
     private val _isPublishing = MutableStateFlow(false)
     val isPublishing: StateFlow<Boolean> = _isPublishing.asStateFlow()
@@ -261,6 +301,32 @@ class SocialViewModel(
             }.onFailure {
                 _actionError.value = it.localizedMessage ?: "Failed to update follow status."
             }
+        }
+    }
+
+    fun observeRepliesForStory(story: SocialStory) {
+        if (story.id.isBlank() || storyReplyObserverJobs[story.id]?.isActive == true) return
+        storyReplyObserverJobs[story.id] = viewModelScope.launch {
+            repository.observeStoryReplies(story)
+                .catch { /* keep cached replies */ }
+                .collect { replies ->
+                    _repliesByStory.value = _repliesByStory.value + (story.id to replies)
+                }
+        }
+    }
+
+    fun sendStoryReply(story: SocialStory, text: String, onSent: () -> Unit = {}) {
+        val clean = text.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch {
+            runCatching { repository.sendStoryReply(story, clean) }
+                .onSuccess {
+                    showStatusBanner("Reply sent to @${story.authorUsername}")
+                    onSent()
+                }
+                .onFailure {
+                    _actionError.value = it.localizedMessage ?: "Failed to send story reply."
+                }
         }
     }
 

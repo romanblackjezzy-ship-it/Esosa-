@@ -18,6 +18,7 @@ class EsosaNotificationManager(private val context: Context) {
 
     private val appContext = context.applicationContext
     private val channelId = appContext.getString(R.string.notification_channel_id)
+    private val socialChannelId = appContext.getString(R.string.notification_social_channel_id)
     private val updatesChannelId = appContext.getString(R.string.notification_updates_channel_id)
 
     init {
@@ -37,6 +38,16 @@ class EsosaNotificationManager(private val context: Context) {
                 enableVibration(true)
             }
             manager.createNotificationChannel(messagesChannel)
+
+            val socialChannel = NotificationChannel(
+                socialChannelId,
+                appContext.getString(R.string.notification_social_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = appContext.getString(R.string.notification_social_channel_description)
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(socialChannel)
 
             val updatesChannel = NotificationChannel(
                 updatesChannelId,
@@ -94,6 +105,91 @@ class EsosaNotificationManager(private val context: Context) {
         try {
             NotificationManagerCompat.from(appContext)
                 .notify(roomId.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // Permission revoked at runtime
+        }
+    }
+
+    fun showPostLikeNotification(
+        postId: String,
+        likerUsername: String,
+        postPreview: String = ""
+    ) {
+        if (!hasNotificationPermission()) return
+
+        val intent = Intent(appContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_POST_ID, postId)
+            putExtra(EXTRA_TARGET_TAB, TAB_HOME)
+        }
+        val requestCode = ("like_$postId").hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            appContext,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val cleanHandle = likerUsername.trim().removePrefix("@").ifBlank { "Someone" }
+        val body = if (postPreview.isNotBlank()) {
+            "@$cleanHandle liked your post: \"${postPreview.take(90)}\""
+        } else {
+            "@$cleanHandle liked your post"
+        }
+
+        val notification = NotificationCompat.Builder(appContext, socialChannelId)
+            .setSmallIcon(android.R.drawable.btn_star_big_on)
+            .setContentTitle("New like on Esosa")
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(appContext)
+                .notify(requestCode, notification)
+        } catch (_: SecurityException) {
+            // Permission revoked at runtime
+        }
+    }
+
+    fun showStoryReplyNotification(
+        storyId: String,
+        senderUsername: String,
+        replyText: String
+    ) {
+        if (!hasNotificationPermission()) return
+
+        val intent = Intent(appContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_STORY_ID, storyId)
+            putExtra(EXTRA_TARGET_TAB, TAB_HOME)
+        }
+        val requestCode = ("story_reply_${storyId}_$senderUsername").hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            appContext,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val cleanHandle = senderUsername.trim().removePrefix("@").ifBlank { "Someone" }
+        val preview = replyText.trim().ifBlank { "replied to your story" }
+        val notification = NotificationCompat.Builder(appContext, socialChannelId)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle("@$cleanHandle replied to your story")
+            .setContentText(preview)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(preview))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(appContext)
+                .notify(requestCode, notification)
         } catch (_: SecurityException) {
             // Permission revoked at runtime
         }
@@ -173,9 +269,12 @@ class EsosaNotificationManager(private val context: Context) {
 
     companion object {
         const val EXTRA_ROOM_ID = "extra_room_id"
+        const val EXTRA_POST_ID = "extra_post_id"
+        const val EXTRA_STORY_ID = "extra_story_id"
         const val EXTRA_TARGET_TAB = "extra_target_tab"
         const val EXTRA_SHOW_UPDATE_DIALOG = "extra_show_update_dialog"
         const val TAB_MESSAGES = "messages"
+        const val TAB_HOME = "home"
         private const val TEST_NOTIFICATION_ID = 4002
         private const val UPDATE_NOTIFICATION_ID = 4003
     }

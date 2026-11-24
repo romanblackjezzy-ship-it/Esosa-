@@ -102,11 +102,19 @@ fun InstagramHomeScreen(
     val followingSet = remember(followEdges, currentUid) {
         followEdges.filter { it.followerId == currentUid }.map { it.targetUid }.toSet()
     }
-    val myLatestStory = remember(stories, currentUid) {
-        stories.firstOrNull { it.authorId == currentUid }
+    val myStories = remember(stories, currentUid) {
+        stories.filter { it.authorId == currentUid }
     }
-    val otherStories = remember(stories, currentUid) {
+    val myLatestStory = myStories.firstOrNull()
+    val otherCreatorsStories = remember(stories, currentUid) {
         stories.filter { it.authorId != currentUid }
+            .groupBy { it.authorId }
+            .values
+            .map { creatorList ->
+                val latest = creatorList.first()
+                val allViewed = creatorList.all { it.isViewedBy(currentUid) }
+                latest to allViewed
+            }
     }
     val storiesByAuthor = remember(stories) {
         stories.associateBy { it.authorId }
@@ -231,15 +239,36 @@ fun InstagramHomeScreen(
                                     }
                                     .testTag("your_story_chip")
                             ) {
-                                InstagramUserAvatar(
-                                    displayName = userProfile.displayName.ifBlank { "You" },
-                                    photoUrl = userProfile.photoUrl,
-                                    seedKey = currentUid,
-                                    size = 68.dp,
-                                    showStoryRing = myLatestStory != null,
-                                    isStoryViewed = false,
-                                    showAddBadge = myLatestStory == null
-                                )
+                                Box(contentAlignment = Alignment.BottomEnd) {
+                                    InstagramUserAvatar(
+                                        displayName = userProfile.displayName.ifBlank { "You" },
+                                        photoUrl = userProfile.photoUrl,
+                                        seedKey = currentUid,
+                                        size = 68.dp,
+                                        showStoryRing = myLatestStory != null,
+                                        isStoryViewed = false,
+                                        showAddBadge = myLatestStory == null
+                                    )
+                                    if (myLatestStory != null) {
+                                        Surface(
+                                            color = InstagramBlue,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clickable { onAddStoryClick() }
+                                                .testTag("your_story_add_badge")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = "+",
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.height(5.dp))
                                 Text(
                                     text = "Your story",
@@ -251,8 +280,7 @@ fun InstagramHomeScreen(
                             }
                         }
 
-                        items(otherStories, key = { it.id }) { story ->
-                            val viewed = story.isViewedBy(currentUid)
+                        items(otherCreatorsStories, key = { (story, _) -> story.authorId }) { (story, viewed) ->
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier

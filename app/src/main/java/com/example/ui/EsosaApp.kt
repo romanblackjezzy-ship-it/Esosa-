@@ -121,6 +121,7 @@ import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.SocialRepository
 import com.example.notifications.EsosaNotificationManager
+import com.example.notifications.FcmTokenRegistrar
 import com.example.ui.components.EsosaBrandLogo
 import com.example.ui.components.EsosaWordmarkBanner
 import com.example.ui.components.FlexibleUpdateFloatingBar
@@ -176,6 +177,8 @@ private enum class EsosaSecondaryRoute {
 @Composable
 fun EsosaApp(
     initialRoomId: String? = null,
+    initialPostId: String? = null,
+    initialStoryId: String? = null,
     initialTab: String? = null,
     initialShowUpdatePrompt: Boolean = false
 ) {
@@ -352,7 +355,12 @@ fun EsosaApp(
                             key = "esosa_social_${signedInUser.uid}",
                             factory = viewModelFactory {
                                 initializer {
-                                    SocialViewModel(repository = socialRepository)
+                                    val app = checkNotNull(this[APPLICATION_KEY])
+                                    SocialViewModel(
+                                        repository = socialRepository,
+                                        notificationManager = EsosaNotificationManager(app),
+                                        profilePreferences = profilePreferences
+                                    )
                                 }
                             }
                         )
@@ -375,10 +383,17 @@ fun EsosaApp(
                                 )
                                 pendingSignupMetadata = PendingSignupMetadata()
                             }
+                            FcmTokenRegistrar.syncCurrentToken(
+                                context = context.applicationContext,
+                                db = firestoreDb,
+                                uid = signedInUser.uid
+                            )
                         }
 
                         EsosaSocialShell(
                             initialRoomId = initialRoomId,
+                            initialPostId = initialPostId,
+                            initialStoryId = initialStoryId,
                             initialTab = initialTab,
                             socialViewModel = socialViewModel,
                             roomsViewModel = roomsViewModel,
@@ -447,6 +462,8 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 @Composable
 private fun EsosaSocialShell(
     initialRoomId: String?,
+    initialPostId: String?,
+    initialStoryId: String?,
     initialTab: String?,
     socialViewModel: SocialViewModel,
     roomsViewModel: RoomsViewModel,
@@ -463,7 +480,8 @@ private fun EsosaSocialShell(
 
     var activeCommentsPost by remember { mutableStateOf<SocialPost?>(null) }
     var activeDetailPost by remember { mutableStateOf<SocialPost?>(null) }
-    var activeStory by remember { mutableStateOf<SocialStory?>(null) }
+    var activeStoryAuthorId by remember { mutableStateOf<String?>(null) }
+    var activeStoryInitialId by remember { mutableStateOf<String?>(null) }
     var sharingPost by remember { mutableStateOf<SocialPost?>(null) }
 
     var hasMicPermission by remember {
@@ -548,10 +566,29 @@ private fun EsosaSocialShell(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* system dialog handled gracefully */ }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            !notificationManager.hasNotificationPermission()
+        ) {
+            val prefs = context.getSharedPreferences("esosa_fcm_prefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("asked_post_notifications", false)) {
+                prefs.edit().putBoolean("asked_post_notifications", true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     LaunchedEffect(initialRoomId, initialTab) {
         if (!initialRoomId.isNullOrBlank()) {
             secondaryRoute = EsosaSecondaryRoute.MESSAGES
             roomsViewModel.openRoom(initialRoomId)
+        } else if (initialTab == EsosaNotificationManager.TAB_HOME) {
+            secondaryRoute = null
+            selectedTab = EsosaTab.HOME
         }
     }
 
@@ -583,6 +620,7 @@ private fun EsosaSocialShell(
 
     val postsState by socialViewModel.postsState.collectAsStateWithLifecycle()
     val socialStories by socialViewModel.stories.collectAsStateWithLifecycle()
+    val repliesByStory by socialViewModel.repliesByStory.collectAsStateWithLifecycle()
     val savedPostIds by socialViewModel.savedPostIds.collectAsStateWithLifecycle()
     val followEdges by socialViewModel.followEdges.collectAsStateWithLifecycle()
     val commentsByPost by socialViewModel.commentsByPost.collectAsStateWithLifecycle()
@@ -591,6 +629,29 @@ private fun EsosaSocialShell(
     val socialActionError by socialViewModel.actionError.collectAsStateWithLifecycle()
     val isRefreshingFeed by socialViewModel.isRefreshingFeed.collectAsStateWithLifecycle()
     val socialBanner by socialViewModel.statusBanner.collectAsStateWithLifecycle()
+
+    LaunchedEffect(initialPostId, postsState) {
+        if (!initialPostId.isNullOrBlank()) {
+            val target = (postsState as? UiState.Success)?.data?.firstOrNull { it.id == initialPostId }
+            if (target != null) {
+                secondaryRoute = null
+                selectedTab = EsosaTab.HOME
+                activeDetailPost = target
+            }
+        }
+    }
+
+    LaunchedEffect(initialStoryId, socialStories) {
+        if (!initialStoryId.isNullOrBlank()) {
+            val target = socialStories.firstOrNull { it.id == initialStoryId }
+            if (target != null) {
+                secondaryRoute = null
+                selectedTab = EsosaTab.HOME
+                activeStoryAuthorId = target.authorId
+                activeStoryInitialId = target.id
+            }
+        }
+    }
 
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val isCheckingUpdates by appUpdateViewModel.isChecking.collectAsStateWithLifecycle()
@@ -941,7 +1002,9 @@ private fun EsosaSocialShell(
                                     },
                                     onOpenStory = { story ->
                                         socialViewModel.markStoryViewed(story)
-                                        activeStory = story
+                                        socialViewModel.observeRepliesForStory(story)
+                                        activeStoryAuthorId = story.authorId
+                                        activeStoryInitialId = story.id
                                     },
                                     onToggleLike = { socialViewModel.toggleLike(it) },
                                     onDoubleTapLike = { socialViewModel.likeOnly(it) },
@@ -1040,8 +1103,19 @@ private fun EsosaSocialShell(
                                     postsState = postsState,
                                     savedPostIds = savedPostIds,
                                     followEdges = followEdges,
+                                    stories = socialStories,
                                     onOpenCreate = {
                                         createFormat = CreateFormat.POST
+                                        selectedTab = EsosaTab.CREATE
+                                    },
+                                    onOpenStory = { story ->
+                                        socialViewModel.markStoryViewed(story)
+                                        socialViewModel.observeRepliesForStory(story)
+                                        activeStoryAuthorId = story.authorId
+                                        activeStoryInitialId = story.id
+                                    },
+                                    onAddStoryClick = {
+                                        createFormat = CreateFormat.STORY
                                         selectedTab = EsosaTab.CREATE
                                     },
                                     onSelectPost = { activeDetailPost = it },
@@ -1064,18 +1138,47 @@ private fun EsosaSocialShell(
             }
         }
 
-        // Story Viewer
-        val storyToView = activeStory
-        if (storyToView != null) {
-            SocialStoryViewerDialog(
-                story = storyToView,
-                currentUid = socialViewModel.currentUserId,
-                onDismiss = { activeStory = null },
-                onDeleteStory = {
-                    socialViewModel.deleteStory(storyToView)
-                    activeStory = null
-                }
-            )
+        // Story Viewer (supports creator multi-segment sequence, video, progress bars, & replies)
+        val storyAuthorId = activeStoryAuthorId
+        if (storyAuthorId != null) {
+            val authorSequence = remember(socialStories, storyAuthorId) {
+                socialStories.filter { it.authorId == storyAuthorId }.reversed()
+            }
+            if (authorSequence.isEmpty()) {
+                activeStoryAuthorId = null
+            } else {
+                val initialIndex = authorSequence
+                    .indexOfFirst { it.id == activeStoryInitialId }
+                    .let { if (it >= 0) it else 0 }
+                SocialStoryViewerDialog(
+                    stories = authorSequence,
+                    initialStoryIndex = initialIndex,
+                    currentUid = socialViewModel.currentUserId,
+                    repliesByStory = repliesByStory,
+                    onStoryChanged = { current ->
+                        socialViewModel.markStoryViewed(current)
+                        socialViewModel.observeRepliesForStory(current)
+                    },
+                    onSendReply = { targetStory, replyText ->
+                        socialViewModel.sendStoryReply(targetStory, replyText)
+                    },
+                    onDeleteStory = { targetStory ->
+                        socialViewModel.deleteStory(targetStory)
+                        if (authorSequence.size <= 1) {
+                            activeStoryAuthorId = null
+                        }
+                    },
+                    onAddAnotherStory = {
+                        activeStoryAuthorId = null
+                        createFormat = CreateFormat.STORY
+                        selectedTab = EsosaTab.CREATE
+                    },
+                    onDismiss = {
+                        activeStoryAuthorId = null
+                        activeStoryInitialId = null
+                    }
+                )
+            }
         }
 
         // Post Detail Viewer (from Explore or Profile grid)

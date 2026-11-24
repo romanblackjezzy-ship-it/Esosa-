@@ -85,6 +85,8 @@ test("User profile isolation: owner can create/update/read; another user cannot 
       avatarKey: "ocean",
       themeMode: "dark",
       language: "English",
+      fcmToken: "fcm_token_alice_1",
+      fcmTokens: ["fcm_token_alice_1"],
       updatedAt: new Date(Date.now() - 1000),
     })
   );
@@ -614,13 +616,24 @@ test("Instagram social posts, reels, likes, comments, stories, saved posts, and 
     aliceDb.collection("posts").doc("post_1").collection("comments").doc("c_1").delete()
   );
 
-  // Stories: Alice publishes story, Bob marks viewed, Charlie cannot spoof viewedByUids
+  // Stories: Alice publishes photo & video stories, Bob marks viewed, Charlie cannot spoof viewedByUids
   await assertSucceeds(
     aliceDb.collection("stories").doc("story_1").set({
       authorId: ALICE_UID,
       authorUsername: "alice_studio",
       caption: "Behind the scenes",
       imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/story_1.jpg",
+      viewedByUids: [],
+      createdAt: now,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_video_1").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      caption: "Morning coffee clip",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/story_poster.jpg",
+      videoUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/story_video_1.mp4",
       viewedByUids: [],
       createdAt: now,
     })
@@ -634,6 +647,43 @@ test("Instagram social posts, reels, likes, comments, stories, saved posts, and 
     charlieDb.collection("stories").doc("story_1").update({
       viewedByUids: [BOB_UID, ALICE_UID],
     })
+  );
+
+  // Story replies: Bob replies to Alice's story; Alice & Bob can read/query; Charlie cannot read or spoof storyAuthorId
+  await assertSucceeds(
+    bobDb.collection("stories").doc("story_1").collection("replies").doc("reply_1").set({
+      storyId: "story_1",
+      storyAuthorId: ALICE_UID,
+      authorId: BOB_UID,
+      authorUsername: "bob_creates",
+      text: "Love this shot!",
+      createdAt: now,
+    })
+  );
+  await assertFails(
+    charlieDb.collection("stories").doc("story_1").collection("replies").doc("reply_spoof").set({
+      storyId: "story_1",
+      storyAuthorId: CHARLIE_UID,
+      authorId: CHARLIE_UID,
+      authorUsername: "charlie_evil",
+      text: "Spoof",
+      createdAt: now,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_1").collection("replies")
+      .where("storyAuthorId", "==", ALICE_UID)
+      .get()
+  );
+  await assertSucceeds(
+    bobDb.collection("stories").doc("story_1").collection("replies")
+      .where("authorId", "==", BOB_UID)
+      .get()
+  );
+  await assertFails(
+    charlieDb.collection("stories").doc("story_1").collection("replies")
+      .where("storyAuthorId", "==", ALICE_UID)
+      .get()
   );
 
   // Saved posts: strictly private to owner

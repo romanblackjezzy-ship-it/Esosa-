@@ -31,12 +31,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AddBox
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GridOn
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.PersonPin
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -80,6 +82,7 @@ import com.example.data.media.CameraPhotoHelper
 import com.example.data.model.SocialFormatters
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
+import com.example.data.model.SocialStory
 import com.example.data.model.UserFollowEdge
 import com.example.data.model.UserProfile
 import com.example.ui.components.InstagramUserAvatar
@@ -94,7 +97,7 @@ import java.io.File
 private enum class ProfileGridTab {
     POSTS,
     REELS,
-    SAVED
+    TAGGED
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,12 +116,16 @@ fun InstagramProfileScreen(
     onUpdateLocalProfile: (displayName: String, username: String, bio: String) -> Unit,
     onUpdateProfilePhoto: (ByteArray, (String) -> Unit) -> Unit,
     onSignOut: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    stories: List<SocialStory> = emptyList(),
+    onOpenStory: (SocialStory) -> Unit = {},
+    onAddStoryClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var activeGridTab by remember { mutableStateOf(ProfileGridTab.POSTS) }
     var showMenuSheet by remember { mutableStateOf(false) }
+    var showSavedPostsSheet by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showAvatarChoiceSheet by remember { mutableStateOf(false) }
     var isUploadingAvatar by remember { mutableStateOf(false) }
@@ -187,15 +194,30 @@ fun InstagramProfileScreen(
         }
     }
 
+    val handleLabel = userProfile.username.ifBlank {
+        userProfile.displayName.lowercase().replace(" ", "_").ifBlank { "esosa_user" }
+    }
+    val myLatestStory = remember(stories, currentUid) {
+        stories.firstOrNull { it.authorId == currentUid }
+    }
+
     val allPosts = (postsState as? UiState.Success)?.data.orEmpty()
     val myPosts = remember(allPosts, currentUid) { allPosts.filter { it.authorId == currentUid } }
     val myReels = remember(myPosts) { myPosts.filter { it.mediaType == SocialMediaType.REEL } }
+    val taggedPosts = remember(allPosts, handleLabel) {
+        val cleanHandle = handleLabel.trim().removePrefix("@")
+        allPosts.filter { post ->
+            cleanHandle.isNotBlank() && post.taggedUsernames.any { tag ->
+                tag.trim().removePrefix("@").equals(cleanHandle, ignoreCase = true)
+            }
+        }
+    }
     val savedPosts = remember(allPosts, savedPostIds) { allPosts.filter { savedPostIds.contains(it.id) } }
 
     val displayedPosts = when (activeGridTab) {
         ProfileGridTab.POSTS -> myPosts
         ProfileGridTab.REELS -> myReels
-        ProfileGridTab.SAVED -> savedPosts
+        ProfileGridTab.TAGGED -> taggedPosts
     }
     val chunkedRows = remember(displayedPosts) { displayedPosts.chunked(3) }
 
@@ -204,10 +226,6 @@ fun InstagramProfileScreen(
     }
     val followingCount = remember(followEdges, currentUid) {
         followEdges.count { it.followerId == currentUid }
-    }
-
-    val handleLabel = userProfile.username.ifBlank {
-        userProfile.displayName.lowercase().replace(" ", "_").ifBlank { "esosa_user" }
     }
 
     Column(
@@ -291,7 +309,9 @@ fun InstagramProfileScreen(
                                 displayName = userProfile.displayName.ifBlank { handleLabel },
                                 photoUrl = userProfile.photoUrl,
                                 seedKey = currentUid,
-                                size = 86.dp
+                                size = 86.dp,
+                                showStoryRing = myLatestStory != null,
+                                isStoryViewed = false
                             )
                             Box(
                                 modifier = Modifier
@@ -391,7 +411,7 @@ fun InstagramProfileScreen(
                 }
             }
 
-            // 3-Tab Switcher: Grid | Reels | Saved
+            // 3-Tab Switcher: Posts | Reels | Tagged
             item(key = "profile_tabs") {
                 Row(
                     modifier = Modifier
@@ -413,11 +433,11 @@ fun InstagramProfileScreen(
                         modifier = Modifier.weight(1f).testTag("profile_tab_reels")
                     )
                     ProfileGridTabItem(
-                        icon = Icons.Outlined.BookmarkBorder,
-                        contentDescription = "Saved",
-                        selected = activeGridTab == ProfileGridTab.SAVED,
-                        onClick = { activeGridTab = ProfileGridTab.SAVED },
-                        modifier = Modifier.weight(1f).testTag("profile_tab_saved")
+                        icon = Icons.Outlined.PersonPin,
+                        contentDescription = "Tagged",
+                        selected = activeGridTab == ProfileGridTab.TAGGED,
+                        onClick = { activeGridTab = ProfileGridTab.TAGGED },
+                        modifier = Modifier.weight(1f).testTag("profile_tab_tagged")
                     )
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = InstagramHairline)
@@ -435,7 +455,7 @@ fun InstagramProfileScreen(
                         val (title, subtitle) = when (activeGridTab) {
                             ProfileGridTab.POSTS -> "Capture the moment" to "Photos you share will appear on your profile grid."
                             ProfileGridTab.REELS -> "No Reels yet" to "Share a vertical Reel to showcase it here."
-                            ProfileGridTab.SAVED -> "No saved posts" to "Tap the bookmark icon on any post to save it privately."
+                            ProfileGridTab.TAGGED -> "Photos and videos of you" to "When people tag @$handleLabel in posts, they'll appear here."
                         }
                         Text(
                             text = title,
@@ -449,7 +469,7 @@ fun InstagramProfileScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
-                        if (activeGridTab != ProfileGridTab.SAVED) {
+                        if (activeGridTab != ProfileGridTab.TAGGED) {
                             Spacer(Modifier.height(14.dp))
                             TextButton(onClick = onOpenCreate) {
                                 Text(
@@ -536,6 +556,15 @@ fun InstagramProfileScreen(
                     }
                 )
                 MenuSheetItem(
+                    icon = Icons.Outlined.BookmarkBorder,
+                    label = "Saved posts (${savedPosts.size})",
+                    modifier = Modifier.testTag("profile_menu_saved_posts"),
+                    onClick = {
+                        showMenuSheet = false
+                        showSavedPostsSheet = true
+                    }
+                )
+                MenuSheetItem(
                     icon = Icons.Outlined.Settings,
                     label = "Settings, Privacy & Updates",
                     onClick = {
@@ -572,6 +601,73 @@ fun InstagramProfileScreen(
         }
     }
 
+    if (showSavedPostsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSavedPostsSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .padding(bottom = 24.dp)
+                    .testTag("profile_saved_posts_sheet")
+            ) {
+                Text(
+                    text = "Saved posts",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+                if (savedPosts.isEmpty()) {
+                    Text(
+                        text = "Tap the bookmark icon on any post to save it here.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 20.dp)
+                    )
+                } else {
+                    val savedRows = savedPosts.chunked(3)
+                    LazyColumn(
+                        modifier = Modifier.height(340.dp),
+                        verticalArrangement = Arrangement.spacedBy(1.5.dp)
+                    ) {
+                        items(savedRows) { rowPosts ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                            ) {
+                                for (idx in 0 until 3) {
+                                    val savedItem = rowPosts.getOrNull(idx)
+                                    if (savedItem != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f)
+                                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                .clickable {
+                                                    showSavedPostsSheet = false
+                                                    onSelectPost(savedItem)
+                                                }
+                                        ) {
+                                            AsyncImage(
+                                                model = savedItem.imageUrl,
+                                                contentDescription = savedItem.caption.ifBlank { "Saved post" },
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (showAvatarChoiceSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAvatarChoiceSheet = false },
@@ -583,9 +679,27 @@ fun InstagramProfileScreen(
                     .padding(bottom = 20.dp)
             ) {
                 Text(
-                    text = "Update profile photo",
+                    text = if (myLatestStory != null) "Profile & Story" else "Update profile photo",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                )
+                if (myLatestStory != null) {
+                    MenuSheetItem(
+                        icon = Icons.Outlined.PlayCircle,
+                        label = "View your story",
+                        onClick = {
+                            showAvatarChoiceSheet = false
+                            onOpenStory(myLatestStory)
+                        }
+                    )
+                }
+                MenuSheetItem(
+                    icon = Icons.Outlined.AddCircleOutline,
+                    label = "Add to your story",
+                    onClick = {
+                        showAvatarChoiceSheet = false
+                        onAddStoryClick()
+                    }
                 )
                 MenuSheetItem(
                     icon = Icons.Outlined.CameraAlt,
@@ -746,6 +860,7 @@ private fun ProfileGridTabItem(
 private fun MenuSheetItem(
     icon: ImageVector,
     label: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     ListItem(
@@ -762,6 +877,6 @@ private fun MenuSheetItem(
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
             )
         },
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = modifier.clickable(onClick = onClick)
     )
 }

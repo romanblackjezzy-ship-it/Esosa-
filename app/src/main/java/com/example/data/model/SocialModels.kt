@@ -138,13 +138,32 @@ data class SocialStory(
     val authorUsername: String = "",
     val authorPhotoUrl: String = "",
     val imageUrl: String = "",
+    val videoUrl: String = "",
     val storagePath: String? = null,
     val caption: String = "",
     val viewedByUids: List<String> = emptyList(),
     val createdAtMillis: Long = 0L
 ) {
     fun isViewedBy(uid: String): Boolean = uid.isNotBlank() && (authorId == uid || viewedByUids.contains(uid))
+
+    val hasVideo: Boolean
+        get() = videoUrl.isNotBlank() ||
+            imageUrl.contains(".mp4", ignoreCase = true) ||
+            imageUrl.contains(".mov", ignoreCase = true) ||
+            imageUrl.contains(".webm", ignoreCase = true) ||
+            imageUrl.contains(".m3u8", ignoreCase = true)
 }
+
+data class StoryReply(
+    val id: String = "",
+    val storyId: String = "",
+    val storyAuthorId: String = "",
+    val authorId: String = "",
+    val authorUsername: String = "",
+    val authorPhotoUrl: String = "",
+    val text: String = "",
+    val createdAtMillis: Long = 0L
+)
 
 data class UserFollowEdge(
     val id: String = "",

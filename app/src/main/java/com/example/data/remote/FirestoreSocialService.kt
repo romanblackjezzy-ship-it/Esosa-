@@ -4,6 +4,7 @@ import com.example.data.model.PostComment
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -199,6 +200,7 @@ class FirestoreSocialService(
         authorUsername: String,
         authorPhotoUrl: String,
         imageUrl: String?,
+        videoUrl: String? = null,
         storagePath: String?,
         caption: String
     ) {
@@ -215,12 +217,74 @@ class FirestoreSocialService(
         if (!imageUrl.isNullOrBlank()) {
             payload["imageUrl"] = imageUrl.take(2000)
         }
+        if (!videoUrl.isNullOrBlank()) {
+            payload["videoUrl"] = videoUrl.take(2000)
+        }
         if (!storagePath.isNullOrBlank()) {
             payload["storagePath"] = storagePath.take(500)
         }
         val path = "$STORIES_COLLECTION/$storyId"
         try {
             db.collection(STORIES_COLLECTION).document(storyId).set(payload).await()
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.CREATE, path, auth)
+            throw e
+        }
+    }
+
+    fun observeStoryReplies(story: SocialStory, currentUid: String): Flow<List<StoryReply>> = callbackFlow {
+        if (story.id.isBlank() || currentUid.isBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val path = "$STORIES_COLLECTION/${story.id}/$REPLIES_SUBCOLLECTION"
+        val filterField = if (story.authorId == currentUid) "storyAuthorId" else "authorId"
+        val reg = db.collection(STORIES_COLLECTION)
+            .document(story.id)
+            .collection(REPLIES_SUBCOLLECTION)
+            .whereEqualTo(filterField, currentUid)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    FirestoreErrorHandler.handleFirestoreError(err, OperationType.LIST, path, auth)
+                    close(err)
+                    return@addSnapshotListener
+                }
+                val list = snap?.documents.orEmpty()
+                    .mapNotNull(::parseStoryReply)
+                    .sortedBy { it.createdAtMillis }
+                trySend(list)
+            }
+        awaitClose { reg.remove() }
+    }
+
+    suspend fun addStoryReply(
+        story: SocialStory,
+        replyId: String,
+        authorId: String,
+        authorUsername: String,
+        authorPhotoUrl: String,
+        text: String
+    ) {
+        val cleanText = text.trim().take(500)
+        if (cleanText.isBlank() || story.id.isBlank() || story.authorId.isBlank()) return
+        val path = "$STORIES_COLLECTION/${story.id}/$REPLIES_SUBCOLLECTION/$replyId"
+        val payload = hashMapOf<String, Any>(
+            "storyId" to story.id,
+            "storyAuthorId" to story.authorId,
+            "authorId" to authorId,
+            "authorUsername" to authorUsername.take(40).ifBlank { "esosa_user" },
+            "text" to cleanText,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        if (authorPhotoUrl.isNotBlank()) {
+            payload["authorPhotoUrl"] = authorPhotoUrl.take(2000)
+        }
+        try {
+            db.collection(STORIES_COLLECTION).document(story.id)
+                .collection(REPLIES_SUBCOLLECTION).document(replyId)
+                .set(payload)
+                .await()
         } catch (e: Exception) {
             FirestoreErrorHandler.handleFirestoreError(e, OperationType.CREATE, path, auth)
             throw e
@@ -441,15 +505,36 @@ class FirestoreSocialService(
     private fun parseStory(doc: DocumentSnapshot): SocialStory? {
         if (!doc.exists()) return null
         val authorId = doc.getString("authorId") ?: return null
+        val videoUrl = doc.getString("videoUrl").orEmpty()
+        val imageUrl = doc.getString("imageUrl").orEmpty().ifBlank { videoUrl }
         return SocialStory(
             id = doc.id,
             authorId = authorId,
             authorUsername = doc.getString("authorUsername").orEmpty().ifBlank { "esosa_user" },
             authorPhotoUrl = doc.getString("authorPhotoUrl").orEmpty(),
-            imageUrl = doc.getString("imageUrl").orEmpty(),
+            imageUrl = imageUrl,
+            videoUrl = videoUrl,
             storagePath = doc.getString("storagePath"),
             caption = doc.getString("caption").orEmpty(),
             viewedByUids = parseStringList(doc.get("viewedByUids")),
+            createdAtMillis = FirestoreSnapshotMappers.timestampToMillis(doc.getTimestamp("createdAt", estimate))
+        )
+    }
+
+    private fun parseStoryReply(doc: DocumentSnapshot): StoryReply? {
+        if (!doc.exists()) return null
+        val storyId = doc.getString("storyId") ?: return null
+        val storyAuthorId = doc.getString("storyAuthorId") ?: return null
+        val authorId = doc.getString("authorId") ?: return null
+        val text = doc.getString("text") ?: return null
+        return StoryReply(
+            id = doc.id,
+            storyId = storyId,
+            storyAuthorId = storyAuthorId,
+            authorId = authorId,
+            authorUsername = doc.getString("authorUsername").orEmpty().ifBlank { "esosa_user" },
+            authorPhotoUrl = doc.getString("authorPhotoUrl").orEmpty(),
+            text = text,
             createdAtMillis = FirestoreSnapshotMappers.timestampToMillis(doc.getTimestamp("createdAt", estimate))
         )
     }
@@ -476,6 +561,7 @@ class FirestoreSocialService(
         private const val POSTS_COLLECTION = "posts"
         private const val COMMENTS_SUBCOLLECTION = "comments"
         private const val STORIES_COLLECTION = "stories"
+        private const val REPLIES_SUBCOLLECTION = "replies"
         private const val USERS_COLLECTION = "users"
         private const val SAVED_POSTS_SUBCOLLECTION = "saved_posts"
         private const val FOLLOWS_COLLECTION = "follows"
