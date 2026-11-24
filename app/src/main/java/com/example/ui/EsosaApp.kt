@@ -7,14 +7,16 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.app.ActivityCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,37 +27,50 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddBox
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.outlined.Call
-import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.AddBox
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,11 +83,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -89,26 +108,46 @@ import com.example.core.UiState
 import com.example.data.local.EsosaDatabase
 import com.example.data.media.VoiceCallAudioController
 import com.example.data.model.CallType
+import com.example.data.model.CreateFormat
 import com.example.data.model.InAppInstallStage
+import com.example.data.model.SocialPost
+import com.example.data.model.SocialStory
+import com.example.data.model.UserProfile
 import com.example.data.remote.FirebasePhotoStorageService
 import com.example.data.remote.FirestoreChatSyncService
+import com.example.data.remote.FirestoreSocialService
 import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
+import com.example.data.repository.SocialRepository
 import com.example.notifications.EsosaNotificationManager
 import com.example.ui.components.EsosaBrandLogo
+import com.example.ui.components.EsosaWordmarkBanner
 import com.example.ui.components.FlexibleUpdateFloatingBar
 import com.example.ui.components.GlassUpdatePromptOverlay
+import com.example.ui.components.InstagramCommentsSheet
+import com.example.ui.components.InstagramPostDetailDialog
+import com.example.ui.components.InstagramUserAvatar
+import com.example.ui.components.SocialStoryViewerDialog
 import com.example.ui.screens.ActiveCallOverlay
 import com.example.ui.screens.AuthOnboardingScreen
 import com.example.ui.screens.CallsScreen
+import com.example.ui.screens.PendingSignupMetadata
+import com.example.ui.screens.InstagramCreateScreen
+import com.example.ui.screens.InstagramExploreScreen
+import com.example.ui.screens.InstagramHomeScreen
+import com.example.ui.screens.InstagramProfileScreen
+import com.example.ui.screens.InstagramReelsScreen
 import com.example.ui.screens.MessagesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.attemptAutoSignIn
 import com.example.ui.screens.signOutFromGoogle
 import com.example.ui.theme.EsosaTheme
+import com.example.ui.theme.InstagramBlue
+import com.example.ui.theme.InstagramHairline
 import com.example.ui.viewmodel.AppUpdateViewModel
 import com.example.ui.viewmodel.RoomsViewModel
+import com.example.ui.viewmodel.SocialViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -121,9 +160,17 @@ enum class EsosaTab(
     val unselectedIcon: ImageVector,
     val testTag: String
 ) {
-    MESSAGES("Chats", Icons.Filled.Forum, Icons.Outlined.Forum, "nav_messages"),
-    CALLS("Calls", Icons.Filled.Call, Icons.Outlined.Call, "nav_calls"),
-    SETTINGS("Settings", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings")
+    HOME("Home", Icons.Filled.Home, Icons.Outlined.Home, "nav_home"),
+    EXPLORE("Explore", Icons.Filled.Search, Icons.Outlined.Search, "nav_explore"),
+    CREATE("Create", Icons.Filled.AddBox, Icons.Outlined.AddBox, "nav_create"),
+    REELS("Reels", Icons.Filled.PlayCircle, Icons.Outlined.PlayCircle, "nav_reels"),
+    PROFILE("Profile", Icons.Filled.Person, Icons.Outlined.Person, "nav_profile")
+}
+
+private enum class EsosaSecondaryRoute {
+    MESSAGES,
+    CALLS,
+    SETTINGS
 }
 
 @Composable
@@ -144,7 +191,7 @@ fun EsosaApp(
 
     var firebaseUser by remember { mutableStateOf(Firebase.auth.currentUser) }
     var isCheckingAutoSignIn by remember { mutableStateOf(Firebase.auth.currentUser == null) }
-    var pendingOptionalPhone by remember { mutableStateOf("") }
+    var pendingSignupMetadata by remember { mutableStateOf(PendingSignupMetadata()) }
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { authState ->
@@ -246,8 +293,8 @@ fun EsosaApp(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            EsosaBrandLogo(size = 56.dp)
-                            CircularProgressIndicator()
+                            EsosaWordmarkBanner(height = 48.dp)
+                            CircularProgressIndicator(color = InstagramBlue)
                         }
                     }
                 }
@@ -255,8 +302,8 @@ fun EsosaApp(
                 signedInUser == null -> {
                     AuthOnboardingScreen(
                         existingProfile = topLevelProfile,
-                        onAuthSuccess = { optionalPhone ->
-                            pendingOptionalPhone = optionalPhone
+                        onAuthSuccess = { signupMetadata ->
+                            pendingSignupMetadata = signupMetadata
                             firebaseUser = Firebase.auth.currentUser
                         }
                     )
@@ -264,6 +311,9 @@ fun EsosaApp(
 
                 else -> {
                     key(signedInUser.uid) {
+                        val photoStorageService = remember {
+                            FirebasePhotoStorageService(Firebase.storage)
+                        }
                         val userRepository = remember(signedInUser.uid, firestoreDb) {
                             val app = context.applicationContext
                             ChatRepository(
@@ -272,7 +322,16 @@ fun EsosaApp(
                                 profilePreferences = profilePreferences,
                                 syncService = FirestoreChatSyncService(firestoreDb, Firebase.auth),
                                 auth = Firebase.auth,
-                                photoStorageService = FirebasePhotoStorageService(Firebase.storage)
+                                photoStorageService = photoStorageService
+                            )
+                        }
+                        val socialRepository = remember(signedInUser.uid, firestoreDb) {
+                            SocialRepository(
+                                appContext = context.applicationContext,
+                                socialService = FirestoreSocialService(firestoreDb, Firebase.auth),
+                                photoStorageService = photoStorageService,
+                                profilePreferences = profilePreferences,
+                                auth = Firebase.auth
                             )
                         }
 
@@ -289,26 +348,39 @@ fun EsosaApp(
                                 }
                             }
                         )
+                        val socialViewModel: SocialViewModel = viewModel(
+                            key = "esosa_social_${signedInUser.uid}",
+                            factory = viewModelFactory {
+                                initializer {
+                                    SocialViewModel(repository = socialRepository)
+                                }
+                            }
+                        )
 
                         LaunchedEffect(signedInUser.uid) {
                             userRepository.syncSignedInUser(signedInUser)
-                            val optionalPhone = pendingOptionalPhone.trim()
-                            if (optionalPhone.isNotBlank()) {
+                            val metadata = pendingSignupMetadata
+                            if (metadata.fullName.isNotBlank() || metadata.username.isNotBlank()) {
                                 val latest = profilePreferences.getProfile()
+                                val cleanName = metadata.fullName.trim().ifBlank { latest.displayName }
+                                val cleanUsername = metadata.username.trim()
+                                    .removePrefix("@")
+                                    .ifBlank { latest.username }
                                 userRepository.saveProfileSetupToFirestore(
-                                    displayName = latest.displayName,
-                                    username = latest.username,
+                                    displayName = cleanName,
+                                    username = cleanUsername,
                                     bio = latest.bio,
                                     avatarKey = latest.avatarKey,
-                                    phoneNumber = optionalPhone
+                                    phoneNumber = latest.phoneOrEmail
                                 )
-                                pendingOptionalPhone = ""
+                                pendingSignupMetadata = PendingSignupMetadata()
                             }
                         }
 
-                        EsosaChatShell(
+                        EsosaSocialShell(
                             initialRoomId = initialRoomId,
                             initialTab = initialTab,
+                            socialViewModel = socialViewModel,
                             roomsViewModel = roomsViewModel,
                             appUpdateViewModel = appUpdateViewModel,
                             onSignOut = {
@@ -371,10 +443,12 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EsosaChatShell(
+private fun EsosaSocialShell(
     initialRoomId: String?,
     initialTab: String?,
+    socialViewModel: SocialViewModel,
     roomsViewModel: RoomsViewModel,
     appUpdateViewModel: AppUpdateViewModel,
     onSignOut: () -> Unit
@@ -383,9 +457,14 @@ private fun EsosaChatShell(
     val lifecycleOwner = LocalLifecycleOwner.current
     val notificationManager = remember(context) { EsosaNotificationManager(context) }
 
-    var selectedTab by rememberSaveable {
-        mutableStateOf(EsosaTab.MESSAGES)
-    }
+    var selectedTab by rememberSaveable { mutableStateOf(EsosaTab.HOME) }
+    var createFormat by rememberSaveable { mutableStateOf(CreateFormat.POST) }
+    var secondaryRoute by rememberSaveable { mutableStateOf<EsosaSecondaryRoute?>(null) }
+
+    var activeCommentsPost by remember { mutableStateOf<SocialPost?>(null) }
+    var activeDetailPost by remember { mutableStateOf<SocialPost?>(null) }
+    var activeStory by remember { mutableStateOf<SocialStory?>(null) }
+    var sharingPost by remember { mutableStateOf<SocialPost?>(null) }
 
     var hasMicPermission by remember {
         mutableStateOf(VoiceCallAudioController.hasMicrophonePermission(context))
@@ -426,9 +505,7 @@ private fun EsosaChatShell(
             pendingCallRequest = null
             showMicRationaleDialog = false
             micPermanentlyDenied = false
-            if (pending != null) {
-                executePendingCall(pending, granted = true)
-            }
+            if (pending != null) executePendingCall(pending, granted = true)
         } else {
             val activity = context.findActivity()
             val canShowRationale = activity != null &&
@@ -463,9 +540,7 @@ private fun EsosaChatShell(
                     micPermanentlyDenied = false
                     val pending = pendingCallRequest
                     pendingCallRequest = null
-                    if (pending != null) {
-                        executePendingCall(pending, granted = true)
-                    }
+                    if (pending != null) executePendingCall(pending, granted = true)
                 }
             }
         }
@@ -475,18 +550,18 @@ private fun EsosaChatShell(
 
     LaunchedEffect(initialRoomId, initialTab) {
         if (!initialRoomId.isNullOrBlank()) {
-            selectedTab = EsosaTab.MESSAGES
+            secondaryRoute = EsosaSecondaryRoute.MESSAGES
             roomsViewModel.openRoom(initialRoomId)
         }
     }
 
     val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
     val activeSessions by roomsViewModel.activeSessions.collectAsStateWithLifecycle()
-    val stories by roomsViewModel.stories.collectAsStateWithLifecycle()
+    val roomStories by roomsViewModel.stories.collectAsStateWithLifecycle()
     val callLogs by roomsViewModel.callLogs.collectAsStateWithLifecycle()
     val activeCallState by roomsViewModel.activeCallState.collectAsStateWithLifecycle()
     val channelComments by roomsViewModel.channelComments.collectAsStateWithLifecycle()
-    val inAppBanner by roomsViewModel.inAppBanner.collectAsStateWithLifecycle()
+    val roomBanner by roomsViewModel.inAppBanner.collectAsStateWithLifecycle()
 
     val roomsState by roomsViewModel.roomsState.collectAsStateWithLifecycle()
     val selectedRoomId by roomsViewModel.selectedRoomId.collectAsStateWithLifecycle()
@@ -506,6 +581,16 @@ private fun EsosaChatShell(
     val replyingToMessage by roomsViewModel.replyingToMessage.collectAsStateWithLifecycle()
     val editingMessage by roomsViewModel.editingMessage.collectAsStateWithLifecycle()
 
+    val postsState by socialViewModel.postsState.collectAsStateWithLifecycle()
+    val socialStories by socialViewModel.stories.collectAsStateWithLifecycle()
+    val savedPostIds by socialViewModel.savedPostIds.collectAsStateWithLifecycle()
+    val followEdges by socialViewModel.followEdges.collectAsStateWithLifecycle()
+    val commentsByPost by socialViewModel.commentsByPost.collectAsStateWithLifecycle()
+    val isPublishingSocial by socialViewModel.isPublishing.collectAsStateWithLifecycle()
+    val socialUploadProgress by socialViewModel.uploadProgress.collectAsStateWithLifecycle()
+    val socialActionError by socialViewModel.actionError.collectAsStateWithLifecycle()
+    val socialBanner by socialViewModel.statusBanner.collectAsStateWithLifecycle()
+
     val availableUpdate by appUpdateViewModel.availableUpdate.collectAsStateWithLifecycle()
     val isCheckingUpdates by appUpdateViewModel.isChecking.collectAsStateWithLifecycle()
     val autoUpdateCheckEnabled by appUpdateViewModel.autoCheckEnabled.collectAsStateWithLifecycle()
@@ -517,10 +602,28 @@ private fun EsosaChatShell(
 
     val allRooms = (roomsState as? UiState.Success)?.data.orEmpty()
     val blockedRooms = remember(allRooms) { allRooms.filter { it.isBlocked } }
+    val unreadDmCount = remember(allRooms) { allRooms.sumOf { it.unreadCount } }
 
-    LaunchedEffect(selectedTab) {
-        roomsViewModel.setOnMessagesScreen(selectedTab == EsosaTab.MESSAGES)
+    LaunchedEffect(secondaryRoute) {
+        roomsViewModel.setOnMessagesScreen(secondaryRoute == EsosaSecondaryRoute.MESSAGES)
     }
+
+    if (secondaryRoute != null) {
+        BackHandler {
+            if (secondaryRoute == EsosaSecondaryRoute.MESSAGES && selectedRoomId != null) {
+                roomsViewModel.openRoom(null)
+            } else {
+                secondaryRoute = null
+            }
+        }
+    }
+
+    val openCommentsSheet: (SocialPost) -> Unit = { post ->
+        socialViewModel.observeCommentsForPost(post.id)
+        activeCommentsPost = post
+    }
+
+    val combinedBanner = socialBanner ?: roomBanner
 
     Box(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -529,32 +632,19 @@ private fun EsosaChatShell(
             Scaffold(
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 bottomBar = {
-                    if (!useRail && !(selectedTab == EsosaTab.MESSAGES && selectedRoomId != null)) {
-                        NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            windowInsets = WindowInsets.navigationBars
-                        ) {
-                            EsosaTab.entries.forEach { tab ->
-                                val isSelected = selectedTab == tab
-                                NavigationBarItem(
-                                    selected = isSelected,
-                                    onClick = { selectedTab = tab },
-                                    icon = {
-                                        Icon(
-                                            imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = tab.label
-                                        )
-                                    },
-                                    label = { Text(tab.label) },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = MaterialTheme.colorScheme.primary,
-                                        selectedTextColor = MaterialTheme.colorScheme.primary,
-                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                                    ),
-                                    modifier = Modifier.testTag(tab.testTag)
-                                )
+                    if (!useRail && secondaryRoute == null && selectedTab != EsosaTab.CREATE) {
+                        EsosaInstagramBottomBar(
+                            selectedTab = selectedTab,
+                            isDarkBar = selectedTab == EsosaTab.REELS,
+                            userProfile = userProfile,
+                            currentUid = socialViewModel.currentUserId,
+                            onSelectTab = { tab ->
+                                if (tab == EsosaTab.CREATE) {
+                                    createFormat = CreateFormat.POST
+                                }
+                                selectedTab = tab
                             }
-                        }
+                        )
                     }
                 }
             ) { innerPadding ->
@@ -573,9 +663,9 @@ private fun EsosaChatShell(
                         installStage !is InAppInstallStage.Downloading &&
                         installStage !is InAppInstallStage.DownloadedReadyToInstall &&
                         installStage !is InAppInstallStage.Installing
-                    if (showPromptStrip && bannerUpdate != null) {
+                    if (showPromptStrip && bannerUpdate != null && selectedTab != EsosaTab.REELS) {
                         Surface(
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { appUpdateViewModel.openUpdateDialog() }
@@ -592,27 +682,27 @@ private fun EsosaChatShell(
                                     Icon(
                                         imageVector = Icons.Filled.SystemUpdate,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Update v${bannerUpdate.versionName} available (${bannerUpdate.sourceLabel})",
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
                                 Text(
                                     text = "View",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = InstagramBlue
                                 )
                             }
                         }
                     }
 
                     Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        if (useRail) {
+                        if (useRail && secondaryRoute == null) {
                             NavigationRail(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 header = {
@@ -623,7 +713,10 @@ private fun EsosaChatShell(
                                     val isSelected = selectedTab == tab
                                     NavigationRailItem(
                                         selected = isSelected,
-                                        onClick = { selectedTab = tab },
+                                        onClick = {
+                                            if (tab == EsosaTab.CREATE) createFormat = CreateFormat.POST
+                                            selectedTab = tab
+                                        },
                                         icon = {
                                             Icon(
                                                 imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
@@ -637,182 +730,450 @@ private fun EsosaChatShell(
                             }
                         }
 
-                        when (selectedTab) {
-                            EsosaTab.MESSAGES -> MessagesScreen(
-                                currentUserId = roomsViewModel.currentUserId,
-                                roomsState = roomsState,
-                                selectedRoomId = selectedRoomId,
-                                activeRoom = activeRoom,
-                                activeMessagesState = activeMessagesState,
-                                userProfile = userProfile,
-                                stories = stories,
-                                typingUsers = roomTypingUsers,
-                                roomTypingMap = roomTypingMap,
-                                searchQuery = roomSearchQuery,
-                                matchingMessages = matchingMessages,
-                                isSearchingMessages = isSearchingMessages,
-                                highlightedMessageId = highlightedMessageId,
-                                actionError = roomActionError,
-                                isBusy = isRoomBusy,
-                                isSendingMessage = isSendingMessage,
-                                photoUploadProgress = photoUploadProgress,
-                                photoUploadPreviewUri = photoUploadPreviewUri,
-                                replyingToMessage = replyingToMessage,
-                                editingMessage = editingMessage,
-                                channelCommentsMap = channelComments,
-                                onOpenRoom = { roomsViewModel.openRoom(it) },
-                                onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
-                                onOpenSearchResult = { roomId, msgId ->
-                                    roomsViewModel.openSearchResult(roomId, msgId)
-                                },
-                                onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
-                                onCreateRoom = { title, topic, kind ->
-                                    roomsViewModel.createRoom(title, topic, kind)
-                                },
-                                onJoinRoomByCode = { code ->
-                                    roomsViewModel.joinRoomByCode(code)
-                                },
-                                onTogglePinRoom = { roomsViewModel.togglePinRoom(it) },
-                                onToggleArchiveRoom = { roomsViewModel.toggleArchiveRoom(it) },
-                                onToggleMuteRoom = { roomsViewModel.toggleMuteRoom(it) },
-                                onToggleBlockRoom = { rId, blocked -> roomsViewModel.setRoomBlocked(rId, blocked) },
-                                onReportRoom = { room -> roomsViewModel.showBanner("Reported ${room.title}") },
-                                onToggleChannelSubscribe = { roomsViewModel.toggleChannelSubscription(it) },
-                                onAddGroupMember = { rId, name -> roomsViewModel.addGroupMember(rId, name) },
-                                onRemoveGroupMember = { rId, name -> roomsViewModel.removeGroupMember(rId, name) },
-                                onToggleGroupAdmin = { rId, name -> roomsViewModel.toggleGroupAdmin(rId, name) },
-                                onUpdateGroupDescription = { rId, desc -> roomsViewModel.updateGroupDescription(rId, desc) },
-                                onSetDisappearingTimer = { rId, sec -> roomsViewModel.setRoomDisappearingTimer(rId, sec) },
-                                onSetRoomWallpaper = { rId, wpId -> roomsViewModel.setRoomWallpaper(rId, wpId) },
-                                onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
-                                onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
-                                onScheduleMessage = { room, text, millis ->
-                                    roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)
-                                },
-                                onSendVoiceNote = { room, sec -> roomsViewModel.sendVoiceNote(room, sec) },
-                                onSendStickerOrGif = { room, text, isGif, lbl ->
-                                    roomsViewModel.sendStickerOrGif(room, text, isGif, lbl)
-                                },
-                                onSendDocumentAttachment = { room, uri ->
-                                    roomsViewModel.sendDocumentAttachment(room, uri)
-                                },
-                                onSendCapturedPhoto = { room, uri, caption, cleanup ->
-                                    roomsViewModel.sendPhotoMessage(
-                                        room = room,
-                                        photoUri = uri,
-                                        caption = caption,
-                                        onCleanup = cleanup
+                        when (secondaryRoute) {
+                            EsosaSecondaryRoute.MESSAGES -> Column(modifier = Modifier.weight(1f)) {
+                                if (selectedRoomId == null) {
+                                    SecondaryOverlayHeader(
+                                        title = "Messages",
+                                        onBack = { secondaryRoute = null }
                                     )
-                                },
-                                onReplyMessage = { roomsViewModel.startReply(it) },
-                                onEditMessage = { roomsViewModel.startEdit(it) },
-                                onCancelComposerMode = { roomsViewModel.cancelComposerMode() },
-                                onForwardMessage = { msg, target -> roomsViewModel.forwardMessage(msg, target) },
-                                onPinMessage = { rId, msg -> roomsViewModel.pinMessageInRoom(rId, msg) },
-                                onAddChannelComment = { rId, pId, txt ->
-                                    roomsViewModel.addChannelComment(rId, pId, txt)
-                                },
-                                onStartCall = { room, callType ->
-                                    requestMicAndExecute(
-                                        PendingVoiceCallRequest.Outgoing(
-                                            peerRoomId = room.id,
-                                            peerName = room.title,
-                                            avatarKey = room.avatarKey,
-                                            callType = callType
+                                }
+                                MessagesScreen(
+                                    currentUserId = roomsViewModel.currentUserId,
+                                    roomsState = roomsState,
+                                    selectedRoomId = selectedRoomId,
+                                    activeRoom = activeRoom,
+                                    activeMessagesState = activeMessagesState,
+                                    userProfile = userProfile,
+                                    stories = roomStories,
+                                    typingUsers = roomTypingUsers,
+                                    roomTypingMap = roomTypingMap,
+                                    searchQuery = roomSearchQuery,
+                                    matchingMessages = matchingMessages,
+                                    isSearchingMessages = isSearchingMessages,
+                                    highlightedMessageId = highlightedMessageId,
+                                    actionError = roomActionError,
+                                    isBusy = isRoomBusy,
+                                    isSendingMessage = isSendingMessage,
+                                    photoUploadProgress = photoUploadProgress,
+                                    photoUploadPreviewUri = photoUploadPreviewUri,
+                                    replyingToMessage = replyingToMessage,
+                                    editingMessage = editingMessage,
+                                    channelCommentsMap = channelComments,
+                                    onOpenRoom = { roomsViewModel.openRoom(it) },
+                                    onSearchQueryChanged = { roomsViewModel.onSearchQueryChanged(it) },
+                                    onOpenSearchResult = { roomId, msgId ->
+                                        roomsViewModel.openSearchResult(roomId, msgId)
+                                    },
+                                    onClearHighlight = { roomsViewModel.clearHighlightedMessage() },
+                                    onCreateRoom = { title, topic, kind ->
+                                        roomsViewModel.createRoom(title, topic, kind)
+                                    },
+                                    onJoinRoomByCode = { code -> roomsViewModel.joinRoomByCode(code) },
+                                    onTogglePinRoom = { roomsViewModel.togglePinRoom(it) },
+                                    onToggleArchiveRoom = { roomsViewModel.toggleArchiveRoom(it) },
+                                    onToggleMuteRoom = { roomsViewModel.toggleMuteRoom(it) },
+                                    onToggleBlockRoom = { rId, blocked -> roomsViewModel.setRoomBlocked(rId, blocked) },
+                                    onReportRoom = { room -> roomsViewModel.showBanner("Reported ${room.title}") },
+                                    onToggleChannelSubscribe = { roomsViewModel.toggleChannelSubscription(it) },
+                                    onAddGroupMember = { rId, name -> roomsViewModel.addGroupMember(rId, name) },
+                                    onRemoveGroupMember = { rId, name -> roomsViewModel.removeGroupMember(rId, name) },
+                                    onToggleGroupAdmin = { rId, name -> roomsViewModel.toggleGroupAdmin(rId, name) },
+                                    onUpdateGroupDescription = { rId, desc -> roomsViewModel.updateGroupDescription(rId, desc) },
+                                    onSetDisappearingTimer = { rId, sec -> roomsViewModel.setRoomDisappearingTimer(rId, sec) },
+                                    onSetRoomWallpaper = { rId, wpId -> roomsViewModel.setRoomWallpaper(rId, wpId) },
+                                    onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
+                                    onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
+                                    onScheduleMessage = { room, text, millis ->
+                                        roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)
+                                    },
+                                    onSendVoiceNote = { room, sec -> roomsViewModel.sendVoiceNote(room, sec) },
+                                    onSendStickerOrGif = { room, text, isGif, lbl ->
+                                        roomsViewModel.sendStickerOrGif(room, text, isGif, lbl)
+                                    },
+                                    onSendDocumentAttachment = { room, uri ->
+                                        roomsViewModel.sendDocumentAttachment(room, uri)
+                                    },
+                                    onSendCapturedPhoto = { room, uri, caption, cleanup ->
+                                        roomsViewModel.sendPhotoMessage(
+                                            room = room,
+                                            photoUri = uri,
+                                            caption = caption,
+                                            onCleanup = cleanup
                                         )
-                                    )
-                                },
-                                onOpenStory = { story -> roomsViewModel.markStoryViewed(story.id) },
-                                onPostStory = { text -> roomsViewModel.postMyStory(text) },
-                                onReportError = { roomsViewModel.reportActionError(it) },
-                                onToggleReaction = { roomId, msgId, emoji ->
-                                    roomsViewModel.toggleReaction(roomId, msgId, emoji)
-                                },
-                                onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
-                                onDeleteRoomMessage = { rId, msg ->
-                                    roomsViewModel.deleteMessage(rId, msg.id, msg.storagePath)
-                                },
-                                onDeleteRoom = { room -> roomsViewModel.deleteRoom(room) },
-                                onClearError = { roomsViewModel.clearActionError() },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            EsosaTab.CALLS -> CallsScreen(
-                                callLogs = callLogs,
-                                rooms = allRooms,
-                                hasMicrophonePermission = hasMicPermission,
-                                onRequestMicPermission = {
-                                    requestMicAndExecute(PendingVoiceCallRequest.EnableMicOnly)
-                                },
-                                onStartCall = { peerId, peerName, avatarKey, callType ->
-                                    requestMicAndExecute(
-                                        PendingVoiceCallRequest.Outgoing(
-                                            peerRoomId = peerId,
-                                            peerName = peerName,
-                                            avatarKey = avatarKey,
-                                            callType = callType
+                                    },
+                                    onReplyMessage = { roomsViewModel.startReply(it) },
+                                    onEditMessage = { roomsViewModel.startEdit(it) },
+                                    onCancelComposerMode = { roomsViewModel.cancelComposerMode() },
+                                    onForwardMessage = { msg, target -> roomsViewModel.forwardMessage(msg, target) },
+                                    onPinMessage = { rId, msg -> roomsViewModel.pinMessageInRoom(rId, msg) },
+                                    onAddChannelComment = { rId, pId, txt ->
+                                        roomsViewModel.addChannelComment(rId, pId, txt)
+                                    },
+                                    onStartCall = { room, callType ->
+                                        requestMicAndExecute(
+                                            PendingVoiceCallRequest.Outgoing(
+                                                peerRoomId = room.id,
+                                                peerName = room.title,
+                                                avatarKey = room.avatarKey,
+                                                callType = callType
+                                            )
                                         )
-                                    )
-                                },
-                                onStartVoiceCallByEmail = { email ->
-                                    requestMicAndExecute(PendingVoiceCallRequest.OutgoingEmail(email))
-                                },
-                                onSimulateIncomingCall = {
-                                    roomsViewModel.simulateIncomingCall(hasMicPermission = hasMicPermission)
-                                },
-                                onDeleteCallLog = { roomsViewModel.deleteCallLog(it) },
-                                modifier = Modifier.weight(1f)
-                            )
+                                    },
+                                    onOpenStory = { story -> roomsViewModel.markStoryViewed(story.id) },
+                                    onPostStory = { text -> roomsViewModel.postMyStory(text) },
+                                    onReportError = { roomsViewModel.reportActionError(it) },
+                                    onToggleReaction = { roomId, msgId, emoji ->
+                                        roomsViewModel.toggleReaction(roomId, msgId, emoji)
+                                    },
+                                    onDeleteMessage = { rId, mId -> roomsViewModel.deleteMessage(rId, mId) },
+                                    onDeleteRoomMessage = { rId, msg ->
+                                        roomsViewModel.deleteMessage(rId, msg.id, msg.storagePath)
+                                    },
+                                    onDeleteRoom = { room -> roomsViewModel.deleteRoom(room) },
+                                    onClearError = { roomsViewModel.clearActionError() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
 
-                            EsosaTab.SETTINGS -> SettingsScreen(
-                                userProfile = userProfile,
-                                notificationManager = notificationManager,
-                                availableUpdate = availableUpdate,
-                                updateStatusSummary = updateStatusSummary,
-                                isCheckingUpdates = isCheckingUpdates,
-                                autoUpdateCheckEnabled = autoUpdateCheckEnabled,
-                                githubUpdateRepo = githubUpdateRepo,
-                                remoteManifestUrl = remoteManifestUrl,
-                                installStage = installStage,
-                                updateError = updateError,
-                                isPlayStoreDistribution = appUpdateViewModel.isPlayStoreDistribution,
-                                activeSessions = activeSessions,
-                                blockedRooms = blockedRooms,
-                                onUpdateLocalProfile = { name, username, bio ->
-                                    roomsViewModel.updateLocalProfile(name, username, bio)
-                                },
-                                onToggleNotifications = { roomsViewModel.setNotificationsEnabled(it) },
-                                onSendTestNotification = { roomsViewModel.sendTestNotification() },
-                                onUpdateThemeMode = { roomsViewModel.updateThemeMode(it) },
-                                onUpdateWallpaper = { roomsViewModel.updateWallpaper(it) },
-                                onUpdateLanguage = { roomsViewModel.updateLanguage(it) },
-                                onSetTwoStepPin = { en, pin -> roomsViewModel.setTwoStepPin(en, pin) },
-                                onToggleContactSync = { roomsViewModel.setContactSyncEnabled(it) },
-                                onToggleReadReceipts = { roomsViewModel.setReadReceiptsEnabled(it) },
-                                onUpdateLastSeenVisibility = { roomsViewModel.setLastSeenVisibility(it) },
-                                onUpdateDefaultDisappearSeconds = { roomsViewModel.setDefaultDisappearSeconds(it) },
-                                onTerminateSession = { roomsViewModel.terminateSession(it) },
-                                onTerminateAllOtherSessions = { roomsViewModel.terminateAllOtherSessions() },
-                                onUnblockRoom = { roomsViewModel.setRoomBlocked(it, false) },
-                                onLogout = onSignOut,
-                                onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
-                                onSaveGithubRepo = { repo -> appUpdateViewModel.saveGithubRepository(repo) },
-                                onSaveRemoteManifestUrl = { url -> appUpdateViewModel.saveRemoteManifestUrl(url) },
-                                onCheckForUpdatesNow = { appUpdateViewModel.checkForUpdatesNow() },
-                                onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
-                                onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
-                                onUpdateProfilePhoto = { bytes, onDone -> roomsViewModel.updateProfilePhoto(bytes, onDone) },
-                                modifier = Modifier.weight(1f)
-                            )
+                            EsosaSecondaryRoute.CALLS -> Column(modifier = Modifier.weight(1f)) {
+                                SecondaryOverlayHeader(
+                                    title = "Calls",
+                                    onBack = { secondaryRoute = null }
+                                )
+                                CallsScreen(
+                                    callLogs = callLogs,
+                                    rooms = allRooms,
+                                    hasMicrophonePermission = hasMicPermission,
+                                    onRequestMicPermission = {
+                                        requestMicAndExecute(PendingVoiceCallRequest.EnableMicOnly)
+                                    },
+                                    onStartCall = { peerId, peerName, avatarKey, callType ->
+                                        requestMicAndExecute(
+                                            PendingVoiceCallRequest.Outgoing(
+                                                peerRoomId = peerId,
+                                                peerName = peerName,
+                                                avatarKey = avatarKey,
+                                                callType = callType
+                                            )
+                                        )
+                                    },
+                                    onStartVoiceCallByEmail = { email ->
+                                        requestMicAndExecute(PendingVoiceCallRequest.OutgoingEmail(email))
+                                    },
+                                    onSimulateIncomingCall = {
+                                        roomsViewModel.simulateIncomingCall(hasMicPermission = hasMicPermission)
+                                    },
+                                    onDeleteCallLog = { roomsViewModel.deleteCallLog(it) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            EsosaSecondaryRoute.SETTINGS -> Column(modifier = Modifier.weight(1f)) {
+                                SecondaryOverlayHeader(
+                                    title = "Settings & Privacy",
+                                    onBack = { secondaryRoute = null }
+                                )
+                                SettingsScreen(
+                                    userProfile = userProfile,
+                                    notificationManager = notificationManager,
+                                    availableUpdate = availableUpdate,
+                                    updateStatusSummary = updateStatusSummary,
+                                    isCheckingUpdates = isCheckingUpdates,
+                                    autoUpdateCheckEnabled = autoUpdateCheckEnabled,
+                                    githubUpdateRepo = githubUpdateRepo,
+                                    remoteManifestUrl = remoteManifestUrl,
+                                    installStage = installStage,
+                                    updateError = updateError,
+                                    isPlayStoreDistribution = appUpdateViewModel.isPlayStoreDistribution,
+                                    activeSessions = activeSessions,
+                                    blockedRooms = blockedRooms,
+                                    onUpdateLocalProfile = { name, username, bio ->
+                                        roomsViewModel.updateLocalProfile(name, username, bio)
+                                    },
+                                    onToggleNotifications = { roomsViewModel.setNotificationsEnabled(it) },
+                                    onSendTestNotification = { roomsViewModel.sendTestNotification() },
+                                    onUpdateThemeMode = { roomsViewModel.updateThemeMode(it) },
+                                    onUpdateWallpaper = { roomsViewModel.updateWallpaper(it) },
+                                    onUpdateLanguage = { roomsViewModel.updateLanguage(it) },
+                                    onSetTwoStepPin = { en, pin -> roomsViewModel.setTwoStepPin(en, pin) },
+                                    onToggleContactSync = { roomsViewModel.setContactSyncEnabled(it) },
+                                    onToggleReadReceipts = { roomsViewModel.setReadReceiptsEnabled(it) },
+                                    onUpdateLastSeenVisibility = { roomsViewModel.setLastSeenVisibility(it) },
+                                    onUpdateDefaultDisappearSeconds = { roomsViewModel.setDefaultDisappearSeconds(it) },
+                                    onTerminateSession = { roomsViewModel.terminateSession(it) },
+                                    onTerminateAllOtherSessions = { roomsViewModel.terminateAllOtherSessions() },
+                                    onUnblockRoom = { roomsViewModel.setRoomBlocked(it, false) },
+                                    onLogout = onSignOut,
+                                    onToggleAutoUpdateCheck = { appUpdateViewModel.setAutoCheckEnabled(it) },
+                                    onSaveGithubRepo = { repo -> appUpdateViewModel.saveGithubRepository(repo) },
+                                    onSaveRemoteManifestUrl = { url -> appUpdateViewModel.saveRemoteManifestUrl(url) },
+                                    onCheckForUpdatesNow = { appUpdateViewModel.checkForUpdatesNow() },
+                                    onOpenUpdateDialog = { appUpdateViewModel.openUpdateDialog() },
+                                    onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
+                                    onUpdateProfilePhoto = { bytes, onDone ->
+                                        roomsViewModel.updateProfilePhoto(bytes, onDone)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            null -> when (selectedTab) {
+                                EsosaTab.HOME -> InstagramHomeScreen(
+                                    currentUid = socialViewModel.currentUserId,
+                                    userProfile = userProfile,
+                                    postsState = postsState,
+                                    stories = socialStories,
+                                    savedPostIds = savedPostIds,
+                                    followEdges = followEdges,
+                                    unreadDmCount = unreadDmCount,
+                                    onOpenDirectMessages = { secondaryRoute = EsosaSecondaryRoute.MESSAGES },
+                                    onAddStoryClick = {
+                                        createFormat = CreateFormat.STORY
+                                        selectedTab = EsosaTab.CREATE
+                                    },
+                                    onOpenCreatePost = {
+                                        createFormat = CreateFormat.POST
+                                        selectedTab = EsosaTab.CREATE
+                                    },
+                                    onOpenStory = { story ->
+                                        socialViewModel.markStoryViewed(story)
+                                        activeStory = story
+                                    },
+                                    onToggleLike = { socialViewModel.toggleLike(it) },
+                                    onDoubleTapLike = { socialViewModel.likeOnly(it) },
+                                    onOpenComments = openCommentsSheet,
+                                    onToggleSave = { socialViewModel.toggleSave(it.id) },
+                                    onToggleFollow = { uid, username -> socialViewModel.toggleFollow(uid, username) },
+                                    onShareToDm = { sharingPost = it },
+                                    onDeletePost = { socialViewModel.deletePost(it) },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                EsosaTab.EXPLORE -> InstagramExploreScreen(
+                                    currentUid = socialViewModel.currentUserId,
+                                    postsState = postsState,
+                                    followEdges = followEdges,
+                                    onSelectPost = { activeDetailPost = it },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                EsosaTab.CREATE -> InstagramCreateScreen(
+                                    initialFormat = createFormat,
+                                    isPublishing = isPublishingSocial,
+                                    uploadProgress = socialUploadProgress,
+                                    actionError = socialActionError,
+                                    onPublishPostOrReel = { uri, type, caption, location, audio, ratio ->
+                                        socialViewModel.publishPostOrReel(
+                                            imageUri = uri,
+                                            mediaType = type,
+                                            caption = caption,
+                                            location = location,
+                                            audioLabel = audio,
+                                            aspectRatio = ratio,
+                                            onPublished = {
+                                                selectedTab = if (type == com.example.data.model.SocialMediaType.REEL) {
+                                                    EsosaTab.REELS
+                                                } else {
+                                                    EsosaTab.HOME
+                                                }
+                                            }
+                                        )
+                                    },
+                                    onPublishStory = { uri, caption ->
+                                        socialViewModel.publishStory(
+                                            imageUri = uri,
+                                            caption = caption,
+                                            onPublished = { selectedTab = EsosaTab.HOME }
+                                        )
+                                    },
+                                    onClearError = { socialViewModel.clearError() },
+                                    onCancel = { selectedTab = EsosaTab.HOME },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                EsosaTab.REELS -> InstagramReelsScreen(
+                                    currentUid = socialViewModel.currentUserId,
+                                    postsState = postsState,
+                                    savedPostIds = savedPostIds,
+                                    followEdges = followEdges,
+                                    onCreateReel = {
+                                        createFormat = CreateFormat.REEL
+                                        selectedTab = EsosaTab.CREATE
+                                    },
+                                    onToggleLike = { socialViewModel.toggleLike(it) },
+                                    onDoubleTapLike = { socialViewModel.likeOnly(it) },
+                                    onOpenComments = openCommentsSheet,
+                                    onToggleSave = { socialViewModel.toggleSave(it.id) },
+                                    onToggleFollow = { uid, username -> socialViewModel.toggleFollow(uid, username) },
+                                    onShareToDm = { sharingPost = it },
+                                    onDeleteReel = { socialViewModel.deletePost(it) },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                EsosaTab.PROFILE -> InstagramProfileScreen(
+                                    currentUid = socialViewModel.currentUserId,
+                                    userProfile = userProfile,
+                                    postsState = postsState,
+                                    savedPostIds = savedPostIds,
+                                    followEdges = followEdges,
+                                    onOpenCreate = {
+                                        createFormat = CreateFormat.POST
+                                        selectedTab = EsosaTab.CREATE
+                                    },
+                                    onSelectPost = { activeDetailPost = it },
+                                    onOpenMessages = { secondaryRoute = EsosaSecondaryRoute.MESSAGES },
+                                    onOpenCalls = { secondaryRoute = EsosaSecondaryRoute.CALLS },
+                                    onOpenSettings = { secondaryRoute = EsosaSecondaryRoute.SETTINGS },
+                                    onUpdateLocalProfile = { name, username, bio ->
+                                        roomsViewModel.updateLocalProfile(name, username, bio)
+                                    },
+                                    onUpdateProfilePhoto = { bytes, onDone ->
+                                        roomsViewModel.updateProfilePhoto(bytes, onDone)
+                                    },
+                                    onSignOut = onSignOut,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // In-app notification toast banner
+        // Story Viewer
+        val storyToView = activeStory
+        if (storyToView != null) {
+            SocialStoryViewerDialog(
+                story = storyToView,
+                currentUid = socialViewModel.currentUserId,
+                onDismiss = { activeStory = null },
+                onDeleteStory = {
+                    socialViewModel.deleteStory(storyToView)
+                    activeStory = null
+                }
+            )
+        }
+
+        // Post Detail Viewer (from Explore or Profile grid)
+        val detailTarget = activeDetailPost
+        if (detailTarget != null) {
+            val freshPost = (postsState as? UiState.Success)?.data
+                ?.firstOrNull { it.id == detailTarget.id } ?: detailTarget
+            val followingSet = remember(followEdges, socialViewModel.currentUserId) {
+                followEdges.filter { it.followerId == socialViewModel.currentUserId }
+                    .map { it.targetUid }.toSet()
+            }
+            InstagramPostDetailDialog(
+                post = freshPost,
+                currentUid = socialViewModel.currentUserId,
+                isSaved = savedPostIds.contains(freshPost.id),
+                isFollowingAuthor = followingSet.contains(freshPost.authorId),
+                onDismiss = { activeDetailPost = null },
+                onToggleLike = { socialViewModel.toggleLike(freshPost) },
+                onDoubleTapLike = { socialViewModel.likeOnly(freshPost) },
+                onOpenComments = { openCommentsSheet(freshPost) },
+                onToggleSave = { socialViewModel.toggleSave(freshPost.id) },
+                onToggleFollow = {
+                    socialViewModel.toggleFollow(freshPost.authorId, freshPost.authorUsername)
+                },
+                onShareToDm = { sharingPost = freshPost },
+                onDeletePost = { socialViewModel.deletePost(freshPost) }
+            )
+        }
+
+        // Comments Bottom Sheet
+        val commentTarget = activeCommentsPost
+        if (commentTarget != null) {
+            val freshPost = (postsState as? UiState.Success)?.data
+                ?.firstOrNull { it.id == commentTarget.id } ?: commentTarget
+            InstagramCommentsSheet(
+                post = freshPost,
+                comments = commentsByPost[freshPost.id].orEmpty(),
+                currentUid = socialViewModel.currentUserId,
+                currentUsername = userProfile.username.ifBlank { userProfile.displayName },
+                currentUserPhotoUrl = userProfile.photoUrl,
+                onDismiss = { activeCommentsPost = null },
+                onSendComment = { txt -> socialViewModel.addComment(freshPost, txt) },
+                onDeleteComment = { comment ->
+                    socialViewModel.deleteComment(freshPost.id, comment.id)
+                }
+            )
+        }
+
+        // Share Post Sheet (to Esosa Chat Room or External Share)
+        val postToShare = sharingPost
+        if (postToShare != null) {
+            ModalBottomSheet(
+                onDismissRequest = { sharingPost = null },
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Share post",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    if (allRooms.isNotEmpty()) {
+                        Text(
+                            text = "Send to an Esosa chat",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        LazyColumn(
+                            modifier = Modifier.height(180.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(allRooms.take(10), key = { it.id }) { room ->
+                                ListItem(
+                                    headlineContent = { Text(room.title, fontWeight = FontWeight.SemiBold) },
+                                    supportingContent = { Text("Send @${postToShare.authorUsername}'s post") },
+                                    modifier = Modifier.clickable {
+                                        val shareBody = buildString {
+                                            append("Shared @${postToShare.authorUsername}'s ")
+                                            append(postToShare.mediaType.id)
+                                            if (postToShare.caption.isNotBlank()) {
+                                                append(": \"${postToShare.caption.take(120)}\"")
+                                            }
+                                        }
+                                        roomsViewModel.sendMessage(room, shareBody)
+                                        socialViewModel.showStatusBanner("Sent to ${room.title}")
+                                        sharingPost = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    Intent.EXTRA_TEXT,
+                                    "Check out @${postToShare.authorUsername} on Esosa: ${postToShare.caption}"
+                                )
+                            }
+                            runCatching {
+                                context.startActivity(Intent.createChooser(sendIntent, "Share via"))
+                            }
+                            sharingPost = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Share via other apps")
+                    }
+                }
+            }
+        }
+
+        // In-app status toast banner
         AnimatedVisibility(
-            visible = inAppBanner != null,
+            visible = combinedBanner != null,
             enter = slideInVertically { -it } + fadeIn(),
             exit = slideOutVertically { -it } + fadeOut(),
             modifier = Modifier
@@ -821,12 +1182,15 @@ private fun EsosaChatShell(
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.inverseSurface,
-                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                color = Color(0xFF1F1F1F),
+                contentColor = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 shadowElevation = 6.dp,
                 modifier = Modifier
-                    .clickable { roomsViewModel.dismissBanner() }
+                    .clickable {
+                        socialViewModel.dismissBanner()
+                        roomsViewModel.dismissBanner()
+                    }
                     .testTag("in_app_notification_banner")
             ) {
                 Row(
@@ -835,7 +1199,7 @@ private fun EsosaChatShell(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(Icons.Filled.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(text = inAppBanner.orEmpty(), style = MaterialTheme.typography.labelLarge)
+                    Text(text = combinedBanner.orEmpty(), style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
@@ -871,9 +1235,7 @@ private fun EsosaChatShell(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 },
-                title = {
-                    Text(stringResource(R.string.voice_call_mic_permission_title))
-                },
+                title = { Text(stringResource(R.string.voice_call_mic_permission_title)) },
                 text = {
                     Text(
                         text = if (micPermanentlyDenied) {
@@ -922,5 +1284,118 @@ private fun EsosaChatShell(
                 modifier = Modifier.testTag("mic_permission_rationale_dialog")
             )
         }
+    }
+}
+
+@Composable
+private fun EsosaInstagramBottomBar(
+    selectedTab: EsosaTab,
+    isDarkBar: Boolean,
+    userProfile: UserProfile,
+    currentUid: String,
+    onSelectTab: (EsosaTab) -> Unit
+) {
+    val backgroundColor = if (isDarkBar) Color.Black else MaterialTheme.colorScheme.surface
+    val iconColor = if (isDarkBar) Color.White else MaterialTheme.colorScheme.onBackground
+    val mutedColor = if (isDarkBar) Color.White.copy(alpha = 0.65f) else MaterialTheme.colorScheme.onBackground
+    val dividerColor = if (isDarkBar) Color(0xFF262626) else InstagramHairline
+
+    Surface(
+        color = backgroundColor,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+        ) {
+            HorizontalDivider(thickness = 0.5.dp, color = dividerColor)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                EsosaTab.entries.forEach { tab ->
+                    val isSelected = selectedTab == tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .minimumInteractiveComponentSize()
+                            .clickable { onSelectTab(tab) }
+                            .testTag(tab.testTag),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (tab == EsosaTab.PROFILE) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .let { mod ->
+                                        if (isSelected) mod.border(1.75.dp, iconColor, CircleShape) else mod
+                                    }
+                                    .padding(if (isSelected) 2.dp else 0.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                InstagramUserAvatar(
+                                    displayName = userProfile.displayName.ifBlank { "You" },
+                                    photoUrl = userProfile.photoUrl,
+                                    seedKey = currentUid,
+                                    size = if (isSelected) 24.dp else 26.dp
+                                )
+                            }
+                        } else {
+                            Icon(
+                                imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
+                                contentDescription = tab.label,
+                                tint = if (isSelected) iconColor else mutedColor,
+                                modifier = Modifier.size(27.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecondaryOverlayHeader(
+    title: String,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .statusBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("secondary_overlay_back_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = InstagramHairline)
     }
 }

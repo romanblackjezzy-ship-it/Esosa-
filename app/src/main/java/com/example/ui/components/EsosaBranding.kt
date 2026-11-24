@@ -1,6 +1,6 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,21 +43,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.R
 import com.example.data.model.ChatKind
 import com.example.data.model.StoryItem
 import com.example.data.model.UserProfile
@@ -72,32 +70,50 @@ fun EsosaBrandLogo(
     size: Dp = 36.dp,
     modifier: Modifier = Modifier
 ) {
+    val shape = RoundedCornerShape(size * 0.28f)
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.30f))
-            .background(Brush.linearGradient(listOf(TelegramAzure, EsosaEmerald))),
+            .clip(shape)
+            .background(Color.White)
+            .border(0.75.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f), shape),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(size * 0.62f)) {
-            val w = this.size.width
-            val h = this.size.height
-            drawRoundRect(
-                color = Color.White,
-                topLeft = Offset(w * 0.08f, h * 0.14f),
-                size = Size(w * 0.84f, h * 0.62f),
-                cornerRadius = CornerRadius(w * 0.22f, w * 0.22f),
-                style = Stroke(width = w * 0.11f, cap = StrokeCap.Round)
-            )
-            val tail = Path().apply {
-                moveTo(w * 0.28f, h * 0.74f)
-                lineTo(w * 0.18f, h * 0.92f)
-                lineTo(w * 0.45f, h * 0.75f)
-            }
-            drawPath(path = tail, color = Color.White, style = Stroke(width = w * 0.10f, cap = StrokeCap.Round))
-            drawCircle(color = Color.White, radius = w * 0.07f, center = Offset(w * 0.36f, h * 0.45f))
-            drawCircle(color = Color.White, radius = w * 0.07f, center = Offset(w * 0.64f, h * 0.45f))
-        }
+        Image(
+            painter = painterResource(id = R.drawable.ic_esosa_foreground),
+            contentDescription = stringResource(R.string.app_name),
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(size * 0.08f)
+        )
+    }
+}
+
+@Composable
+fun EsosaWordmarkBanner(
+    height: Dp = 56.dp,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Surface(
+        shape = shape,
+        color = Color.White,
+        shadowElevation = 2.dp,
+        modifier = modifier.border(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+            shape
+        )
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.img_esosa_wordmark),
+            contentDescription = stringResource(R.string.app_name),
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .height(height)
+        )
     }
 }
 

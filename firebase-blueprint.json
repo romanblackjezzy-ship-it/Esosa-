@@ -172,12 +172,107 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["userId", "threadId", "speaker", "text", "createdAt"]
+    },
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "Public photo post or vertical Reel published by an authenticated user.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "description": "Author Firebase Auth UID" },
+        "authorUsername": { "type": "string", "description": "Author handle" },
+        "authorDisplayName": { "type": "string", "description": "Author display name" },
+        "authorPhotoUrl": { "type": "string", "description": "Optional author avatar URL" },
+        "mediaType": { "type": "string", "enum": ["photo", "reel"], "description": "Post or Reel format" },
+        "imageUrl": { "type": "string", "description": "HTTPS download URL for the post or reel visual" },
+        "storagePath": { "type": "string", "description": "Firebase Storage path for owner cleanup" },
+        "caption": { "type": "string", "description": "Post caption and hashtags" },
+        "location": { "type": "string", "description": "Optional location tag" },
+        "audioLabel": { "type": "string", "description": "Optional Reel audio track label" },
+        "aspectRatio": { "type": "number", "description": "Display aspect ratio hint" },
+        "likedByUids": { "type": "array", "description": "List of UIDs who liked the post" },
+        "commentCount": { "type": "integer", "description": "Total comment count" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["authorId", "authorUsername", "authorDisplayName", "mediaType", "imageUrl", "caption", "likedByUids", "commentCount", "createdAt"]
+    },
+    "PostComment": {
+      "title": "PostComment",
+      "description": "Comment on a social post or Reel.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string", "description": "Parent post ID" },
+        "authorId": { "type": "string", "description": "Comment author UID" },
+        "authorUsername": { "type": "string", "description": "Comment author handle" },
+        "authorPhotoUrl": { "type": "string", "description": "Optional comment author avatar URL" },
+        "text": { "type": "string", "description": "Comment text" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["postId", "authorId", "authorUsername", "text", "createdAt"]
+    },
+    "SocialStory": {
+      "title": "SocialStory",
+      "description": "Ephemeral-style social story published by a user.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "description": "Author UID" },
+        "authorUsername": { "type": "string", "description": "Author handle" },
+        "authorPhotoUrl": { "type": "string", "description": "Optional author avatar URL" },
+        "imageUrl": { "type": "string", "description": "Optional HTTPS image URL for photo stories" },
+        "storagePath": { "type": "string", "description": "Optional Firebase Storage path" },
+        "caption": { "type": "string", "description": "Story caption or status text" },
+        "viewedByUids": { "type": "array", "description": "UIDs that have viewed the story" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["authorId", "authorUsername", "caption", "viewedByUids", "createdAt"]
+    },
+    "SavedPostRef": {
+      "title": "SavedPostRef",
+      "description": "Private bookmarked post reference for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner UID" },
+        "postId": { "type": "string", "description": "Bookmarked post ID" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "postId", "createdAt"]
+    },
+    "UserFollowRef": {
+      "title": "UserFollowRef",
+      "description": "Public follow edge from followerId to targetUid.",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string", "description": "Follower UID" },
+        "targetUid": { "type": "string", "description": "Followed creator UID" },
+        "targetUsername": { "type": "string", "description": "Followed creator username" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["followerId", "targetUid", "targetUsername", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Private user profile and notification preferences."
+    },
+    "/users/{userId}/saved_posts/{postId}": {
+      "schema": { "$ref": "#/entities/SavedPostRef" },
+      "description": "Private saved/bookmarked posts for a user."
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/SocialPost" },
+      "description": "Community Instagram-style photo posts and vertical Reels."
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/PostComment" },
+      "description": "Comments on a social post or Reel."
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/SocialStory" },
+      "description": "Community stories shown in the top Home strip."
+    },
+    "/follows/{followId}": {
+      "schema": { "$ref": "#/entities/UserFollowRef" },
+      "description": "Follow relationships between users."
     },
     "/rooms/{roomId}": {
       "schema": { "$ref": "#/entities/ChatRoom" },

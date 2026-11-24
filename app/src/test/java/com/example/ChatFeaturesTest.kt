@@ -133,9 +133,15 @@ class ChatFeaturesTest {
     }
 
     @Test
-    fun `esosa tabs exclude ai bot and live voice`() {
+    fun `esosa tabs expose all 5 Instagram navigation tabs`() {
         assertEquals(
-            listOf(EsosaTab.MESSAGES, EsosaTab.CALLS, EsosaTab.SETTINGS),
+            listOf(
+                EsosaTab.HOME,
+                EsosaTab.EXPLORE,
+                EsosaTab.CREATE,
+                EsosaTab.REELS,
+                EsosaTab.PROFILE
+            ),
             EsosaTab.entries
         )
     }

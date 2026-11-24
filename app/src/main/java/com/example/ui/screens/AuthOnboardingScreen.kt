@@ -5,60 +5,67 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,14 +76,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.ClearCredentialStateRequest
@@ -86,116 +103,91 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
 import com.example.data.model.UserProfile
-import com.example.ui.components.EsosaBrandLogo
+import com.example.ui.components.EsosaHeaderWordmark
+import com.example.ui.theme.EsosaOnlineGreen
+import com.example.ui.theme.InstagramBlack
+import com.example.ui.theme.InstagramBlue
+import com.example.ui.theme.InstagramBlueDeep
+import com.example.ui.theme.InstagramBlueSoft
+import com.example.ui.theme.InstagramHairline
+import com.example.ui.theme.InstagramMutedText
+import com.example.ui.theme.InstagramOffWhite
+import com.example.ui.theme.InstagramWhite
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-data class CountryItem(val name: String, val code: String, val flag: String)
+enum class AuthScreenMode {
+    LOGIN,
+    SIGN_UP,
+    FORGOT_PASSWORD
+}
 
-val euAndAfricanCountries = listOf(
-    // European Union (EU) 27 Member States
-    CountryItem("Austria", "+43", "🇦🇹"),
-    CountryItem("Belgium", "+32", "🇧🇪"),
-    CountryItem("Bulgaria", "+359", "🇧🇬"),
-    CountryItem("Croatia", "+385", "🇭🇷"),
-    CountryItem("Cyprus", "+357", "🇨🇾"),
-    CountryItem("Czech Republic", "+420", "🇨🇿"),
-    CountryItem("Denmark", "+45", "🇩🇰"),
-    CountryItem("Estonia", "+372", "🇪🇪"),
-    CountryItem("Finland", "+358", "🇫🇮"),
-    CountryItem("France", "+33", "🇫🇷"),
-    CountryItem("Germany", "+49", "🇩🇪"),
-    CountryItem("Greece", "+30", "🇬🇷"),
-    CountryItem("Hungary", "+36", "🇭🇺"),
-    CountryItem("Ireland", "+353", "🇮🇪"),
-    CountryItem("Italy", "+39", "🇮🇹"),
-    CountryItem("Latvia", "+371", "🇱🇻"),
-    CountryItem("Lithuania", "+370", "🇱🇹"),
-    CountryItem("Luxembourg", "+352", "🇱🇺"),
-    CountryItem("Malta", "+356", "🇲🇹"),
-    CountryItem("Netherlands", "+31", "🇳🇱"),
-    CountryItem("Poland", "+48", "🇵🇱"),
-    CountryItem("Portugal", "+351", "🇵🇹"),
-    CountryItem("Romania", "+40", "🇷🇴"),
-    CountryItem("Slovakia", "+421", "🇸🇰"),
-    CountryItem("Slovenia", "+386", "🇸🇮"),
-    CountryItem("Spain", "+34", "🇪🇸"),
-    CountryItem("Sweden", "+46", "🇸🇪"),
+data class PendingSignupMetadata(
+    val fullName: String = "",
+    val username: String = ""
+)
 
-    // African Countries (54 nations)
-    CountryItem("Algeria", "+213", "🇩🇿"),
-    CountryItem("Angola", "+244", "🇦🇴"),
-    CountryItem("Benin", "+229", "🇧🇯"),
-    CountryItem("Botswana", "+267", "🇧🇼"),
-    CountryItem("Burkina Faso", "+226", "🇧🇫"),
-    CountryItem("Burundi", "+257", "🇧🇮"),
-    CountryItem("Cabo Verde", "+238", "🇨🇻"),
-    CountryItem("Cameroon", "+237", "🇨🇲"),
-    CountryItem("Central African Republic", "+236", "🇨🇫"),
-    CountryItem("Chad", "+235", "🇹🇩"),
-    CountryItem("Comoros", "+269", "🇰🇲"),
-    CountryItem("Congo", "+242", "🇨🇬"),
-    CountryItem("Democratic Republic of the Congo", "+243", "🇨🇩"),
-    CountryItem("Djibouti", "+253", "🇩🇯"),
-    CountryItem("Egypt", "+20", "🇪🇬"),
-    CountryItem("Equatorial Guinea", "+240", "🇬🇶"),
-    CountryItem("Eritrea", "+291", "🇪🇷"),
-    CountryItem("Eswatini", "+268", "🇸🇿"),
-    CountryItem("Ethiopia", "+251", "🇪🇹"),
-    CountryItem("Gabon", "+241", "🇬🇦"),
-    CountryItem("Gambia", "+220", "🇬🇲"),
-    CountryItem("Ghana", "+233", "🇬🇭"),
-    CountryItem("Guinea", "+224", "🇬🇳"),
-    CountryItem("Guinea-Bissau", "+245", "🇬🇼"),
-    CountryItem("Ivory Coast", "+225", "🇨🇮"),
-    CountryItem("Kenya", "+254", "🇰🇪"),
-    CountryItem("Lesotho", "+266", "🇱🇸"),
-    CountryItem("Liberia", "+231", "🇱🇷"),
-    CountryItem("Libya", "+218", "🇱🇾"),
-    CountryItem("Madagascar", "+261", "🇲🇬"),
-    CountryItem("Malawi", "+265", "🇲🇼"),
-    CountryItem("Mali", "+223", "🇲🇱"),
-    CountryItem("Mauritania", "+222", "🇲🇷"),
-    CountryItem("Mauritius", "+230", "🇲🇺"),
-    CountryItem("Morocco", "+212", "🇲🇦"),
-    CountryItem("Mozambique", "+258", "🇲🇿"),
-    CountryItem("Namibia", "+264", "🇳🇦"),
-    CountryItem("Niger", "+227", "🇳🇪"),
-    CountryItem("Nigeria", "+234", "🇳🇬"),
-    CountryItem("Rwanda", "+250", "🇷🇼"),
-    CountryItem("Sao Tome and Principe", "+239", "🇸🇹"),
-    CountryItem("Senegal", "+221", "🇸🇳"),
-    CountryItem("Seychelles", "+248", "🇸🇨"),
-    CountryItem("Sierra Leone", "+232", "🇸🇱"),
-    CountryItem("Somalia", "+252", "🇸🇴"),
-    CountryItem("South Africa", "+27", "🇿🇦"),
-    CountryItem("South Sudan", "+211", "🇸🇸"),
-    CountryItem("Sudan", "+249", "🇸🇩"),
-    CountryItem("Tanzania", "+255", "🇹🇿"),
-    CountryItem("Togo", "+228", "🇹🇬"),
-    CountryItem("Tunisia", "+216", "🇹🇳"),
-    CountryItem("Uganda", "+256", "🇺🇬"),
-    CountryItem("Zambia", "+260", "🇿🇲"),
-    CountryItem("Zimbabwe", "+263", "🇿🇼"),
+private enum class AuthBannerTone {
+    ERROR,
+    INFO,
+    SUCCESS
+}
 
-    // Global Hubs
-    CountryItem("United States", "+1", "🇺🇸"),
-    CountryItem("United Kingdom", "+44", "🇬🇧"),
-    CountryItem("Canada", "+1", "🇨🇦"),
-    CountryItem("Australia", "+61", "🇦🇺"),
-    CountryItem("India", "+91", "🇮🇳"),
-    CountryItem("Japan", "+81", "🇯🇵")
-).sortedBy { it.name }
+private data class AuthStatusBanner(
+    val message: String,
+    val tone: AuthBannerTone
+)
+
+object AuthFormValidator {
+    private val EMAIL_REGEX = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+    private val USERNAME_REGEX = Regex("^[a-z0-9._]{3,24}$")
+
+    fun validateEmail(email: String): String? {
+        val cleaned = email.trim()
+        return when {
+            cleaned.isEmpty() -> "Enter your email address."
+            !EMAIL_REGEX.matches(cleaned) -> "Enter a valid email address."
+            else -> null
+        }
+    }
+
+    fun validateLogin(email: String, password: String): String? {
+        validateEmail(email)?.let { return it }
+        return when {
+            password.isEmpty() -> "Enter your password."
+            password.length < 6 -> "Password must be at least 6 characters."
+            else -> null
+        }
+    }
+
+    fun validateSignUp(
+        email: String,
+        fullName: String,
+        username: String,
+        password: String
+    ): String? {
+        validateEmail(email)?.let { return it }
+        if (fullName.trim().length < 2) return "Enter your full name."
+        val cleanHandle = username.trim().removePrefix("@").lowercase()
+        if (!USERNAME_REGEX.matches(cleanHandle)) {
+            return "Username must be 3-24 characters using letters, numbers, '.' or '_'."
+        }
+        if (password.length < 6) return "Password must be at least 6 characters."
+        return null
+    }
+}
 
 private tailrec fun Context.findActivityOrNull(): Activity? = when (this) {
     is Activity -> this
@@ -308,7 +300,7 @@ fun signOutFromGoogle(
 @Composable
 fun AuthOnboardingScreen(
     existingProfile: UserProfile,
-    onAuthSuccess: (optionalPhoneNumber: String) -> Unit,
+    onAuthSuccess: (PendingSignupMetadata) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -316,459 +308,991 @@ fun AuthOnboardingScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    var isLoading by remember { mutableStateOf(false) }
-    var authError by remember { mutableStateOf<String?>(null) }
+    var screenMode by rememberSaveable { mutableStateOf(AuthScreenMode.LOGIN) }
 
-    var showPhoneSection by rememberSaveable { mutableStateOf(false) }
-    var selectedCountryName by rememberSaveable { mutableStateOf("Nigeria") }
-    var showCountryPicker by remember { mutableStateOf(false) }
-    var countrySearchQuery by remember { mutableStateOf("") }
-    var localPhoneInput by rememberSaveable {
+    var emailInput by rememberSaveable {
         mutableStateOf(
-            if (!existingProfile.phoneOrEmail.contains("@")) existingProfile.phoneOrEmail else ""
+            if (existingProfile.phoneOrEmail.contains("@")) existingProfile.phoneOrEmail else ""
         )
     }
+    var passwordInput by rememberSaveable { mutableStateOf("") }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
-    val selectedCountry = remember(selectedCountryName) {
-        euAndAfricanCountries.find { it.name == selectedCountryName } ?: euAndAfricanCountries.first()
-    }
+    var fullNameInput by rememberSaveable { mutableStateOf(existingProfile.displayName) }
+    var usernameInput by rememberSaveable { mutableStateOf(existingProfile.username) }
+    var resetEmailInput by rememberSaveable { mutableStateOf(emailInput) }
 
-    val formattedOptionalPhone = remember(localPhoneInput, selectedCountry) {
-        val cleaned = localPhoneInput.trim()
-        if (cleaned.isEmpty()) ""
-        else if (cleaned.startsWith("+")) cleaned
-        else "${selectedCountry.code} $cleaned"
-    }
+    var isGoogleLoading by remember { mutableStateOf(false) }
+    var isResetSending by remember { mutableStateOf(false) }
+    var statusBanner by remember { mutableStateOf<AuthStatusBanner?>(null) }
 
-    if (showCountryPicker) {
+    if (screenMode != AuthScreenMode.LOGIN) {
         BackHandler {
-            showCountryPicker = false
-            countrySearchQuery = ""
+            statusBanner = null
+            screenMode = AuthScreenMode.LOGIN
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .imePadding(),
-        contentAlignment = Alignment.Center
+    val pendingMetadata = remember(screenMode, fullNameInput, usernameInput) {
+        if (screenMode == AuthScreenMode.SIGN_UP) {
+            PendingSignupMetadata(
+                fullName = fullNameInput.trim(),
+                username = usernameInput.trim().removePrefix("@")
+            )
+        } else {
+            PendingSignupMetadata()
+        }
+    }
+
+    fun triggerGoogleAuth() {
+        keyboardController?.hide()
+        statusBanner = null
+        isGoogleLoading = true
+        onGoogleSignInClicked(
+            context = context,
+            credentialManager = credentialManager,
+            onAuthSuccess = {
+                isGoogleLoading = false
+                onAuthSuccess(pendingMetadata)
+            },
+            onAuthError = { msg ->
+                isGoogleLoading = false
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            },
+            scope = scope,
+            onAuthCancelled = {
+                isGoogleLoading = false
+            }
+        )
+    }
+
+    fun submitEmailLogin() {
+        keyboardController?.hide()
+        val error = AuthFormValidator.validateLogin(emailInput, passwordInput)
+        if (error != null) {
+            statusBanner = AuthStatusBanner(error, AuthBannerTone.ERROR)
+            return
+        }
+        statusBanner = AuthStatusBanner(
+            message = "Email/password login requires enabling the Email/Password provider in Firebase Console (Authentication → Sign-in method). Tap \"Continue with Google\" below to sign in right away.",
+            tone = AuthBannerTone.INFO
+        )
+    }
+
+    fun submitEmailSignUp() {
+        keyboardController?.hide()
+        val error = AuthFormValidator.validateSignUp(
+            email = emailInput,
+            fullName = fullNameInput,
+            username = usernameInput,
+            password = passwordInput
+        )
+        if (error != null) {
+            statusBanner = AuthStatusBanner(error, AuthBannerTone.ERROR)
+            return
+        }
+        statusBanner = AuthStatusBanner(
+            message = "Email/password sign-up requires enabling Email/Password in Firebase Console (Authentication → Sign-in method). Tap \"Sign up with Google\" above — your name and @username will be saved automatically.",
+            tone = AuthBannerTone.INFO
+        )
+    }
+
+    fun submitForgotPassword() {
+        keyboardController?.hide()
+        val cleanEmail = resetEmailInput.trim()
+        val validationError = AuthFormValidator.validateEmail(cleanEmail)
+        if (validationError != null) {
+            statusBanner = AuthStatusBanner(validationError, AuthBannerTone.ERROR)
+            return
+        }
+        isResetSending = true
+        statusBanner = null
+        scope.launch {
+            try {
+                Firebase.auth.sendPasswordResetEmail(cleanEmail).await()
+                isResetSending = false
+                statusBanner = AuthStatusBanner(
+                    message = "Password reset link sent to $cleanEmail. Check your inbox and spam folder.",
+                    tone = AuthBannerTone.SUCCESS
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: FirebaseAuthException) {
+                isResetSending = false
+                val msg = when (e.errorCode) {
+                    "ERROR_OPERATION_NOT_ALLOWED", "CONFIGURATION_NOT_FOUND" ->
+                        "Email/Password reset isn't enabled in Firebase Console yet. Use \"Continue with Google\" to access your account immediately."
+                    "ERROR_USER_NOT_FOUND" ->
+                        "No email/password account was found for $cleanEmail. Try \"Sign up\" or \"Continue with Google\"."
+                    else -> e.localizedMessage ?: "Unable to send reset email right now."
+                }
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            } catch (e: Exception) {
+                isResetSending = false
+                statusBanner = AuthStatusBanner(
+                    message = e.localizedMessage ?: "Unable to send reset email right now.",
+                    tone = AuthBannerTone.ERROR
+                )
+            }
+        }
+    }
+
+    Surface(
+        color = InstagramWhite,
+        contentColor = InstagramBlack,
+        modifier = modifier.fillMaxSize()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier.widthIn(max = 440.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(84.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        EsosaBrandLogo(size = 48.dp)
-                    }
-                }
-
-                Text(
-                    text = "Esosa Messenger",
-                    style = MaterialTheme.typography.headlineLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
-                    ),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Real-time cloud messaging, groups, channels, and HD voice calls synced securely with Cloud Firestore.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        FeatureHighlightRow(
-                            icon = Icons.Filled.CloudDone,
-                            title = "Real-Time Cloud Sync",
-                            subtitle = "Messages, typing status & profile saved across devices"
-                        )
-                        FeatureHighlightRow(
-                            icon = Icons.Filled.Groups,
-                            title = "Groups & Channels",
-                            subtitle = "Invite teammates by email or shareable room code"
-                        )
-                        FeatureHighlightRow(
-                            icon = Icons.Filled.Lock,
-                            title = "Google Account Security",
-                            subtitle = "Zero-trust per-user access control powered by Firebase Auth"
-                        )
-                        FeatureHighlightRow(
-                            icon = Icons.Filled.Call,
-                            title = "Crystal-Clear Calls",
-                            subtitle = "HD voice and video communication"
-                        )
-                    }
-                }
-
-                // Optional EU & African Phone Linker Card
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { showPhoneSection = !showPhoneSection }
-                                .padding(vertical = 4.dp)
-                                .testTag("auth_toggle_phone_section"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Phone,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "Link EU / Africa Phone Number (Optional)",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-                                    )
-                                    Text(
-                                        text = if (formattedOptionalPhone.isNotBlank()) formattedOptionalPhone
-                                        else "All EU & African dial codes supported",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Icon(
-                                imageVector = if (showPhoneSection) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                                contentDescription = if (showPhoneSection) "Collapse" else "Expand",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        AnimatedVisibility(
-                            visible = showPhoneSection,
-                            enter = expandVertically() + fadeIn(),
-                            exit = shrinkVertically() + fadeOut()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(top = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surface,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showCountryPicker = true }
-                                        .testTag("auth_country_selector")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Text(text = selectedCountry.flag, fontSize = 22.sp)
-                                            Column {
-                                                Text(
-                                                    text = selectedCountry.name,
-                                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                                                )
-                                                Text(
-                                                    text = selectedCountry.code,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = "Change",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-
-                                OutlinedTextField(
-                                    value = localPhoneInput,
-                                    onValueChange = { if (it.length <= 24) localPhoneInput = it },
-                                    label = { Text("Phone Number") },
-                                    placeholder = { Text("801 234 5678") },
-                                    prefix = { Text("${selectedCountry.code} ") },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(14.dp),
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Phone,
-                                        imeAction = ImeAction.Done
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("auth_phone_input")
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (authError != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("auth_error_banner")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.ErrorOutline,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = authError.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        keyboardController?.hide()
-                        authError = null
-                        isLoading = true
-                        onGoogleSignInClicked(
-                            context = context,
-                            credentialManager = credentialManager,
-                            onAuthSuccess = {
-                                isLoading = false
-                                onAuthSuccess(formattedOptionalPhone)
-                            },
-                            onAuthError = { msg ->
-                                isLoading = false
-                                authError = msg
-                            },
-                            scope = scope,
-                            onAuthCancelled = {
-                                isLoading = false
-                            }
-                        )
-                    },
-                    enabled = !isLoading,
-                    shape = RoundedCornerShape(16.dp),
+            if (screenMode == AuthScreenMode.FORGOT_PASSWORD) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
-                        .testTag("google_sign_in_button")
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.5.dp
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = "Signing in…",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                        )
-                    } else {
-                        Text(
-                            text = "Sign in with Google",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    IconButton(
+                        onClick = {
+                            statusBanner = null
+                            screenMode = AuthScreenMode.LOGIN
+                        },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("forgot_password_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.auth_back_to_login),
+                            tint = InstagramBlack
                         )
                     }
                 }
-
-                Text(
-                    text = "Sign in with your Google Account to synchronize your chats, contacts, and profile in Cloud Firestore.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
-        }
 
-        if (showCountryPicker) {
-            AlertDialog(
-                onDismissRequest = {
-                    showCountryPicker = false
-                    countrySearchQuery = ""
-                },
-                title = {
-                    Text(
-                        text = "Select Country (EU & Africa)",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                text = {
-                    val filteredCountries = remember(countrySearchQuery) {
-                        if (countrySearchQuery.isBlank()) {
-                            euAndAfricanCountries
-                        } else {
-                            euAndAfricanCountries.filter {
-                                it.name.contains(countrySearchQuery, ignoreCase = true) ||
-                                    it.code.contains(countrySearchQuery, ignoreCase = true)
-                            }
-                        }
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = countrySearchQuery,
-                            onValueChange = { countrySearchQuery = it },
-                            placeholder = { Text("Search country or code...") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("country_search_input")
-                        )
-
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 28.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    AnimatedContent(
+                        targetState = screenMode,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "auth_screen_mode"
+                    ) { mode ->
+                        Column(
+                            modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            items(filteredCountries, key = { "${it.name}_${it.code}" }) { country ->
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            selectedCountryName = country.name
-                                            showCountryPicker = false
-                                            countrySearchQuery = ""
+                            when (mode) {
+                                AuthScreenMode.LOGIN -> {
+                                    Spacer(Modifier.height(12.dp))
+                                    EsosaHeaderWordmark(height = 50.dp)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = "Log in to see photos and reels from friends.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = InstagramMutedText,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(28.dp))
+
+                                    InstagramAuthTextField(
+                                        value = emailInput,
+                                        onValueChange = {
+                                            emailInput = it
+                                            statusBanner = null
                                         },
-                                    color = if (selectedCountryName == country.name)
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    else
-                                        MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Row(
+                                        placeholder = "Email",
+                                        leadingIcon = Icons.Outlined.Email,
+                                        keyboardType = KeyboardType.Email,
+                                        imeAction = ImeAction.Next,
+                                        modifier = Modifier.testTag("auth_email_input")
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+
+                                    InstagramPasswordTextField(
+                                        value = passwordInput,
+                                        onValueChange = {
+                                            passwordInput = it
+                                            statusBanner = null
+                                        },
+                                        passwordVisible = passwordVisible,
+                                        onToggleVisibility = { passwordVisible = !passwordVisible },
+                                        onDone = ::submitEmailLogin,
+                                        modifier = Modifier.testTag("auth_password_input")
+                                    )
+
+                                    Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                            .padding(top = 4.dp),
+                                        contentAlignment = Alignment.CenterEnd
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        TextButton(
+                                            onClick = {
+                                                statusBanner = null
+                                                if (resetEmailInput.isBlank() && emailInput.isNotBlank()) {
+                                                    resetEmailInput = emailInput
+                                                }
+                                                screenMode = AuthScreenMode.FORGOT_PASSWORD
+                                            },
+                                            modifier = Modifier
+                                                .minimumInteractiveComponentSize()
+                                                .testTag("forgot_password_button")
                                         ) {
-                                            Text(text = country.flag, fontSize = 20.sp)
                                             Text(
-                                                text = country.name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = if (selectedCountryName == country.name) FontWeight.Bold else FontWeight.Normal
+                                                text = stringResource(R.string.auth_forgot_password_cta),
+                                                style = MaterialTheme.typography.labelLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = InstagramBlue
                                             )
                                         }
+                                    }
+
+                                    AuthBannerAnimated(banner = statusBanner)
+
+                                    Spacer(Modifier.height(8.dp))
+
+                                    Button(
+                                        onClick = ::submitEmailLogin,
+                                        enabled = !isGoogleLoading,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = InstagramBlue,
+                                            contentColor = InstagramWhite,
+                                            disabledContainerColor = InstagramBlue.copy(alpha = 0.45f),
+                                            disabledContentColor = InstagramWhite
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("auth_login_submit_button")
+                                    ) {
                                         Text(
-                                            text = country.code,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.primary
+                                            text = stringResource(R.string.auth_login_cta),
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.sp
+                                            )
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(22.dp))
+                                    OrHairlineDivider()
+                                    Spacer(Modifier.height(22.dp))
+
+                                    GoogleAuthOutlinedButton(
+                                        label = stringResource(R.string.auth_google_continue_cta),
+                                        isLoading = isGoogleLoading,
+                                        onClick = ::triggerGoogleAuth
+                                    )
+                                }
+
+                                AuthScreenMode.SIGN_UP -> {
+                                    EsosaHeaderWordmark(height = 46.dp)
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        text = "Sign up to see photos and reels from your friends.",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = InstagramMutedText,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(20.dp))
+
+                                    GoogleAuthPrimaryButton(
+                                        label = stringResource(R.string.auth_google_signup_cta),
+                                        isLoading = isGoogleLoading,
+                                        onClick = ::triggerGoogleAuth
+                                    )
+
+                                    Spacer(Modifier.height(18.dp))
+                                    OrHairlineDivider()
+                                    Spacer(Modifier.height(18.dp))
+
+                                    InstagramAuthTextField(
+                                        value = emailInput,
+                                        onValueChange = {
+                                            emailInput = it
+                                            statusBanner = null
+                                        },
+                                        placeholder = "Email",
+                                        leadingIcon = Icons.Outlined.Email,
+                                        keyboardType = KeyboardType.Email,
+                                        imeAction = ImeAction.Next,
+                                        modifier = Modifier.testTag("auth_email_input")
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+
+                                    InstagramAuthTextField(
+                                        value = fullNameInput,
+                                        onValueChange = {
+                                            if (it.length <= 48) {
+                                                fullNameInput = it
+                                                statusBanner = null
+                                            }
+                                        },
+                                        placeholder = "Full Name",
+                                        leadingIcon = Icons.Outlined.Person,
+                                        keyboardType = KeyboardType.Text,
+                                        capitalization = KeyboardCapitalization.Words,
+                                        imeAction = ImeAction.Next,
+                                        modifier = Modifier.testTag("auth_fullname_input")
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+
+                                    InstagramAuthTextField(
+                                        value = usernameInput,
+                                        onValueChange = { raw ->
+                                            val sanitized = raw.lowercase().filter {
+                                                it.isLetterOrDigit() || it == '.' || it == '_'
+                                            }.take(24)
+                                            usernameInput = sanitized
+                                            statusBanner = null
+                                        },
+                                        placeholder = "Username",
+                                        leadingIcon = Icons.Outlined.AlternateEmail,
+                                        keyboardType = KeyboardType.Ascii,
+                                        imeAction = ImeAction.Next,
+                                        modifier = Modifier.testTag("auth_username_input")
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+
+                                    InstagramPasswordTextField(
+                                        value = passwordInput,
+                                        onValueChange = {
+                                            passwordInput = it
+                                            statusBanner = null
+                                        },
+                                        passwordVisible = passwordVisible,
+                                        onToggleVisibility = { passwordVisible = !passwordVisible },
+                                        onDone = ::submitEmailSignUp,
+                                        modifier = Modifier.testTag("auth_password_input")
+                                    )
+
+                                    Spacer(Modifier.height(10.dp))
+                                    AuthBannerAnimated(banner = statusBanner)
+                                    Spacer(Modifier.height(6.dp))
+
+                                    Button(
+                                        onClick = ::submitEmailSignUp,
+                                        enabled = !isGoogleLoading,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = InstagramBlue,
+                                            contentColor = InstagramWhite
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("auth_signup_submit_button")
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.auth_signup_cta),
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.sp
+                                            )
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(14.dp))
+                                    Text(
+                                        text = "By signing up, you agree to Esosa's Terms and Community Guidelines.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = InstagramMutedText,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
+                                AuthScreenMode.FORGOT_PASSWORD -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(92.dp)
+                                            .clip(CircleShape)
+                                            .border(2.dp, InstagramBlack, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Lock,
+                                            contentDescription = null,
+                                            tint = InstagramBlack,
+                                            modifier = Modifier.size(42.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.height(18.dp))
+
+                                    Text(
+                                        text = stringResource(R.string.auth_forgot_password_title),
+                                        style = MaterialTheme.typography.titleLarge.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = InstagramBlack,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.auth_forgot_password_subtitle),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = InstagramMutedText,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(22.dp))
+
+                                    InstagramAuthTextField(
+                                        value = resetEmailInput,
+                                        onValueChange = {
+                                            resetEmailInput = it
+                                            statusBanner = null
+                                        },
+                                        placeholder = "Email",
+                                        leadingIcon = Icons.Outlined.Email,
+                                        keyboardType = KeyboardType.Email,
+                                        imeAction = ImeAction.Done,
+                                        onDone = ::submitForgotPassword,
+                                        modifier = Modifier.testTag("forgot_password_email_input")
+                                    )
+
+                                    Spacer(Modifier.height(10.dp))
+                                    AuthBannerAnimated(banner = statusBanner)
+                                    Spacer(Modifier.height(6.dp))
+
+                                    Button(
+                                        onClick = ::submitForgotPassword,
+                                        enabled = !isResetSending && !isGoogleLoading,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = InstagramBlue,
+                                            contentColor = InstagramWhite
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("forgot_password_submit_button")
+                                    ) {
+                                        if (isResetSending) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = InstagramWhite,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                        }
+                                        Text(
+                                            text = stringResource(R.string.auth_send_reset_link),
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.sp
+                                            )
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(22.dp))
+                                    OrHairlineDivider()
+                                    Spacer(Modifier.height(16.dp))
+
+                                    GoogleAuthOutlinedButton(
+                                        label = stringResource(R.string.auth_google_continue_cta),
+                                        isLoading = isGoogleLoading,
+                                        onClick = ::triggerGoogleAuth
+                                    )
+
+                                    Spacer(Modifier.height(8.dp))
+                                    TextButton(
+                                        onClick = {
+                                            statusBanner = null
+                                            screenMode = AuthScreenMode.SIGN_UP
+                                        },
+                                        modifier = Modifier
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("switch_to_signup_from_forgot")
+                                    ) {
+                                        Text(
+                                            text = "Create new account",
+                                            style = MaterialTheme.typography.labelLarge.copy(
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = InstagramBlack
                                         )
                                     }
                                 }
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    OutlinedButton(
-                        onClick = {
-                            showCountryPicker = false
-                            countrySearchQuery = ""
+                }
+            }
+
+            // Classic Instagram pinned bottom switcher bar
+            HorizontalDivider(thickness = 0.8.dp, color = InstagramHairline)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                when (screenMode) {
+                    AuthScreenMode.LOGIN -> {
+                        Text(
+                            text = stringResource(R.string.auth_no_account_prompt),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = InstagramMutedText
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        TextButton(
+                            onClick = {
+                                statusBanner = null
+                                screenMode = AuthScreenMode.SIGN_UP
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("switch_to_signup_button")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.auth_signup_cta) + ".",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = InstagramBlue
+                            )
                         }
-                    ) {
-                        Text("Close")
+                    }
+
+                    AuthScreenMode.SIGN_UP -> {
+                        Text(
+                            text = stringResource(R.string.auth_have_account_prompt),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = InstagramMutedText
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        TextButton(
+                            onClick = {
+                                statusBanner = null
+                                screenMode = AuthScreenMode.LOGIN
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("switch_to_login_button")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.auth_login_cta) + ".",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = InstagramBlue
+                            )
+                        }
+                    }
+
+                    AuthScreenMode.FORGOT_PASSWORD -> {
+                        TextButton(
+                            onClick = {
+                                statusBanner = null
+                                screenMode = AuthScreenMode.LOGIN
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("back_to_login_footer")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.auth_back_to_login),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = InstagramBlue
+                            )
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstagramAuthTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    leadingIcon: ImageVector,
+    keyboardType: KeyboardType,
+    imeAction: ImeAction,
+    modifier: Modifier = Modifier,
+    capitalization: KeyboardCapitalization = KeyboardCapitalization.None,
+    onDone: (() -> Unit)? = null
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = {
+            Text(
+                text = placeholder,
+                color = InstagramMutedText,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = InstagramMutedText,
+                modifier = Modifier.size(20.dp)
+            )
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(8.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = InstagramOffWhite,
+            unfocusedContainerColor = InstagramOffWhite,
+            focusedBorderColor = InstagramMutedText,
+            unfocusedBorderColor = InstagramHairline,
+            focusedTextColor = InstagramBlack,
+            unfocusedTextColor = InstagramBlack,
+            cursorColor = InstagramBlue
+        ),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = keyboardType,
+            capitalization = capitalization,
+            imeAction = imeAction
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = { onDone?.invoke() }
+        ),
+        modifier = modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun InstagramPasswordTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    passwordVisible: Boolean,
+    onToggleVisibility: () -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = {
+            Text(
+                text = "Password",
+                color = InstagramMutedText,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Outlined.Lock,
+                contentDescription = null,
+                tint = InstagramMutedText,
+                modifier = Modifier.size(20.dp)
+            )
+        },
+        trailingIcon = {
+            IconButton(
+                onClick = onToggleVisibility,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("auth_password_visibility_toggle")
+            ) {
+                Icon(
+                    imageVector = if (passwordVisible) {
+                        Icons.Outlined.VisibilityOff
+                    } else {
+                        Icons.Outlined.Visibility
+                    },
+                    contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                    tint = InstagramMutedText
+                )
+            }
+        },
+        singleLine = true,
+        visualTransformation = if (passwordVisible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        },
+        shape = RoundedCornerShape(8.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = InstagramOffWhite,
+            unfocusedContainerColor = InstagramOffWhite,
+            focusedBorderColor = InstagramMutedText,
+            unfocusedBorderColor = InstagramHairline,
+            focusedTextColor = InstagramBlack,
+            unfocusedTextColor = InstagramBlack,
+            cursorColor = InstagramBlue
+        ),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = { onDone() }
+        ),
+        modifier = modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun GoogleAuthPrimaryButton(
+    label: String,
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        enabled = !isLoading,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = InstagramBlue,
+            contentColor = InstagramWhite
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("google_sign_in_button")
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = InstagramWhite,
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Connecting…",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(InstagramWhite),
+                contentAlignment = Alignment.Center
+            ) {
+                GoogleGEmblem(size = 14.dp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
+                )
             )
         }
     }
 }
 
 @Composable
-private fun FeatureHighlightRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String
+private fun GoogleAuthOutlinedButton(
+    label: String,
+    isLoading: Boolean,
+    onClick: () -> Unit
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    OutlinedButton(
+        onClick = onClick,
+        enabled = !isLoading,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, InstagramHairline),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = InstagramWhite,
+            contentColor = InstagramBlueDeep
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("google_sign_in_button")
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = InstagramBlue,
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Signing in…",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = InstagramBlue
+            )
+        } else {
+            GoogleGEmblem(size = 18.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
+                ),
+                color = InstagramBlack
             )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    }
+}
+
+@Composable
+private fun OrHairlineDivider() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 0.8.dp,
+            color = InstagramHairline
+        )
+        Text(
+            text = "OR",
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.8.sp
+            ),
+            color = InstagramMutedText,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 0.8.dp,
+            color = InstagramHairline
+        )
+    }
+}
+
+@Composable
+private fun AuthBannerAnimated(banner: AuthStatusBanner?) {
+    AnimatedVisibility(
+        visible = banner != null,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        if (banner != null) {
+            val containerColor: Color
+            val contentColor: Color
+            val icon: ImageVector
+            val tag: String
+            when (banner.tone) {
+                AuthBannerTone.ERROR -> {
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    icon = Icons.Outlined.ErrorOutline
+                    tag = "auth_error_banner"
+                }
+                AuthBannerTone.INFO -> {
+                    containerColor = InstagramBlueSoft
+                    contentColor = InstagramBlueDeep
+                    icon = Icons.Outlined.Info
+                    tag = "auth_info_banner"
+                }
+                AuthBannerTone.SUCCESS -> {
+                    containerColor = EsosaOnlineGreen.copy(alpha = 0.14f)
+                    contentColor = Color(0xFF14532D)
+                    icon = Icons.Outlined.CheckCircle
+                    tag = "auth_success_banner"
+                }
+            }
+            Surface(
+                color = containerColor,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .testTag(tag)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = contentColor,
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .size(18.dp)
+                    )
+                    Text(
+                        text = banner.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun GoogleGEmblem(size: Dp = 18.dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val strokeWidth = this.size.minDimension * 0.22f
+        val inset = strokeWidth / 2f
+        val arcSize = Size(this.size.width - strokeWidth, this.size.height - strokeWidth)
+        val topLeft = Offset(inset, inset)
+
+        drawArc(
+            color = Color(0xFF4285F4),
+            startAngle = -15f,
+            sweepAngle = 70f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFF34A853),
+            startAngle = 55f,
+            sweepAngle = 95f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFFFBBC05),
+            startAngle = 150f,
+            sweepAngle = 60f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFFEA4335),
+            startAngle = 210f,
+            sweepAngle = 105f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawLine(
+            color = Color(0xFF4285F4),
+            start = Offset(this.size.width * 0.52f, this.size.height * 0.5f),
+            end = Offset(this.size.width * 0.94f, this.size.height * 0.5f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Butt
+        )
     }
 }

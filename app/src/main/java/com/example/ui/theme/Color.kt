@@ -103,6 +103,31 @@ val TelegramErrorContainerLight = Color(0xFFFFEBEE)
 val TelegramErrorContainerDark = Color(0xFF54171A)
 val TelegramTealAccent = EsosaSecondaryMint
 
+// Instagram-inspired Esosa Light Tokens
+val InstagramWhite = Color(0xFFFFFFFF)
+val InstagramOffWhite = Color(0xFFFAFAFA)
+val InstagramBlack = Color(0xFF000000)
+val InstagramInk = Color(0xFF0F0F0F)
+val InstagramMutedText = Color(0xFF737373)
+val InstagramHairline = Color(0xFFDBDBDB)
+val InstagramChipGray = Color(0xFFEFEFEF)
+val InstagramBlue = Color(0xFF0095F6)
+val InstagramBlueDeep = Color(0xFF0074CC)
+val InstagramBlueSoft = Color(0xFFE0F1FF)
+val InstagramHeartRed = Color(0xFFFF3040)
+val InstagramStoryGold = Color(0xFFFCAF45)
+val InstagramStoryOrange = Color(0xFFF77737)
+val InstagramStoryRed = Color(0xFFFD1D1D)
+val InstagramStoryMagenta = Color(0xFFC13584)
+val InstagramStoryPurple = Color(0xFF833AB4)
+val InstagramStoryGradient = listOf(
+    InstagramStoryGold,
+    InstagramStoryOrange,
+    InstagramStoryRed,
+    InstagramStoryMagenta,
+    InstagramStoryPurple
+)
+
 // Vibrant circular avatar pairs (top gradient color -> bottom gradient color)
 val TelegramAvatarPairs: List<Pair<Color, Color>> = listOf(
     Color(0xFF38A3F1) to Color(0xFF1B6EC8),

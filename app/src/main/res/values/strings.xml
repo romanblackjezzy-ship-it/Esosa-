@@ -58,4 +58,15 @@
     <string name="profile_photo_take">Take Profile Photo</string>
     <string name="profile_photo_uploading">Uploading profile photo…</string>
     <string name="profile_photo_camera_permission">Camera permission is required to take a profile photo.</string>
+    <string name="auth_login_cta">Log in</string>
+    <string name="auth_signup_cta">Sign up</string>
+    <string name="auth_google_signup_cta">Sign up with Google</string>
+    <string name="auth_google_continue_cta">Continue with Google</string>
+    <string name="auth_forgot_password_cta">Forgot password?</string>
+    <string name="auth_forgot_password_title">Trouble logging in?</string>
+    <string name="auth_forgot_password_subtitle">Enter your email address and we\'ll send you a link to get back into your account.</string>
+    <string name="auth_send_reset_link">Send reset link</string>
+    <string name="auth_back_to_login">Back to login</string>
+    <string name="auth_no_account_prompt">Don\'t have an account?</string>
+    <string name="auth_have_account_prompt">Have an account?</string>
 </resources>

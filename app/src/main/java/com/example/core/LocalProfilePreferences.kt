@@ -231,7 +231,7 @@ class LocalProfilePreferences(context: Context) {
             authMethod = prefs.getString(KEY_AUTH_METHOD, "google") ?: "google",
             isAuthenticated = prefs.getBoolean(KEY_IS_AUTHENTICATED, false),
             notificationsEnabled = prefs.getBoolean(KEY_NOTIFICATIONS_ENABLED, true),
-            themeMode = AppThemeMode.fromId(prefs.getString(KEY_THEME_MODE, AppThemeMode.SYSTEM.id)),
+            themeMode = AppThemeMode.fromId(prefs.getString(KEY_THEME_MODE, AppThemeMode.LIGHT.id)),
             wallpaper = ChatWallpaper.fromId(prefs.getString(KEY_WALLPAPER_ID, ChatWallpaper.CLASSIC.id)),
             language = prefs.getString(KEY_LANGUAGE, "English") ?: "English",
             twoStepPinEnabled = prefs.getBoolean(KEY_TWO_STEP_ENABLED, false),

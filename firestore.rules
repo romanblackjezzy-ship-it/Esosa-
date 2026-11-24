@@ -142,6 +142,58 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
+    function isValidSocialPost(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
+             data.authorDisplayName is string && data.authorDisplayName.size() >= 1 && data.authorDisplayName.size() <= 80 &&
+             (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
+             data.mediaType in ['photo', 'reel'] &&
+             data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*') &&
+             (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
+             data.caption is string && data.caption.size() <= 2200 &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 120)) &&
+             (!('audioLabel' in data) || (data.audioLabel is string && data.audioLabel.size() <= 120)) &&
+             (!('aspectRatio' in data) || ((data.aspectRatio is float || data.aspectRatio is int) && data.aspectRatio >= 0.4 && data.aspectRatio <= 2.5)) &&
+             data.likedByUids is list && data.likedByUids.size() <= 1000 &&
+             data.commentCount is int && data.commentCount >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidPostComment(data) {
+      return isValidId(data.postId) &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
+             (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidSocialStory(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
+             (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
+             (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
+             data.caption is string && data.caption.size() <= 300 &&
+             (('imageUrl' in data) || data.caption.size() >= 1) &&
+             data.viewedByUids is list && data.viewedByUids.size() <= 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidSavedPostRef(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.postId) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidUserFollowRef(data) {
+      return data.followerId is string && data.followerId.size() >= 1 && data.followerId.size() <= 128 &&
+             data.targetUid is string && data.targetUid.size() >= 1 && data.targetUid.size() <= 128 &&
+             data.followerId != data.targetUid &&
+             data.targetUsername is string && data.targetUsername.size() >= 1 && data.targetUsername.size() <= 40 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     // 1. Private User Profile & Settings
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
@@ -268,6 +320,25 @@ service cloud.firestore {
           allow delete: if isSignedIn() && isValidId(userId) && isValidId(threadId) && isValidId(messageId) && request.auth.uid == userId;
         }
       }
+
+      // 9. Private Saved/Bookmarked Posts
+      match /saved_posts/{postId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(postId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(postId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().postId == postId &&
+                         incoming().keys().hasAll(['userId', 'postId', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'postId', 'createdAt']) &&
+                         isValidSavedPostRef(incoming());
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(postId) && request.auth.uid == userId;
+      }
     }
 
     // 2. Real-Time Chat Rooms
@@ -359,6 +430,12 @@ service cloud.firestore {
                              incoming().text.size() >= 1 &&
                              incoming().isEdited == true &&
                              incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isEdited'])
+                           ) || (
+                             incoming().text == existing().text &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+                           ) || (
+                             incoming().text == existing().text &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'status'])
                            )
                          );
 
@@ -423,6 +500,136 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(configId);
       allow list: if false;
       allow create, update, delete: if false;
+    }
+
+    // 5. Community Social Posts & Reels
+    match /posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(postId) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().likedByUids.size() == 0 &&
+                       incoming().commentCount == 0 &&
+                       incoming().keys().hasAll(['authorId', 'authorUsername', 'authorDisplayName', 'mediaType', 'imageUrl', 'caption', 'likedByUids', 'commentCount', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorDisplayName', 'authorPhotoUrl', 'mediaType', 'imageUrl', 'storagePath', 'caption', 'location', 'audioLabel', 'aspectRatio', 'likedByUids', 'commentCount', 'createdAt']) &&
+                       isValidSocialPost(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(postId) &&
+                       isValidSocialPost(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().authorUsername == existing().authorUsername &&
+                       incoming().authorDisplayName == existing().authorDisplayName &&
+                       incoming().mediaType == existing().mediaType &&
+                       incoming().imageUrl == existing().imageUrl &&
+                       incoming().createdAt == existing().createdAt &&
+                       (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
+                       (!('authorPhotoUrl' in existing()) ? !('authorPhotoUrl' in incoming()) : incoming().authorPhotoUrl == existing().authorPhotoUrl) &&
+                       (
+                         // Toggle own UID in likedByUids
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['likedByUids']) &&
+                           (
+                             (
+                               !(request.auth.uid in existing().likedByUids) &&
+                               (request.auth.uid in incoming().likedByUids) &&
+                               incoming().likedByUids.hasAll(existing().likedByUids) &&
+                               incoming().likedByUids.size() == existing().likedByUids.size() + 1
+                             ) || (
+                               (request.auth.uid in existing().likedByUids) &&
+                               !(request.auth.uid in incoming().likedByUids) &&
+                               existing().likedByUids.hasAll(incoming().likedByUids) &&
+                               incoming().likedByUids.size() == existing().likedByUids.size() - 1
+                             )
+                           )
+                         ) ||
+                         // Increment commentCount by 1 when posting a comment
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['commentCount']) &&
+                           incoming().commentCount == existing().commentCount + 1
+                         ) ||
+                         // Author edits caption/location/audioLabel
+                         (
+                           existing().authorId == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'location', 'audioLabel'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(postId) && existing().authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow get: if isSignedIn() && isValidId(postId) && isValidId(commentId);
+        allow list: if isSignedIn() && isValidId(postId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         exists(/databases/$(database)/documents/posts/$(postId)) &&
+                         incoming().postId == postId &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().keys().hasAll(['postId', 'authorId', 'authorUsername', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['postId', 'authorId', 'authorUsername', 'authorPhotoUrl', 'text', 'createdAt']) &&
+                         isValidPostComment(incoming());
+
+        allow update: if false;
+        allow delete: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         (
+                           existing().authorId == request.auth.uid ||
+                           get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid
+                         );
+      }
+    }
+
+    // 6. Community Stories
+    match /stories/{storyId} {
+      allow get: if isSignedIn() && isValidId(storyId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().viewedByUids.size() == 0 &&
+                       incoming().keys().hasAll(['authorId', 'authorUsername', 'caption', 'viewedByUids', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'storagePath', 'caption', 'viewedByUids', 'createdAt']) &&
+                       isValidSocialStory(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       isValidSocialStory(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().authorUsername == existing().authorUsername &&
+                       incoming().caption == existing().caption &&
+                       incoming().createdAt == existing().createdAt &&
+                       (!('imageUrl' in existing()) ? !('imageUrl' in incoming()) : incoming().imageUrl == existing().imageUrl) &&
+                       (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids']) &&
+                       !(request.auth.uid in existing().viewedByUids) &&
+                       (request.auth.uid in incoming().viewedByUids) &&
+                       incoming().viewedByUids.hasAll(existing().viewedByUids) &&
+                       incoming().viewedByUids.size() == existing().viewedByUids.size() + 1;
+
+      allow delete: if isSignedIn() && isValidId(storyId) && existing().authorId == request.auth.uid;
+    }
+
+    // 7. Follow Graph
+    match /follows/{followId} {
+      allow get: if isSignedIn() && isValidId(followId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(followId) &&
+                       incoming().followerId == request.auth.uid &&
+                       followId == (request.auth.uid + '_' + incoming().targetUid) &&
+                       incoming().keys().hasAll(['followerId', 'targetUid', 'targetUsername', 'createdAt']) &&
+                       incoming().keys().hasOnly(['followerId', 'targetUid', 'targetUsername', 'createdAt']) &&
+                       isValidUserFollowRef(incoming());
+
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(followId) && existing().followerId == request.auth.uid;
     }
   }
 }

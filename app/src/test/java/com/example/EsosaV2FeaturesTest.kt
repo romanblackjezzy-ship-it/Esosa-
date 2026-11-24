@@ -48,7 +48,7 @@ class EsosaV2FeaturesTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `auth onboarding displays Google sign in and EU Africa phone country selector`() {
+    fun `auth onboarding switches cleanly between Login, Sign Up with Google, and Forgot Password`() {
         composeTestRule.setContent {
             EsosaTheme {
                 AuthOnboardingScreen(
@@ -59,17 +59,33 @@ class EsosaV2FeaturesTest {
         }
 
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("auth_email_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_password_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_login_submit_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("forgot_password_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("google_sign_in_button").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("auth_toggle_phone_section").assertIsDisplayed().performClick()
-        composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("auth_country_selector").assertIsDisplayed().performClick()
+        // Validation banner when submitting empty login
+        composeTestRule.onNodeWithTag("auth_login_submit_button").performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("Germany").performScrollTo().performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("auth_error_banner").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag("auth_phone_input").performTextInput("1701234567")
+        // Navigate to Sign Up screen
+        composeTestRule.onNodeWithTag("switch_to_signup_button").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Sign up with Google").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_fullname_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_username_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_signup_submit_button").assertIsDisplayed()
+
+        // Navigate back to Login and into Forgot Password screen
+        composeTestRule.onNodeWithTag("switch_to_login_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("forgot_password_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Trouble logging in?").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("forgot_password_email_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("forgot_password_submit_button").assertIsDisplayed()
     }
 
     @Test

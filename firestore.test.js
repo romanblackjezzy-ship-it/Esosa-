@@ -511,3 +511,162 @@ test("User-scoped Live Voice threads & transcript messages: owner succeeds, cros
     })
   );
 });
+
+test("Instagram social posts, reels, likes, comments, stories, saved posts, and follows", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 2000);
+
+  // Unauthenticated reads/writes blocked
+  await assertFails(unauthDb.collection("posts").get());
+  await assertFails(unauthDb.collection("stories").get());
+  await assertFails(unauthDb.collection("follows").get());
+
+  // Alice publishes a photo post
+  await assertSucceeds(
+    aliceDb.collection("posts").doc("post_1").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      authorDisplayName: "Alice",
+      mediaType: "photo",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/users%2Falice%2Fpost_1.jpg?alt=media",
+      storagePath: "users/alice_uid_123/post_1.jpg",
+      caption: "Golden hour light ✨ #esosa",
+      location: "San Francisco",
+      aspectRatio: 1.0,
+      likedByUids: [],
+      commentCount: 0,
+      createdAt: now,
+    })
+  );
+
+  // Reject creating a post with spoofed authorId or pre-seeded likes
+  await assertFails(
+    bobDb.collection("posts").doc("post_spoof").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      authorDisplayName: "Alice",
+      mediaType: "photo",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/fake.jpg",
+      caption: "Spoof",
+      likedByUids: [],
+      commentCount: 0,
+      createdAt: now,
+    })
+  );
+  await assertFails(
+    aliceDb.collection("posts").doc("post_prefake").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      authorDisplayName: "Alice",
+      mediaType: "reel",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/reel.jpg",
+      caption: "Fake likes",
+      likedByUids: [BOB_UID],
+      commentCount: 0,
+      createdAt: now,
+    })
+  );
+
+  // Bob can list feed and like/unlike Alice's post (only his own UID)
+  await assertSucceeds(bobDb.collection("posts").get());
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_1").update({
+      likedByUids: [BOB_UID],
+    })
+  );
+  // Bob cannot add Charlie's UID to likedByUids
+  await assertFails(
+    bobDb.collection("posts").doc("post_1").update({
+      likedByUids: [BOB_UID, CHARLIE_UID],
+    })
+  );
+  // Bob cannot edit Alice's caption or delete Alice's post
+  await assertFails(
+    bobDb.collection("posts").doc("post_1").update({ caption: "Hacked" })
+  );
+  await assertFails(bobDb.collection("posts").doc("post_1").delete());
+
+  // Bob comments on Alice's post and increments commentCount by 1
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_1").collection("comments").doc("c_1").set({
+      postId: "post_1",
+      authorId: BOB_UID,
+      authorUsername: "bob_creates",
+      text: "Clean framing!",
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_1").update({ commentCount: 1 })
+  );
+  await assertFails(
+    bobDb.collection("posts").doc("post_1").update({ commentCount: 99 })
+  );
+
+  // Alice (post owner) or Bob (comment author) can delete comment; Charlie cannot
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  await assertFails(
+    charlieDb.collection("posts").doc("post_1").collection("comments").doc("c_1").delete()
+  );
+  await assertSucceeds(
+    aliceDb.collection("posts").doc("post_1").collection("comments").doc("c_1").delete()
+  );
+
+  // Stories: Alice publishes story, Bob marks viewed, Charlie cannot spoof viewedByUids
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_1").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      caption: "Behind the scenes",
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/demo.appspot.com/o/story_1.jpg",
+      viewedByUids: [],
+      createdAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("stories").doc("story_1").update({
+      viewedByUids: [BOB_UID],
+    })
+  );
+  await assertFails(
+    charlieDb.collection("stories").doc("story_1").update({
+      viewedByUids: [BOB_UID, ALICE_UID],
+    })
+  );
+
+  // Saved posts: strictly private to owner
+  await assertSucceeds(
+    bobDb.collection("users").doc(BOB_UID).collection("saved_posts").doc("post_1").set({
+      userId: BOB_UID,
+      postId: "post_1",
+      createdAt: now,
+    })
+  );
+  await assertFails(
+    aliceDb.collection("users").doc(BOB_UID).collection("saved_posts").get()
+  );
+
+  // Follow graph: Bob follows Alice, cannot follow himself or spoof Alice following Bob
+  const followId = `${BOB_UID}_${ALICE_UID}`;
+  await assertSucceeds(
+    bobDb.collection("follows").doc(followId).set({
+      followerId: BOB_UID,
+      targetUid: ALICE_UID,
+      targetUsername: "alice_studio",
+      createdAt: now,
+    })
+  );
+  await assertFails(
+    bobDb.collection("follows").doc(`${BOB_UID}_${BOB_UID}`).set({
+      followerId: BOB_UID,
+      targetUid: BOB_UID,
+      targetUsername: "bob_creates",
+      createdAt: now,
+    })
+  );
+  await assertFails(aliceDb.collection("follows").doc(followId).delete());
+  await assertSucceeds(bobDb.collection("follows").doc(followId).delete());
+});
+
