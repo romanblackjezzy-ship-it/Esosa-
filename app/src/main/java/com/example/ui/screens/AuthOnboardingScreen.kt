@@ -249,8 +249,7 @@ fun onGoogleSignInClicked(
     val clientId = try {
         context.getString(R.string.default_web_client_id)
     } catch (_: Exception) {
-        onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
-        return
+        "1074191788431-ln79cuak607jj1bti393i0n6ev73nkdo.apps.googleusercontent.com"
     }
     val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
     val request = GetCredentialRequest.Builder()
@@ -266,14 +265,15 @@ fun onGoogleSignInClicked(
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
                 onAuthSuccess()
             } else {
-                onAuthError("Unexpected Google credential response.")
+                onAuthError("Unexpected Google credential response. Please try signing in with email and password.")
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
         } catch (e: Exception) {
             Log.e("Auth", "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "Sign in failed. Please check your connection and try again.")
+            val msg = e.localizedMessage ?: "Google Sign-In requires Google Play Services or a configured Google account on this device. Please use Email and Password to log in or sign up."
+            onAuthError(msg)
         }
     }
 }
