@@ -370,6 +370,8 @@ fun AuthOnboardingScreen(
         )
     }
 
+    var isEmailAuthLoading by remember { mutableStateOf(false) }
+
     fun submitEmailLogin() {
         keyboardController?.hide()
         val error = AuthFormValidator.validateLogin(emailInput, passwordInput)
@@ -377,10 +379,19 @@ fun AuthOnboardingScreen(
             statusBanner = AuthStatusBanner(error, AuthBannerTone.ERROR)
             return
         }
-        statusBanner = AuthStatusBanner(
-            message = "Email/password login requires enabling the Email/Password provider in Firebase Console (Authentication → Sign-in method). Tap \"Continue with Google\" below to sign in right away.",
-            tone = AuthBannerTone.INFO
-        )
+        isEmailAuthLoading = true
+        statusBanner = null
+        scope.launch {
+            try {
+                Firebase.auth.signInWithEmailAndPassword(emailInput.trim(), passwordInput).await()
+                isEmailAuthLoading = false
+                onAuthSuccess(pendingMetadata)
+            } catch (e: Exception) {
+                isEmailAuthLoading = false
+                val msg = e.localizedMessage ?: "Sign in failed. Please check your credentials."
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            }
+        }
     }
 
     fun submitEmailSignUp() {
@@ -395,10 +406,19 @@ fun AuthOnboardingScreen(
             statusBanner = AuthStatusBanner(error, AuthBannerTone.ERROR)
             return
         }
-        statusBanner = AuthStatusBanner(
-            message = "Email/password sign-up requires enabling Email/Password in Firebase Console (Authentication → Sign-in method). Tap \"Sign up with Google\" above — your name and @username will be saved automatically.",
-            tone = AuthBannerTone.INFO
-        )
+        isEmailAuthLoading = true
+        statusBanner = null
+        scope.launch {
+            try {
+                Firebase.auth.createUserWithEmailAndPassword(emailInput.trim(), passwordInput).await()
+                isEmailAuthLoading = false
+                onAuthSuccess(pendingMetadata)
+            } catch (e: Exception) {
+                isEmailAuthLoading = false
+                val msg = e.localizedMessage ?: "Sign up failed. Please check your details."
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            }
+        }
     }
 
     fun submitForgotPassword() {
