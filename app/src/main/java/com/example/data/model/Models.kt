@@ -161,7 +161,8 @@ data class RoomTypingStatus(
     val userId: String = "",
     val roomId: String = "",
     val displayName: String = "",
-    val typing: Boolean = false
+    val typing: Boolean = false,
+    val updatedAtMillis: Long = 0L
 )
 
 data class StoryItem(

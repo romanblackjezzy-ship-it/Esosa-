@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -43,6 +44,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoomsViewModel(
@@ -113,6 +116,8 @@ class RoomsViewModel(
     private var userTypingJob: Job? = null
     private var activeTypingRoom: ChatRoom? = null
     private var lastTypingSentAtMillis: Long = 0L
+    private val typingPublishMutex = Mutex()
+    private val typingObserverJobs = mutableMapOf<String, Job>()
 
     val userProfile: StateFlow<UserProfile> = repository.observeUserProfile()
         .stateIn(
@@ -255,27 +260,45 @@ class RoomsViewModel(
                     .collect { }
             }
             viewModelScope.launch {
-                _selectedRoomId
-                    .flatMapLatest { roomId ->
-                        if (roomId.isNullOrBlank()) {
-                            flowOf<Pair<String?, List<RoomTypingStatus>>>(null to emptyList())
-                        } else {
-                            repository.observeRemoteRoomTyping(roomId, currentUserId)
-                                .map<List<RoomTypingStatus>, Pair<String?, List<RoomTypingStatus>>> { roomId to it }
-                                .catch { error ->
-                                    val fsErr = extractFirestoreException(error)
-                                    if (fsErr == null && error is CancellationException) throw error
-                                    Log.w(TAG, "Typing sync error for $roomId", fsErr ?: error)
-                                    emit(roomId to emptyList())
-                                }
+                combine(roomsState, _selectedRoomId) { state, selectedId ->
+                    val rooms = (state as? UiState.Success)?.data.orEmpty()
+                    val targetIds = rooms.asSequence()
+                        .filter { it.ownerId.isNotBlank() && it.chatKind != ChatKind.SAVED }
+                        .take(MAX_OBSERVED_TYPING_ROOMS)
+                        .mapTo(linkedSetOf()) { it.id }
+                    if (!selectedId.isNullOrBlank()) {
+                        val selectedRoom = rooms.firstOrNull { it.id == selectedId }
+                        if (selectedRoom == null || (selectedRoom.ownerId.isNotBlank() && selectedRoom.chatKind != ChatKind.SAVED)) {
+                            targetIds.add(selectedId)
                         }
                     }
-                    .collect { (roomId, remoteTypers) ->
-                        if (!roomId.isNullOrBlank()) {
-                            val updated = _roomTypingMap.value.toMutableMap()
-                            if (remoteTypers.isEmpty()) updated.remove(roomId)
-                            else updated[roomId] = remoteTypers
-                            _roomTypingMap.value = updated
+                    targetIds.toSet()
+                }
+                    .distinctUntilChanged()
+                    .collect { targetRoomIds ->
+                        val removedIds = typingObserverJobs.keys.filter { it !in targetRoomIds }
+                        removedIds.forEach { removedId ->
+                            typingObserverJobs.remove(removedId)?.cancel()
+                            clearTypingForRoom(removedId)
+                        }
+                        targetRoomIds.forEach { roomId ->
+                            if (!typingObserverJobs.containsKey(roomId)) {
+                                typingObserverJobs[roomId] = viewModelScope.launch {
+                                    repository.observeRemoteRoomTyping(roomId, currentUserId)
+                                        .catch { error ->
+                                            val fsErr = extractFirestoreException(error)
+                                            if (fsErr == null && error is CancellationException) throw error
+                                            Log.w(TAG, "Typing sync error for $roomId", fsErr ?: error)
+                                            emit(emptyList())
+                                        }
+                                        .collect { remoteTypers ->
+                                            val updated = _roomTypingMap.value.toMutableMap()
+                                            if (remoteTypers.isEmpty()) updated.remove(roomId)
+                                            else updated[roomId] = remoteTypers
+                                            _roomTypingMap.value = updated
+                                        }
+                                }
+                            }
                         }
                     }
             }
@@ -290,10 +313,7 @@ class RoomsViewModel(
     private fun setSelectedRoom(roomId: String?) {
         val previousTypingRoom = activeTypingRoom
         if (previousTypingRoom != null && previousTypingRoom.id != roomId) {
-            userTypingJob?.cancel()
-            activeTypingRoom = null
-            lastTypingSentAtMillis = 0L
-            viewModelScope.launch { repository.updateTypingStatus(previousTypingRoom, isTyping = false) }
+            stopTyping(previousTypingRoom)
         }
         _selectedRoomId.value = roomId
         _replyingToMessage.value = null
@@ -423,14 +443,11 @@ class RoomsViewModel(
     }
 
     fun logout() {
-        val previousTypingRoom = activeTypingRoom
-        userTypingJob?.cancel()
-        activeTypingRoom = null
-        lastTypingSentAtMillis = 0L
+        stopTyping()
+        typingObserverJobs.values.forEach { it.cancel() }
+        typingObserverJobs.clear()
+        _roomTypingMap.value = emptyMap()
         _selectedRoomId.value = null
-        if (previousTypingRoom != null) {
-            viewModelScope.launch { repository.updateTypingStatus(previousTypingRoom, isTyping = false) }
-        }
         repository.logout()
     }
 
@@ -616,29 +633,54 @@ class RoomsViewModel(
         }
     }
 
+    private fun enqueueTypingStatusUpdate(room: ChatRoom, isTyping: Boolean) {
+        viewModelScope.launch {
+            typingPublishMutex.withLock {
+                repository.updateTypingStatus(room, isTyping = isTyping)
+            }
+        }
+    }
+
+    fun stopTyping(room: ChatRoom? = null) {
+        val active = activeTypingRoom ?: return
+        if (room != null && active.id != room.id) return
+        userTypingJob?.cancel()
+        userTypingJob = null
+        activeTypingRoom = null
+        lastTypingSentAtMillis = 0L
+        enqueueTypingStatusUpdate(active, isTyping = false)
+    }
+
     fun onDraftChanged(room: ChatRoom?, draft: String) {
         if (room == null) return
+        val previousRoom = activeTypingRoom
+        if (previousRoom != null && previousRoom.id != room.id) {
+            userTypingJob?.cancel()
+            activeTypingRoom = null
+            lastTypingSentAtMillis = 0L
+            enqueueTypingStatusUpdate(previousRoom, isTyping = false)
+        }
         userTypingJob?.cancel()
         if (draft.isNotBlank()) {
             val now = System.currentTimeMillis()
-            val shouldPublishActive = activeTypingRoom?.id != room.id || (now - lastTypingSentAtMillis) > 4_000L
+            val shouldPublishActive = activeTypingRoom?.id != room.id || (now - lastTypingSentAtMillis) > TYPING_HEARTBEAT_MS
             activeTypingRoom = room
+            if (shouldPublishActive) {
+                lastTypingSentAtMillis = now
+                enqueueTypingStatusUpdate(room, isTyping = true)
+            }
             userTypingJob = viewModelScope.launch {
-                if (shouldPublishActive) {
-                    lastTypingSentAtMillis = now
-                    repository.updateTypingStatus(room, isTyping = true)
+                delay(TYPING_IDLE_TIMEOUT_MS)
+                if (activeTypingRoom?.id == room.id) {
+                    activeTypingRoom = null
+                    lastTypingSentAtMillis = 0L
+                    enqueueTypingStatusUpdate(room, isTyping = false)
                 }
-                delay(2800)
-                activeTypingRoom = null
-                lastTypingSentAtMillis = 0L
-                repository.updateTypingStatus(room, isTyping = false)
             }
         } else if (activeTypingRoom?.id == room.id) {
             activeTypingRoom = null
             lastTypingSentAtMillis = 0L
-            viewModelScope.launch {
-                repository.updateTypingStatus(room, isTyping = false)
-            }
+            enqueueTypingStatusUpdate(room, isTyping = false)
         }
     }
 
@@ -652,13 +694,16 @@ class RoomsViewModel(
         val editing = _editingMessage.value
         val replyingTo = _replyingToMessage.value
         userTypingJob?.cancel()
+        userTypingJob = null
         activeTypingRoom = null
         lastTypingSentAtMillis = 0L
         viewModelScope.launch {
             _actionError.value = null
             _isSendingMessage.value = true
             try {
-                repository.updateTypingStatus(room, isTyping = false)
+                typingPublishMutex.withLock {
+                    repository.updateTypingStatus(room, isTyping = false)
+                }
                 val result = if (editing != null) {
                     repository.editRoomMessage(room.id, editing.id, text)
                 } else {
@@ -686,6 +731,7 @@ class RoomsViewModel(
     }
 
     fun sendVoiceNote(room: ChatRoom, durationSec: Int) {
+        stopTyping(room)
         viewModelScope.launch {
             repository.sendVoiceNote(room, durationSec).onFailure {
                 _actionError.value = it.localizedMessage ?: "Could not save voice note."
@@ -694,6 +740,7 @@ class RoomsViewModel(
     }
 
     fun sendStickerOrGif(room: ChatRoom, text: String, isGif: Boolean, label: String? = null) {
+        stopTyping(room)
         viewModelScope.launch {
             repository.sendRoomMessage(
                 room = room,
@@ -707,6 +754,7 @@ class RoomsViewModel(
     }
 
     fun sendDocumentAttachment(room: ChatRoom, uri: Uri) {
+        stopTyping(room)
         viewModelScope.launch {
             repository.sendDocumentAttachment(room, uri).onFailure {
                 _actionError.value = it.localizedMessage ?: "Failed to attach file."
@@ -748,6 +796,7 @@ class RoomsViewModel(
         onSent: () -> Unit = {}
     ) {
         if (_photoUploadProgress.value != null) return
+        stopTyping(room)
         viewModelScope.launch {
             _actionError.value = null
             _photoUploadPreviewUri.value = photoUri.toString()
@@ -1074,5 +1123,8 @@ class RoomsViewModel(
 
     private companion object {
         const val TAG = "RoomsVM"
+        const val TYPING_HEARTBEAT_MS = 4_000L
+        const val TYPING_IDLE_TIMEOUT_MS = 2_800L
+        const val MAX_OBSERVED_TYPING_ROOMS = 15
     }
 }

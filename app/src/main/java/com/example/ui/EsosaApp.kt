@@ -845,6 +845,7 @@ private fun EsosaSocialShell(
                                     onSetDisappearingTimer = { rId, sec -> roomsViewModel.setRoomDisappearingTimer(rId, sec) },
                                     onSetRoomWallpaper = { rId, wpId -> roomsViewModel.setRoomWallpaper(rId, wpId) },
                                     onDraftChanged = { room, text -> roomsViewModel.onDraftChanged(room, text) },
+                                    onStopTyping = { room -> roomsViewModel.stopTyping(room) },
                                     onSendMessage = { room, text -> roomsViewModel.sendMessage(room, text) },
                                     onScheduleMessage = { room, text, millis ->
                                         roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)

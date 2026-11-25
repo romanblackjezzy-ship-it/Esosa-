@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -138,6 +139,7 @@ fun ConversationScreen(
     onStartCall: (CallType) -> Unit = {},
     onClearHighlight: () -> Unit,
     onDraftChanged: (ChatRoom?, String) -> Unit,
+    onStopTyping: (ChatRoom?) -> Unit = {},
     onSendMessage: (String) -> Unit,
     onScheduleMessage: (String, Long) -> Unit = { _, _ -> },
     onSendVoiceNote: (Int) -> Unit = {},
@@ -206,7 +208,9 @@ fun ConversationScreen(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, context) {
+    val latestRoom by rememberUpdatedState(room)
+    val latestOnStopTyping by rememberUpdatedState(onStopTyping)
+    DisposableEffect(lifecycleOwner, context, room?.id) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val cameraGranted = ContextCompat.checkSelfPermission(
@@ -216,10 +220,15 @@ fun ConversationScreen(
                 if (cameraGranted && showCameraDeniedBanner) {
                     showCameraDeniedBanner = false
                 }
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                latestOnStopTyping(latestRoom)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            latestOnStopTyping(latestRoom)
+        }
     }
 
     val takePictureLauncher = rememberLauncherForActivityResult(
@@ -951,7 +960,10 @@ fun ConversationScreen(
                         },
                         onDismissCameraBanner = { showCameraDeniedBanner = false },
                         onCancelComposerMode = {
-                            if (editingMessage != null) draft = ""
+                            if (editingMessage != null) {
+                                draft = ""
+                                onDraftChanged(room, "")
+                            }
                             onCancelComposerMode()
                         },
                         onStartVoiceRecording = {

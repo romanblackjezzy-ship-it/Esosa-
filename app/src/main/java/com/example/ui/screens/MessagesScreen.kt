@@ -156,6 +156,7 @@ fun MessagesScreen(
     onSetDisappearingTimer: (String, Int) -> Unit = { _, _ -> },
     onSetRoomWallpaper: (String, String) -> Unit = { _, _ -> },
     onDraftChanged: (ChatRoom?, String) -> Unit = { _, _ -> },
+    onStopTyping: (ChatRoom?) -> Unit = {},
     onSendMessage: (ChatRoom, String) -> Unit,
     onScheduleMessage: (ChatRoom, String, Long) -> Unit = { _, _, _ -> },
     onSendVoiceNote: (ChatRoom, Int) -> Unit = { _, _ -> },
@@ -243,6 +244,7 @@ fun MessagesScreen(
                         onStartCall = { type -> onStartCall(activeRoom, type) },
                         onClearHighlight = onClearHighlight,
                         onDraftChanged = onDraftChanged,
+                        onStopTyping = onStopTyping,
                         onSendMessage = { text -> onSendMessage(activeRoom, text) },
                         onScheduleMessage = { text, millis -> onScheduleMessage(activeRoom, text, millis) },
                         onSendVoiceNote = { sec -> onSendVoiceNote(activeRoom, sec) },
@@ -347,6 +349,7 @@ fun MessagesScreen(
                     onStartCall = { type -> activeRoom?.let { onStartCall(it, type) } },
                     onClearHighlight = onClearHighlight,
                     onDraftChanged = onDraftChanged,
+                    onStopTyping = onStopTyping,
                     onSendMessage = { text -> activeRoom?.let { onSendMessage(it, text) } },
                     onScheduleMessage = { text, millis ->
                         activeRoom?.let { onScheduleMessage(it, text, millis) }

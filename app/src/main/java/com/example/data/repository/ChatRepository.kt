@@ -33,6 +33,7 @@ import com.example.data.model.UserProfile
 import com.example.data.remote.FirebasePhotoStorageService
 import com.example.data.remote.FirestoreChatRoomDto
 import com.example.data.remote.FirestoreChatSyncService
+import com.example.data.remote.RoomTypingSync
 import com.example.data.remote.FirestoreRoomMessageDto
 import com.example.data.remote.FirestoreSnapshotMappers
 import com.google.firebase.auth.FirebaseAuth
@@ -55,7 +56,8 @@ class ChatRepository(
     private val profilePreferences: LocalProfilePreferences = LocalProfilePreferences(appContext),
     private val syncService: FirestoreChatSyncService? = null,
     private val auth: FirebaseAuth? = null,
-    private val photoStorageService: FirebasePhotoStorageService? = null
+    private val photoStorageService: FirebasePhotoStorageService? = null,
+    private val typingSync: RoomTypingSync? = syncService
 ) {
     fun currentUserId(): String =
         auth?.currentUser?.uid
@@ -113,7 +115,7 @@ class ChatRepository(
     }
 
     fun observeRemoteRoomTyping(roomId: String, uid: String): Flow<List<RoomTypingStatus>> {
-        val remote = syncService ?: return emptyFlow()
+        val remote = typingSync ?: return emptyFlow()
         return remote.observeRoomTyping(roomId, uid)
     }
 
@@ -223,11 +225,11 @@ class ChatRepository(
     }
 
     suspend fun updateTypingStatus(room: ChatRoom?, isTyping: Boolean) {
-        if (room == null || room.ownerId.isBlank()) return
+        if (room == null || room.ownerId.isBlank() || room.chatKind == ChatKind.SAVED) return
         val uid = currentUserId()
         if (uid == LocalProfilePreferences.LOCAL_USER_ID) return
         val displayName = profilePreferences.getProfile().displayName.ifBlank { "Member" }
-        syncService?.setTypingStatus(uid = uid, room = room, displayName = displayName, isTyping = isTyping)
+        typingSync?.setTypingStatus(uid = uid, room = room, displayName = displayName, isTyping = isTyping)
     }
 
     fun completeOnboarding(

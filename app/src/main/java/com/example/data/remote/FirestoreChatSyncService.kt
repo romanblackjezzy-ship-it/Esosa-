@@ -11,15 +11,24 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-class FirestoreChatSyncService(
+interface RoomTypingSync {
+    fun observeRoomTyping(roomId: String, uid: String): Flow<List<RoomTypingStatus>>
+    suspend fun setTypingStatus(uid: String, room: ChatRoom, displayName: String, isTyping: Boolean)
+}
+
+open class FirestoreChatSyncService(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth
-) {
-    fun observeUserProfile(uid: String): Flow<FirestoreUserProfileDto?> = callbackFlow {
+) : RoomTypingSync {
+    open fun observeUserProfile(uid: String): Flow<FirestoreUserProfileDto?> = callbackFlow {
         val docRef = db.collection(USERS_COLLECTION).document(uid)
         val listener = docRef.addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -118,7 +127,7 @@ class FirestoreChatSyncService(
         }
     }
 
-    fun observeUserRooms(uid: String): Flow<List<FirestoreChatRoomDto>> = callbackFlow {
+    open fun observeUserRooms(uid: String): Flow<List<FirestoreChatRoomDto>> = callbackFlow {
         val query = db.collection(ROOMS_COLLECTION)
             .whereArrayContains("memberUids", uid)
         val listener = query.addSnapshotListener { snapshot, error ->
@@ -270,7 +279,7 @@ class FirestoreChatSyncService(
         }
     }
 
-    fun observeRoomMessages(roomId: String, uid: String): Flow<List<FirestoreRoomMessageDto>> = callbackFlow {
+    open fun observeRoomMessages(roomId: String, uid: String): Flow<List<FirestoreRoomMessageDto>> = callbackFlow {
         val query = db.collection(ROOMS_COLLECTION)
             .document(roomId)
             .collection(MESSAGES_COLLECTION)
@@ -430,11 +439,14 @@ class FirestoreChatSyncService(
         }
     }
 
-    fun observeRoomTyping(roomId: String, uid: String): Flow<List<RoomTypingStatus>> = callbackFlow {
+    override fun observeRoomTyping(roomId: String, uid: String): Flow<List<RoomTypingStatus>> = callbackFlow {
         val query = db.collection(ROOMS_COLLECTION)
             .document(roomId)
             .collection(TYPING_COLLECTION)
             .whereArrayContains("memberUids", uid)
+        var latestEntries: List<Pair<FirestoreRoomTypingDto, Long>> = emptyList()
+        var lastEmitted: List<RoomTypingStatus>? = null
+
         val listener = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
                 FirestoreErrorHandler.handleFirestoreError(
@@ -443,30 +455,49 @@ class FirestoreChatSyncService(
                     path = "$ROOMS_COLLECTION/$roomId/$TYPING_COLLECTION",
                     auth = auth
                 )
+                close(error)
                 return@addSnapshotListener
             }
             val now = System.currentTimeMillis()
-            val activeTypers = snapshot?.documents.orEmpty()
-                .mapNotNull { FirestoreSnapshotMappers.parseRoomTyping(it) }
-                .filter { dto ->
-                    val updatedMillis = FirestoreSnapshotMappers.timestampToMillis(dto.updatedAt, now)
-                    dto.typing && dto.userId != uid && (now - updatedMillis) <= TYPING_STALE_WINDOW_MS
+            val parsedEntries = snapshot?.documents.orEmpty()
+                .mapNotNull { doc ->
+                    FirestoreSnapshotMappers.parseRoomTyping(doc)?.let { it to now }
                 }
-                .map { dto ->
-                    RoomTypingStatus(
-                        id = dto.userId,
-                        userId = dto.userId,
-                        roomId = dto.roomId,
-                        displayName = dto.displayName,
-                        typing = true
-                    )
-                }
+            latestEntries = parsedEntries
+            val activeTypers = filterActiveTypers(
+                entries = parsedEntries,
+                currentUid = uid,
+                nowMillis = now
+            )
+            lastEmitted = activeTypers
             trySend(activeTypers)
         }
-        awaitClose { listener.remove() }
-    }
 
-    suspend fun setTypingStatus(
+        val expiryJob = launch {
+            while (isActive) {
+                delay(TYPING_EXPIRY_POLL_MS)
+                val snapshotEntries = latestEntries
+                if (snapshotEntries.isNotEmpty() || !lastEmitted.isNullOrEmpty()) {
+                    val filtered = filterActiveTypers(
+                        entries = snapshotEntries,
+                        currentUid = uid,
+                        nowMillis = System.currentTimeMillis()
+                    )
+                    if (filtered != lastEmitted) {
+                        lastEmitted = filtered
+                        trySend(filtered)
+                    }
+                }
+            }
+        }
+
+        awaitClose {
+            expiryJob.cancel()
+            listener.remove()
+        }
+    }.distinctUntilChanged()
+
+    override suspend fun setTypingStatus(
         uid: String,
         room: ChatRoom,
         displayName: String,
@@ -475,9 +506,18 @@ class FirestoreChatSyncService(
         val path = "$ROOMS_COLLECTION/${room.id}/$TYPING_COLLECTION/$uid"
         try {
             val roomRef = db.collection(ROOMS_COLLECTION).document(room.id)
-            val liveMembers = room.memberUids.takeIf { uid in it } ?: listOf(uid)
+            val roomSnap = roomRef.get().await()
+            if (!roomSnap.exists()) return
+            val liveMembers = (roomSnap.get("memberUids") as? List<*>)
+                ?.mapNotNull { (it as? String)?.takeIf { s -> s.isNotBlank() } }
+                ?.takeIf { it.isNotEmpty() }
+                ?: return
+            if (uid !in liveMembers) return
+
             val typingRef = roomRef.collection(TYPING_COLLECTION).document(uid)
             val existing = typingRef.get().await()
+            if (!existing.exists() && !isTyping) return
+
             val cleanName = displayName.trim().ifBlank { "Member" }.take(80)
             if (!existing.exists()) {
                 val payload = hashMapOf<String, Any>(
@@ -512,8 +552,38 @@ class FirestoreChatSyncService(
         const val INVITES_COLLECTION = "invites"
         const val MESSAGES_COLLECTION = "messages"
         const val TYPING_COLLECTION = "typing"
-        private const val TYPING_STALE_WINDOW_MS = 20_000L
+        internal const val TYPING_STALE_WINDOW_MS = 20_000L
+        private const val TYPING_EXPIRY_POLL_MS = 2_500L
         private val ROOM_CODE_REGEX = Regex("^[A-Za-z0-9_\\-]+$")
         private val ALLOWED_MESSAGE_TYPES = setOf("text", "image", "voice", "document", "sticker", "gif")
+
+        internal fun filterActiveTypers(
+            entries: List<Pair<FirestoreRoomTypingDto, Long>>,
+            currentUid: String,
+            nowMillis: Long,
+            staleWindowMs: Long = TYPING_STALE_WINDOW_MS
+        ): List<RoomTypingStatus> {
+            return entries
+                .asSequence()
+                .filter { (dto, receivedAtMillis) ->
+                    val updatedMillis = FirestoreSnapshotMappers.timestampToMillis(dto.updatedAt, receivedAtMillis)
+                    dto.typing &&
+                        dto.userId.isNotBlank() &&
+                        dto.userId != currentUid &&
+                        (nowMillis - updatedMillis) <= staleWindowMs
+                }
+                .map { (dto, receivedAtMillis) ->
+                    RoomTypingStatus(
+                        id = dto.userId,
+                        userId = dto.userId,
+                        roomId = dto.roomId,
+                        displayName = dto.displayName,
+                        typing = true,
+                        updatedAtMillis = FirestoreSnapshotMappers.timestampToMillis(dto.updatedAt, receivedAtMillis)
+                    )
+                }
+                .sortedBy { it.displayName.lowercase() }
+                .toList()
+        }
     }
 }
