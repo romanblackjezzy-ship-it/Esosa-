@@ -66,11 +66,13 @@ class ChatRepository(
 
     suspend fun syncSignedInUser(user: FirebaseUser): Result<Unit> {
         return try {
+            val resolvedAuthMethod = if (user.providerData.any { it.providerId == "password" }) "email" else "google"
             profilePreferences.applyFirebaseIdentity(
                 uid = user.uid,
                 displayName = user.displayName,
                 email = user.email,
-                photoUrl = user.photoUrl?.toString()
+                photoUrl = user.photoUrl?.toString(),
+                authMethod = resolvedAuthMethod
             )
             cleanupLegacyDemoData()
             val profile = profilePreferences.getProfile()

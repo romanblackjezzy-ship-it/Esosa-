@@ -72,5 +72,4 @@
     <string name="auth_back_to_login">Back to login</string>
     <string name="auth_no_account_prompt">Don\'t have an account?</string>
     <string name="auth_have_account_prompt">Have an account?</string>
-    <string name="default_web_client_id" translatable="false">1074191788431-ln79cuak607jj1bti393i0n6ev73nkdo.apps.googleusercontent.com</string>
 </resources>

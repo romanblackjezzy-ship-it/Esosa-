@@ -31,7 +31,8 @@ class LocalProfilePreferences(context: Context) {
         uid: String,
         displayName: String?,
         email: String?,
-        photoUrl: String?
+        photoUrl: String?,
+        authMethod: String = "google"
     ) {
         val current = readProfile()
         val resolvedName = current.displayName.takeIf { it.isNotBlank() && current.userId == uid }
@@ -42,7 +43,7 @@ class LocalProfilePreferences(context: Context) {
         prefs.edit()
             .putString(KEY_USER_ID, uid)
             .putBoolean(KEY_IS_AUTHENTICATED, true)
-            .putString(KEY_AUTH_METHOD, "google")
+            .putString(KEY_AUTH_METHOD, authMethod)
             .putString(KEY_DISPLAY_NAME, resolvedName)
             .putString(KEY_PHONE_OR_EMAIL, resolvedEmail)
             .putString(KEY_PHOTO_URL, photoUrl.orEmpty())

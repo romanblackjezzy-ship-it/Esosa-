@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.MutableContextWrapper
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -103,6 +104,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.example.data.model.UserProfile
 import com.example.ui.components.EsosaHeaderWordmark
@@ -122,6 +124,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
@@ -131,6 +134,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class AuthScreenMode {
     LOGIN,
@@ -191,6 +195,36 @@ object AuthFormValidator {
         if (password.length < 6) return "Password must be at least 6 characters."
         return null
     }
+
+    fun mapEmailLoginError(errorCode: String, localizedMessage: String?): String = when (errorCode) {
+        "ERROR_USER_NOT_FOUND" ->
+            "No account found for this email. Tap \"Sign up\" below to create your account."
+        "ERROR_INVALID_CREDENTIAL", "ERROR_WRONG_PASSWORD" ->
+            "Incorrect email or password. If you originally signed up with Google, tap \"Continue with Google\" below or use \"Forgot password?\"."
+        "ERROR_INVALID_EMAIL" ->
+            "Enter a valid email address."
+        "ERROR_USER_DISABLED" ->
+            "This account has been disabled. Please contact support."
+        "ERROR_OPERATION_NOT_ALLOWED", "CONFIGURATION_NOT_FOUND" ->
+            "Email/Password sign-in is disabled in Firebase Console. Enable Email/Password under Authentication → Sign-in method, or use Google Sign-In."
+        "ERROR_TOO_MANY_REQUESTS" ->
+            "Too many failed login attempts. Wait a moment or tap \"Forgot password?\" to reset your password."
+        else -> localizedMessage ?: "Sign in failed ($errorCode). Please check your credentials."
+    }
+
+    fun mapEmailSignUpError(errorCode: String, localizedMessage: String?): String = when (errorCode) {
+        "ERROR_EMAIL_ALREADY_IN_USE" ->
+            "An account with this email already exists. Tap \"Log in\" below, or use \"Sign up with Google\" / \"Forgot password?\"."
+        "ERROR_WEAK_PASSWORD" ->
+            "Password is too weak. Please use at least 6 characters with letters and numbers."
+        "ERROR_INVALID_EMAIL" ->
+            "Enter a valid email address."
+        "ERROR_OPERATION_NOT_ALLOWED", "CONFIGURATION_NOT_FOUND" ->
+            "Email/Password sign-up is disabled in Firebase Console. Enable Email/Password under Authentication → Sign-in method, or sign up with Google."
+        "ERROR_TOO_MANY_REQUESTS" ->
+            "Too many attempts right now. Please wait a moment and try again."
+        else -> localizedMessage ?: "Sign up failed ($errorCode). Please check your details."
+    }
 }
 
 private tailrec fun Context.findActivityOrNull(): Activity? = when (this) {
@@ -211,8 +245,11 @@ fun attemptAutoSignIn(
         return
     }
     val clientId = try {
-        context.getString(R.string.default_web_client_id)
+        context.getString(R.string.default_web_client_id).trim()
     } catch (_: Exception) {
+        ""
+    }
+    if (clientId.isBlank()) {
         onUnauthenticated()
         return
     }
@@ -228,7 +265,11 @@ fun attemptAutoSignIn(
     scope.launch {
         try {
             val activityContext = context.findActivityOrNull() ?: context
-            val cred = credentialManager.getCredential(activityContext, request).credential
+            val wrappedContext = MutableContextWrapper(activityContext)
+            val response = withTimeoutOrNull(4000L) {
+                credentialManager.getCredential(wrappedContext, request)
+            }
+            val cred = response?.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
@@ -236,6 +277,8 @@ fun attemptAutoSignIn(
             } else {
                 onUnauthenticated()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             onUnauthenticated()
         }
@@ -251,9 +294,13 @@ fun onGoogleSignInClicked(
     onAuthCancelled: () -> Unit = {}
 ) {
     val clientId = try {
-        context.getString(R.string.default_web_client_id)
+        context.getString(R.string.default_web_client_id).trim()
     } catch (_: Exception) {
-        "1074191788431-ln79cuak607jj1bti393i0n6ev73nkdo.apps.googleusercontent.com"
+        ""
+    }
+    if (clientId.isBlank()) {
+        onAuthError("Google Sign-In is not configured for this build. Please use Email & Password.")
+        return
     }
     val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
     val request = GetCredentialRequest.Builder()
@@ -263,7 +310,22 @@ fun onGoogleSignInClicked(
     scope.launch {
         try {
             val activityContext = context.findActivityOrNull() ?: context
-            val cred = credentialManager.getCredential(activityContext, request).credential
+            val wrappedContext = MutableContextWrapper(activityContext)
+            val credResponse = try {
+                credentialManager.getCredential(wrappedContext, request)
+            } catch (noCred: NoCredentialException) {
+                Log.w("Auth", "Primary Google Sign-In returned NoCredentialException; trying fallback", noCred)
+                val fallbackOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(fallbackOption)
+                    .build()
+                credentialManager.getCredential(wrappedContext, fallbackRequest)
+            }
+            val cred = credResponse.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
@@ -271,6 +333,8 @@ fun onGoogleSignInClicked(
             } else {
                 onAuthError("Unexpected Google credential response. Please try signing in with email and password.")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
@@ -373,6 +437,7 @@ fun AuthOnboardingScreen(
     var isEmailAuthLoading by remember { mutableStateOf(false) }
 
     fun submitEmailLogin() {
+        if (isEmailAuthLoading || isGoogleLoading) return
         keyboardController?.hide()
         val error = AuthFormValidator.validateLogin(emailInput, passwordInput)
         if (error != null) {
@@ -386,18 +451,25 @@ fun AuthOnboardingScreen(
                 Firebase.auth.signInWithEmailAndPassword(emailInput.trim(), passwordInput).await()
                 isEmailAuthLoading = false
                 onAuthSuccess(pendingMetadata)
+            } catch (e: CancellationException) {
+                isEmailAuthLoading = false
+                throw e
+            } catch (e: FirebaseAuthException) {
+                isEmailAuthLoading = false
+                Log.w("Auth", "Email sign-in failed (${e.errorCode}): ${e.message}", e)
+                val msg = AuthFormValidator.mapEmailLoginError(e.errorCode, e.localizedMessage)
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            } catch (e: FirebaseNetworkException) {
+                isEmailAuthLoading = false
+                Log.w("Auth", "Network error during email login", e)
+                statusBanner = AuthStatusBanner(
+                    "Network error. Please check your internet connection and try again.",
+                    AuthBannerTone.ERROR
+                )
             } catch (e: Exception) {
                 isEmailAuthLoading = false
+                Log.w("Auth", "Unexpected error during email login", e)
                 val msg = when {
-                    e.message?.contains("no user record", ignoreCase = true) == true ||
-                    e.message?.contains("user-not-found", ignoreCase = true) == true ->
-                        "No account found for this email. Tap \"Sign up\" below to create your account."
-                    e.message?.contains("wrong-password", ignoreCase = true) == true ||
-                    e.message?.contains("invalid-credential", ignoreCase = true) == true ->
-                        "Incorrect password or email. Please check your credentials or tap \"Forgot password\"."
-                    e.message?.contains("disabled", ignoreCase = true) == true ||
-                    e.message?.contains("operation-not-allowed", ignoreCase = true) == true ->
-                        "Email/Password sign-in is disabled in your Firebase console. Please enable Email/Password under Authentication → Sign-in method, or use Google Sign-In."
                     e.message?.contains("network", ignoreCase = true) == true ->
                         "Network error. Please check your internet connection and try again."
                     else -> e.localizedMessage ?: "Sign in failed. Please check your credentials."
@@ -408,6 +480,7 @@ fun AuthOnboardingScreen(
     }
 
     fun submitEmailSignUp() {
+        if (isEmailAuthLoading || isGoogleLoading) return
         keyboardController?.hide()
         val error = AuthFormValidator.validateSignUp(
             email = emailInput,
@@ -426,17 +499,27 @@ fun AuthOnboardingScreen(
                 Firebase.auth.createUserWithEmailAndPassword(emailInput.trim(), passwordInput).await()
                 isEmailAuthLoading = false
                 onAuthSuccess(pendingMetadata)
+            } catch (e: CancellationException) {
+                isEmailAuthLoading = false
+                throw e
+            } catch (e: FirebaseAuthException) {
+                isEmailAuthLoading = false
+                Log.w("Auth", "Email sign-up failed (${e.errorCode}): ${e.message}", e)
+                val msg = AuthFormValidator.mapEmailSignUpError(e.errorCode, e.localizedMessage)
+                statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
+            } catch (e: FirebaseNetworkException) {
+                isEmailAuthLoading = false
+                Log.w("Auth", "Network error during email sign-up", e)
+                statusBanner = AuthStatusBanner(
+                    "Network error. Please check your internet connection and try again.",
+                    AuthBannerTone.ERROR
+                )
             } catch (e: Exception) {
                 isEmailAuthLoading = false
+                Log.w("Auth", "Unexpected error during email sign-up", e)
                 val msg = when {
-                    e.message?.contains("email-already-in-use", ignoreCase = true) == true ||
-                    e.message?.contains("already in use", ignoreCase = true) == true ->
-                        "An account with this email already exists. Tap \"Log in\" below to sign in."
-                    e.message?.contains("weak-password", ignoreCase = true) == true ->
-                        "Password is too weak. Please use at least 6 characters with letters and numbers."
-                    e.message?.contains("disabled", ignoreCase = true) == true ||
-                    e.message?.contains("operation-not-allowed", ignoreCase = true) == true ->
-                        "Email/Password sign-up is disabled in Firebase console. Please enable Email/Password under Authentication → Sign-in method, or sign up with Google."
+                    e.message?.contains("network", ignoreCase = true) == true ->
+                        "Network error. Please check your internet connection and try again."
                     else -> e.localizedMessage ?: "Sign up failed. Please check your details."
                 }
                 statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
