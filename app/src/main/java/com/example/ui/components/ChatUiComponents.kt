@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import coil.compose.AsyncImage
+import com.example.data.media.EsosaImageCache
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -188,8 +190,16 @@ fun TelegramAvatarCircle(
                 )
             }
         } else if (!photoUrl.isNullOrBlank()) {
+            val context = LocalContext.current
+            val avatarRequest = remember(photoUrl, context) {
+                EsosaImageCache.buildChatImageRequest(
+                    context = context,
+                    imageUrl = photoUrl,
+                    variant = EsosaImageCache.VARIANT_AVATAR
+                )
+            }
             AsyncImage(
-                model = photoUrl,
+                model = avatarRequest,
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier

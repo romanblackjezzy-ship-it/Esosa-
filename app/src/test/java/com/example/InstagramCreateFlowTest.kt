@@ -1,5 +1,9 @@
 package com.example
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.Uri
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -8,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.core.content.FileProvider
+import androidx.test.core.app.ApplicationProvider
 import com.example.data.media.CameraPhotoHelper
 import com.example.data.model.CreateFormat
 import com.example.data.model.MediaCropSpec
@@ -17,7 +23,10 @@ import com.example.data.model.SocialPost
 import com.example.ui.components.InstagramPostCard
 import com.example.ui.screens.InstagramCreateScreen
 import com.example.ui.theme.EsosaTheme
+import java.io.File
+import java.io.FileOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -67,6 +76,71 @@ class InstagramCreateFlowTest {
         PostFilter.entries.forEach { filter ->
             assertEquals(20, filter.colorMatrixValues().size)
         }
+    }
+
+    @Test
+    fun `processImageToJpegBytesWithCropAndFilter and compressUriToJpegBytesWithSizeCap decode content and file URIs`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dir = File(context.cacheDir, "camera_photos").apply { mkdirs() }
+        val photoFile = File(dir, "test_sample_${System.currentTimeMillis()}.png")
+        val bitmap = Bitmap.createBitmap(120, 80, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.RED)
+        }
+        FileOutputStream(photoFile).use { out ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+        }
+        bitmap.recycle()
+
+        val contentUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            photoFile
+        )
+        val processedBytes = CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+            context = context,
+            uri = contentUri,
+            cropSpec = MediaCropSpec(targetAspectRatio = 1f, scale = 1f),
+            filter = PostFilter.CLARENDON
+        )
+        assertTrue(processedBytes.isNotEmpty())
+        val decodedProcessed = BitmapFactory.decodeByteArray(processedBytes, 0, processedBytes.size)
+        assertTrue(decodedProcessed != null && decodedProcessed.width > 0 && decodedProcessed.height > 0)
+        decodedProcessed?.recycle()
+
+        val compressedBytes = CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(
+            context = context,
+            uri = Uri.fromFile(photoFile)
+        )
+        assertTrue(compressedBytes.isNotEmpty())
+        photoFile.delete()
+    }
+
+    @Test
+    fun `processImageToJpegBytesWithCropAndFilter throws clear error for missing or empty URI`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val missingError = assertThrows(IllegalStateException::class.java) {
+            CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+                context = context,
+                uri = Uri.parse("content://com.example.missing/image/1"),
+                cropSpec = MediaCropSpec(),
+                filter = PostFilter.NORMAL
+            )
+        }
+        assertEquals("Could not open selected image.", missingError.message)
+
+        val emptyFile = File(context.cacheDir, "empty_img_${System.currentTimeMillis()}.jpg").apply {
+            writeBytes(ByteArray(0))
+        }
+        val emptyError = assertThrows(IllegalStateException::class.java) {
+            CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+                context = context,
+                uri = Uri.fromFile(emptyFile),
+                cropSpec = MediaCropSpec(),
+                filter = PostFilter.NORMAL
+            )
+        }
+        assertEquals("Selected image is empty or unreadable.", emptyError.message)
+        emptyFile.delete()
     }
 
     @Test

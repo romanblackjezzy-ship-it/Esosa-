@@ -88,6 +88,7 @@ import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.core.UiState
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.EsosaImageCache
 import com.example.data.model.CallType
 import com.example.data.model.ChannelComment
 import com.example.data.model.ChatKind
@@ -322,6 +323,20 @@ fun ConversationScreen(
     val newestMessage = messagesList.lastOrNull()
     val hasActiveHighlightTarget = highlightedMessageId != null &&
         messagesList.any { it.id == highlightedMessageId }
+
+    LaunchedEffect(room?.id, messagesList.size, newestMessage?.id) {
+        val candidates = buildList<Pair<String?, String?>> {
+            for (msg in messagesList.asReversed()) {
+                val url = msg.imageUrl
+                if (!url.isNullOrBlank()) {
+                    add(url to msg.storagePath)
+                }
+            }
+        }
+        if (candidates.isNotEmpty()) {
+            EsosaImageCache.prefetchChatImages(context, candidates)
+        }
+    }
 
     LaunchedEffect(highlightedMessageId, messagesList) {
         val targetId = highlightedMessageId ?: return@LaunchedEffect

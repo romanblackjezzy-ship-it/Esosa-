@@ -31,6 +31,7 @@
     <string name="room_uploading_photo">Uploading photo…</string>
     <string name="room_photo_message_label">Photo</string>
     <string name="room_photo_load_failed">Could not load photo</string>
+    <string name="room_photo_tap_to_retry">Tap to retry</string>
     <string name="room_photo_preview_close">Close photo preview</string>
     <string name="room_photo_no_camera_app">No camera app is available on this device.</string>
     <string name="esosa_saved_messages_title">Saved Messages</string>

@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -71,7 +72,9 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -96,7 +100,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.example.R
+import com.example.data.media.EsosaImageCache
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.RoomMessage
@@ -289,6 +295,17 @@ fun ConversationMessageBubble(
 
                     val photoUrl = message.imageUrl
                     if (!photoUrl.isNullOrBlank()) {
+                        val context = LocalContext.current
+                        var retryAttempt by remember(message.id, photoUrl) { mutableIntStateOf(0) }
+                        val photoRequest = remember(photoUrl, message.storagePath, retryAttempt, context) {
+                            EsosaImageCache.buildChatImageRequest(
+                                context = context,
+                                imageUrl = photoUrl,
+                                storagePath = message.storagePath,
+                                variant = EsosaImageCache.VARIANT_THUMBNAIL,
+                                retryAttempt = retryAttempt
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -307,7 +324,7 @@ fun ConversationMessageBubble(
                             contentAlignment = Alignment.Center
                         ) {
                             SubcomposeAsyncImage(
-                                model = photoUrl,
+                                model = photoRequest,
                                 contentDescription = message.text.ifBlank {
                                     "${message.senderName} ${stringResource(R.string.room_photo_message_label)}"
                                 },
@@ -330,23 +347,47 @@ fun ConversationMessageBubble(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(140.dp)
-                                            .padding(12.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
+                                            .height(160.dp)
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.BrokenImage,
-                                            contentDescription = stringResource(R.string.room_photo_load_failed),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Spacer(Modifier.height(6.dp))
-                                        Text(
-                                            text = stringResource(R.string.room_photo_load_failed),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.BrokenImage,
+                                                contentDescription = stringResource(R.string.room_photo_load_failed),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                text = stringResource(R.string.room_photo_load_failed),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = { retryAttempt++ },
+                                            modifier = Modifier
+                                                .minimumInteractiveComponentSize()
+                                                .testTag("room_message_image_retry_${message.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Refresh,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                text = stringResource(R.string.room_photo_tap_to_retry),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
                                 }
                             )
@@ -654,8 +695,15 @@ fun ConversationBottomComposer(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (!photoUploadPreviewUri.isNullOrBlank()) {
+                            val context = LocalContext.current
+                            val previewRequest = remember(photoUploadPreviewUri, context) {
+                                ImageRequest.Builder(context)
+                                    .data(photoUploadPreviewUri)
+                                    .crossfade(true)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = photoUploadPreviewUri,
+                                model = previewRequest,
                                 contentDescription = stringResource(R.string.room_uploading_photo),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp))
@@ -1160,8 +1208,24 @@ fun FullScreenPhotoDialog(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
+                val context = LocalContext.current
+                var retryAttempt by remember(message.id, imageUrl) { mutableIntStateOf(0) }
+                val fullScreenRequest = remember(imageUrl, message.storagePath, retryAttempt, context) {
+                    EsosaImageCache.buildChatImageRequest(
+                        context = context,
+                        imageUrl = imageUrl,
+                        storagePath = message.storagePath,
+                        variant = EsosaImageCache.VARIANT_FULLSCREEN,
+                        placeholderMemoryCacheKey = EsosaImageCache.memoryCacheKeyFor(
+                            imageUrl = imageUrl,
+                            storagePath = message.storagePath,
+                            variant = EsosaImageCache.VARIANT_THUMBNAIL
+                        ),
+                        retryAttempt = retryAttempt
+                    )
+                }
                 SubcomposeAsyncImage(
-                    model = imageUrl,
+                    model = fullScreenRequest,
                     contentDescription = message.text.ifBlank { stringResource(R.string.room_photo_message_label) },
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().align(Alignment.Center),
@@ -1172,7 +1236,10 @@ fun FullScreenPhotoDialog(
                     },
                     error = {
                         Column(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { retryAttempt++ }
+                                .testTag("full_screen_photo_retry_button"),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
@@ -1188,6 +1255,16 @@ fun FullScreenPhotoDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Color.White
                             )
+                            Spacer(Modifier.height(6.dp))
+                            TextButton(onClick = { retryAttempt++ }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(text = stringResource(R.string.room_photo_tap_to_retry))
+                            }
                         }
                     }
                 )

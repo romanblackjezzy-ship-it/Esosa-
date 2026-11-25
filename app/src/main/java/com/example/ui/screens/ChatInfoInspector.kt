@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.media.EsosaImageCache
 import com.example.data.model.CallType
 import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
@@ -509,9 +511,18 @@ fun ChatInfoInspectorPanel(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+                                    val context = LocalContext.current
                                     mediaMessages.take(6).forEach { msg ->
+                                        val thumbRequest = remember(msg.imageUrl, msg.storagePath, context) {
+                                            EsosaImageCache.buildChatImageRequest(
+                                                context = context,
+                                                imageUrl = msg.imageUrl,
+                                                storagePath = msg.storagePath,
+                                                variant = EsosaImageCache.VARIANT_THUMBNAIL
+                                            )
+                                        }
                                         AsyncImage(
-                                            model = msg.imageUrl,
+                                            model = thumbRequest,
                                             contentDescription = msg.text.ifBlank { "Shared media" },
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier

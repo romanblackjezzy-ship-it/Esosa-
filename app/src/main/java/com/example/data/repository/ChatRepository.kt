@@ -14,6 +14,7 @@ import com.example.data.local.RoomMessageEntity
 import com.example.data.local.StoryEntity
 import com.example.data.local.StringListJsonCodec
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.EsosaImageCache
 import com.example.data.model.ActiveSession
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallDirection
@@ -893,6 +894,7 @@ class ChatRepository(
                 )
                 imageUrl = uploaded.downloadUrl
                 storagePath = uploaded.storagePath
+                EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
             } else {
                 val savedFile = withContext(Dispatchers.IO) {
                     CameraPhotoHelper.saveJpegBytesToLocalChatPhotos(appContext, jpegBytes)

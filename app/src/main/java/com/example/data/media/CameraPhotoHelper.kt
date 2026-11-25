@@ -6,18 +6,21 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import com.example.data.model.MediaCropSpec
 import com.example.data.model.PostFilter
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -133,39 +136,14 @@ object CameraPhotoHelper {
         maxDimension: Int = 1600,
         quality: Int = 82
     ): ByteArray {
-        val boundsOptions = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, boundsOptions)
-        } ?: throw IllegalStateException("Could not open captured photo.")
-
-        val srcWidth = boundsOptions.outWidth
-        val srcHeight = boundsOptions.outHeight
-        if (srcWidth <= 0 || srcHeight <= 0) {
-            throw IllegalStateException("Captured image is empty or unreadable.")
-        }
-
-        var sampleSize = 1
-        while (srcWidth / sampleSize > maxDimension * 2 || srcHeight / sampleSize > maxDimension * 2) {
-            sampleSize *= 2
-        }
-
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-        }
-        val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, decodeOptions)
-        } ?: throw IllegalStateException("Could not decode captured photo.")
-
-        val orientation = context.contentResolver.openInputStream(uri)?.use { stream ->
-            ExifInterface(stream).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
-        } ?: ExifInterface.ORIENTATION_NORMAL
-
-        val oriented = rotateIfNeeded(decoded, orientation)
+        val oriented = decodeOrientedBitmapFromUri(
+            context = context,
+            uri = uri,
+            maxTargetDimension = maxDimension * 2,
+            openErrorMessage = "Could not open captured photo.",
+            emptyErrorMessage = "Captured image is empty or unreadable.",
+            decodeErrorMessage = "Could not decode captured photo."
+        )
         val scaled = scaleDownIfNeeded(oriented, maxDimension)
 
         return try {
@@ -177,8 +155,7 @@ object CameraPhotoHelper {
             }
         } finally {
             if (scaled !== oriented && !scaled.isRecycled) scaled.recycle()
-            if (oriented !== decoded && !oriented.isRecycled) oriented.recycle()
-            if (!decoded.isRecycled) decoded.recycle()
+            if (!oriented.isRecycled) oriented.recycle()
         }
     }
 
@@ -224,41 +201,21 @@ object CameraPhotoHelper {
         filter: PostFilter,
         maxBytes: Int = 9_500_000
     ): ByteArray {
-        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, boundsOptions)
-        } ?: throw IllegalStateException("Could not open selected image.")
-
-        val srcWidth = boundsOptions.outWidth
-        val srcHeight = boundsOptions.outHeight
-        if (srcWidth <= 0 || srcHeight <= 0) {
-            throw IllegalStateException("Selected image is empty or unreadable.")
-        }
-
-        var sampleSize = 1
-        while (srcWidth / sampleSize > 3200 || srcHeight / sampleSize > 3200) {
-            sampleSize *= 2
-        }
-
-        val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = sampleSize })
-        } ?: throw IllegalStateException("Could not decode selected image.")
-
-        val orientation = context.contentResolver.openInputStream(uri)?.use { stream ->
-            ExifInterface(stream).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
-        } ?: ExifInterface.ORIENTATION_NORMAL
-
-        val oriented = rotateIfNeeded(decoded, orientation)
+        val oriented = decodeOrientedBitmapFromUri(
+            context = context,
+            uri = uri,
+            maxTargetDimension = 3200,
+            openErrorMessage = "Could not open selected image.",
+            emptyErrorMessage = "Selected image is empty or unreadable.",
+            decodeErrorMessage = "Could not decode selected image."
+        )
         val cropRect = computeCropRect(oriented.width, oriented.height, cropSpec)
         val cropped = Bitmap.createBitmap(
             oriented,
             cropRect.left,
             cropRect.top,
-            cropRect.width().coerceAtLeast(1),
-            cropRect.height().coerceAtLeast(1)
+            cropRect.width().coerceIn(1, oriented.width - cropRect.left),
+            cropRect.height().coerceIn(1, oriented.height - cropRect.top)
         )
 
         val filtered = if (filter == PostFilter.NORMAL) {
@@ -299,8 +256,7 @@ object CameraPhotoHelper {
         } finally {
             if (filtered !== cropped && !filtered.isRecycled) filtered.recycle()
             if (cropped !== oriented && !cropped.isRecycled) cropped.recycle()
-            if (oriented !== decoded && !oriented.isRecycled) oriented.recycle()
-            if (!decoded.isRecycled) decoded.recycle()
+            if (!oriented.isRecycled) oriented.recycle()
         }
     }
 
@@ -349,7 +305,7 @@ object CameraPhotoHelper {
         videoUri: Uri,
         maxBytes: Int = 24 * 1024 * 1024
     ): ByteArray {
-        val stream = context.contentResolver.openInputStream(videoUri)
+        val stream = openInputStreamWithFallback(context, videoUri)
             ?: throw IllegalStateException("Could not open selected video.")
         return stream.use { input ->
             val buffer = ByteArrayOutputStream()
@@ -372,15 +328,182 @@ object CameraPhotoHelper {
         }
     }
 
-    private fun rotateIfNeeded(bitmap: Bitmap, orientation: Int): Bitmap {
-        val degrees = when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-            else -> 0f
+    private fun openInputStreamWithFallback(context: Context, uri: Uri): InputStream? {
+        runCatching { context.contentResolver.openInputStream(uri) }
+            .getOrNull()
+            ?.let { return it }
+
+        runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.createInputStream()
+        }.getOrNull()?.let { return it }
+
+        if (uri.scheme.equals("file", ignoreCase = true)) {
+            val path = uri.path
+            if (!path.isNullOrBlank()) {
+                val file = File(path)
+                if (file.exists() && file.canRead()) {
+                    return runCatching { file.inputStream() }.getOrNull()
+                }
+            }
         }
-        if (degrees == 0f) return bitmap
-        val matrix = Matrix().apply { postRotate(degrees) }
+        return null
+    }
+
+    private fun copyUriToTempFile(
+        context: Context,
+        uri: Uri,
+        openErrorMessage: String,
+        emptyErrorMessage: String
+    ): File {
+        val stagingDir = File(context.cacheDir, "media_staging").apply {
+            if (!exists()) mkdirs()
+        }
+        val tempFile = File.createTempFile("esosa_media_", ".tmp", stagingDir)
+        try {
+            val candidates: List<() -> InputStream?> = listOf(
+                { context.contentResolver.openInputStream(uri) },
+                { context.contentResolver.openAssetFileDescriptor(uri, "r")?.createInputStream() },
+                {
+                    if (uri.scheme.equals("file", ignoreCase = true)) {
+                        val path = uri.path
+                        if (!path.isNullOrBlank()) {
+                            File(path).takeIf { it.exists() && it.canRead() }?.inputStream()
+                        } else null
+                    } else null
+                }
+            )
+
+            var anyOpenedAndRead = false
+            var lastError: Throwable? = null
+            for (openCandidate in candidates) {
+                val attempt = runCatching {
+                    val stream = openCandidate() ?: return@runCatching false
+                    stream.use { input ->
+                        FileOutputStream(tempFile).use { output ->
+                            input.copyTo(output)
+                            output.flush()
+                        }
+                    }
+                    true
+                }
+                if (attempt.getOrNull() == true) {
+                    anyOpenedAndRead = true
+                    break
+                }
+                attempt.exceptionOrNull()?.let { lastError = it }
+            }
+
+            if (!anyOpenedAndRead) {
+                throw IllegalStateException(openErrorMessage, lastError)
+            }
+            if (tempFile.length() <= 0L) {
+                throw IllegalStateException(emptyErrorMessage)
+            }
+            return tempFile
+        } catch (t: Throwable) {
+            tempFile.delete()
+            throw t
+        }
+    }
+
+    private fun decodeOrientedBitmapFromUri(
+        context: Context,
+        uri: Uri,
+        maxTargetDimension: Int,
+        openErrorMessage: String,
+        emptyErrorMessage: String,
+        decodeErrorMessage: String
+    ): Bitmap {
+        val tempFile = copyUriToTempFile(
+            context = context,
+            uri = uri,
+            openErrorMessage = openErrorMessage,
+            emptyErrorMessage = emptyErrorMessage
+        )
+        try {
+            val boundsOptions = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(tempFile.absolutePath, boundsOptions)
+
+            val srcWidth = boundsOptions.outWidth
+            val srcHeight = boundsOptions.outHeight
+            if (srcWidth > 0 && srcHeight > 0) {
+                var sampleSize = 1
+                while (srcWidth / sampleSize > maxTargetDimension || srcHeight / sampleSize > maxTargetDimension) {
+                    sampleSize *= 2
+                }
+                val decodeOptions = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                }
+                val decoded = BitmapFactory.decodeFile(tempFile.absolutePath, decodeOptions)
+                if (decoded != null) {
+                    val orientation = runCatching {
+                        ExifInterface(tempFile.absolutePath).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+                    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+                    val oriented = rotateIfNeeded(decoded, orientation)
+                    if (oriented !== decoded && !decoded.isRecycled) {
+                        decoded.recycle()
+                    }
+                    return oriented
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val decodedWithImageDecoder = runCatching {
+                    val source = ImageDecoder.createSource(tempFile)
+                    ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                        val w = info.size.width
+                        val h = info.size.height
+                        val maxSide = maxOf(w, h)
+                        if (maxSide > maxTargetDimension && maxSide > 0) {
+                            val ratio = maxTargetDimension.toFloat() / maxSide.toFloat()
+                            decoder.setTargetSize(
+                                (w * ratio).roundToInt().coerceAtLeast(1),
+                                (h * ratio).roundToInt().coerceAtLeast(1)
+                            )
+                        }
+                    }
+                }.getOrNull()
+                if (decodedWithImageDecoder != null) {
+                    return decodedWithImageDecoder
+                }
+            }
+
+            if (srcWidth <= 0 || srcHeight <= 0) {
+                throw IllegalStateException(emptyErrorMessage)
+            }
+            throw IllegalStateException(decodeErrorMessage)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    private fun rotateIfNeeded(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+                matrix.setRotate(180f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+            else -> return bitmap
+        }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
