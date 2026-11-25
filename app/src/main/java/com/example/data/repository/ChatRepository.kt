@@ -886,14 +886,22 @@ class ChatRepository(
 
             val imageUrl: String
             val storagePath: String
-            if (isCloudSyncedRoom && photoStorageService != null) {
-                val uploaded = photoStorageService.uploadRoomPhoto(
-                    roomId = room.id,
-                    messageId = messageId,
-                    senderUid = uid,
-                    jpegBytes = jpegBytes,
-                    onProgress = onProgress
-                )
+            val uploadedPhotoResult = if (isCloudSyncedRoom && photoStorageService != null) {
+                runCatching {
+                    photoStorageService!!.uploadRoomPhoto(
+                        roomId = room.id,
+                        messageId = messageId,
+                        senderUid = uid,
+                        jpegBytes = jpegBytes,
+                        onProgress = onProgress
+                    )
+                }
+            } else {
+                Result.failure(IllegalStateException("Not cloud synced"))
+            }
+
+            if (uploadedPhotoResult.isSuccess) {
+                val uploaded = uploadedPhotoResult.getOrThrow()
                 imageUrl = uploaded.downloadUrl
                 storagePath = uploaded.storagePath
                 EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
