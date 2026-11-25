@@ -69,7 +69,7 @@ class FirestoreChatSyncService(
                     "bio" to localProfile.bio.takeIf { it.isNotBlank() }?.take(200),
                     "avatarKey" to localProfile.avatarKey.takeIf { it.isNotBlank() }?.take(64),
                     "phoneNumber" to localProfile.phoneOrEmail.takeIf { it.isNotBlank() && !it.contains("@") }?.take(40),
-                    "authMethod" to "google",
+                    "authMethod" to if (firebaseUser.providerData.any { it.providerId == "password" }) "email" else "google",
                     "themeMode" to localProfile.themeMode.id,
                     "language" to localProfile.language.take(40),
                     "notificationsEnabled" to localProfile.notificationsEnabled,

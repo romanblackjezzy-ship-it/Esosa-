@@ -666,7 +666,7 @@ private fun TelegramChatsListView(
                     }
 
                     if (rooms.isEmpty() && trimmedQuery.isEmpty()) {
-                        EmptyTelegramChatsState(onCreateClick = { showCreateDialog = true })
+                        EmptyEsosaChatsState(onCreateClick = { showCreateDialog = true })
                     } else if (trimmedQuery.isNotEmpty() &&
                         folderFilteredRooms.isEmpty() &&
                         matchingMessages.isEmpty() &&
@@ -1032,7 +1032,7 @@ private fun TelegramChatRow(
 }
 
 @Composable
-private fun EmptyTelegramChatsState(onCreateClick: () -> Unit) {
+private fun EmptyEsosaChatsState(onCreateClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.widthIn(max = 380.dp),
@@ -1047,7 +1047,7 @@ private fun EmptyTelegramChatsState(onCreateClick: () -> Unit) {
             }
             Text("No chats yet", style = MaterialTheme.typography.titleLarge)
             Text(
-                text = "Tap the pencil button to start a new chat, group, or channel stored right on your device.",
+                text = "Tap the compose button to start a new chat or group with friends on Esosa.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

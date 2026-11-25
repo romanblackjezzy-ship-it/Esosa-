@@ -388,7 +388,20 @@ fun AuthOnboardingScreen(
                 onAuthSuccess(pendingMetadata)
             } catch (e: Exception) {
                 isEmailAuthLoading = false
-                val msg = e.localizedMessage ?: "Sign in failed. Please check your credentials."
+                val msg = when {
+                    e.message?.contains("no user record", ignoreCase = true) == true ||
+                    e.message?.contains("user-not-found", ignoreCase = true) == true ->
+                        "No account found for this email. Tap \"Sign up\" below to create your account."
+                    e.message?.contains("wrong-password", ignoreCase = true) == true ||
+                    e.message?.contains("invalid-credential", ignoreCase = true) == true ->
+                        "Incorrect password or email. Please check your credentials or tap \"Forgot password\"."
+                    e.message?.contains("disabled", ignoreCase = true) == true ||
+                    e.message?.contains("operation-not-allowed", ignoreCase = true) == true ->
+                        "Email/Password sign-in is disabled in your Firebase console. Please enable Email/Password under Authentication → Sign-in method, or use Google Sign-In."
+                    e.message?.contains("network", ignoreCase = true) == true ->
+                        "Network error. Please check your internet connection and try again."
+                    else -> e.localizedMessage ?: "Sign in failed. Please check your credentials."
+                }
                 statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
             }
         }
@@ -415,7 +428,17 @@ fun AuthOnboardingScreen(
                 onAuthSuccess(pendingMetadata)
             } catch (e: Exception) {
                 isEmailAuthLoading = false
-                val msg = e.localizedMessage ?: "Sign up failed. Please check your details."
+                val msg = when {
+                    e.message?.contains("email-already-in-use", ignoreCase = true) == true ||
+                    e.message?.contains("already in use", ignoreCase = true) == true ->
+                        "An account with this email already exists. Tap \"Log in\" below to sign in."
+                    e.message?.contains("weak-password", ignoreCase = true) == true ->
+                        "Password is too weak. Please use at least 6 characters with letters and numbers."
+                    e.message?.contains("disabled", ignoreCase = true) == true ||
+                    e.message?.contains("operation-not-allowed", ignoreCase = true) == true ->
+                        "Email/Password sign-up is disabled in Firebase console. Please enable Email/Password under Authentication → Sign-in method, or sign up with Google."
+                    else -> e.localizedMessage ?: "Sign up failed. Please check your details."
+                }
                 statusBanner = AuthStatusBanner(msg, AuthBannerTone.ERROR)
             }
         }
@@ -593,7 +616,7 @@ fun AuthOnboardingScreen(
 
                                     Button(
                                         onClick = ::submitEmailLogin,
-                                        enabled = !isGoogleLoading,
+                                        enabled = !isGoogleLoading && !isEmailAuthLoading,
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = InstagramBlue,
@@ -606,6 +629,14 @@ fun AuthOnboardingScreen(
                                             .height(48.dp)
                                             .testTag("auth_login_submit_button")
                                     ) {
+                                        if (isEmailAuthLoading) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = InstagramWhite,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                        }
                                         Text(
                                             text = stringResource(R.string.auth_login_cta),
                                             style = MaterialTheme.typography.titleSmall.copy(
@@ -715,17 +746,27 @@ fun AuthOnboardingScreen(
 
                                     Button(
                                         onClick = ::submitEmailSignUp,
-                                        enabled = !isGoogleLoading,
+                                        enabled = !isGoogleLoading && !isEmailAuthLoading,
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = InstagramBlue,
-                                            contentColor = InstagramWhite
+                                            contentColor = InstagramWhite,
+                                            disabledContainerColor = InstagramBlue.copy(alpha = 0.45f),
+                                            disabledContentColor = InstagramWhite
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(48.dp)
                                             .testTag("auth_signup_submit_button")
                                     ) {
+                                        if (isEmailAuthLoading) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = InstagramWhite,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                        }
                                         Text(
                                             text = stringResource(R.string.auth_signup_cta),
                                             style = MaterialTheme.typography.titleSmall.copy(

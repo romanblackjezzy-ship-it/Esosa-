@@ -78,7 +78,15 @@ class SignInViewModel : ViewModel() {
                 Log.w("SignInViewModel", "Google Sign-In cancelled: ${e.message}")
             } catch (e: Exception) {
                 _isLoading.value = false
-                val msg = e.localizedMessage ?: "Google Sign-In failed. Please check your connection and try again."
+                val msg = when {
+                    e.message?.contains("10:") == true || e.message?.contains("DEVELOPER_ERROR") == true ->
+                        "Google Sign-In error (DEVELOPER_ERROR). Please ensure you have a Google account signed in on this device, or sign in with Email/Password."
+                    e.message?.contains("16:") == true || e.message?.contains("Cannot find a matching credential") == true ->
+                        "No Google account selected or available on this device. Please sign in with Email & Password."
+                    e.message?.contains("network", ignoreCase = true) == true ->
+                        "Network error connecting to Google. Please check your internet connection."
+                    else -> e.localizedMessage ?: "Google Sign-In failed. Please check your connection and try again."
+                }
                 _errorMessage.value = msg
                 Log.e("SignInViewModel", "Google Sign-In error", e)
             }

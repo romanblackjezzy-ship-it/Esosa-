@@ -375,7 +375,7 @@ fun ConversationScreen(
         typingUsers.isNotEmpty() -> "$typingLabel…"
         room == null -> ""
         room.isBlocked -> "Blocked contact"
-        room.chatKind == ChatKind.SAVED -> stringResource(R.string.telegram_saved_messages_subtitle)
+        room.chatKind == ChatKind.SAVED -> stringResource(R.string.esosa_saved_messages_subtitle)
         room.chatKind == ChatKind.CHANNEL ->
             "${room.subscriberCount} subscribers • ${if (room.isPublic) "Public Channel" else "Private Channel"}"
         room.onlineStatusText.isNotBlank() -> room.onlineStatusText

@@ -244,7 +244,7 @@ fun SettingsScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Edit,
-                            contentDescription = stringResource(R.string.telegram_settings_edit_profile),
+                            contentDescription = stringResource(R.string.esosa_settings_edit_profile),
                             tint = telegram.onTopBar
                         )
                     }
@@ -980,7 +980,7 @@ private fun EditLocalProfileDialog(
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
             .widthIn(max = 560.dp),
-        title = { Text(stringResource(R.string.telegram_settings_edit_profile)) },
+        title = { Text(stringResource(R.string.esosa_settings_edit_profile)) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),

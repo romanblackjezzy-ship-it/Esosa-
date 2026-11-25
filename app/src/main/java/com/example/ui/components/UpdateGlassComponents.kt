@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
@@ -307,68 +308,59 @@ fun GlassUpdatePromptOverlay(
                         }
                     }
 
-                    // Short Summary & Release Breakdown (What's New / Features / Bug Fixes)
+                    // Clean, concise release note without verbose CI logs or debug write-ups
                     if (update != null && !isMaintenance) {
-                        Surface(
-                            color = glass.innerSectionSurface,
-                            shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(1.dp, glass.specularBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                        val hasBullets = update.newFeatures.isNotEmpty() || update.bugFixes.isNotEmpty()
+                        if (hasBullets) {
+                            Surface(
+                                color = glass.innerSectionSurface,
+                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(1.dp, glass.specularBorder),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = "What's New",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                val cleanNotes = if (update.releaseNotes.contains("Automated build of", ignoreCase = true) ||
-                                    update.releaseNotes.contains("Signing SHA-256", ignoreCase = true) ||
-                                    update.releaseNotes.contains("Download the", ignoreCase = true)) {
-                                    "Performance improvements and security enhancements for Esosa."
-                                } else {
-                                    update.releaseNotes.ifBlank {
-                                        "Performance improvements and security enhancements for Esosa."
-                                    }
-                                }
-                                Text(
-                                    text = cleanNotes,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-
-                                if (update.newFeatures.isNotEmpty()) {
-                                    Text(
-                                        text = "New Features",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                    update.newFeatures.forEach { feature ->
-                                        ReleaseBulletRow(
-                                            icon = Icons.Filled.AutoAwesome,
-                                            iconTint = MaterialTheme.colorScheme.secondary,
-                                            text = feature
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (update.newFeatures.isNotEmpty()) {
+                                        Text(
+                                            text = "New Features",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.secondary
                                         )
+                                        update.newFeatures.forEach { feature ->
+                                            ReleaseBulletRow(
+                                                icon = Icons.Filled.AutoAwesome,
+                                                iconTint = MaterialTheme.colorScheme.secondary,
+                                                text = feature
+                                            )
+                                        }
                                     }
-                                }
 
-                                if (update.bugFixes.isNotEmpty()) {
-                                    Text(
-                                        text = "Bug Fixes & Improvements",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    update.bugFixes.forEach { fix ->
-                                        ReleaseBulletRow(
-                                            icon = Icons.Filled.Build,
-                                            iconTint = MaterialTheme.colorScheme.primary,
-                                            text = fix
+                                    if (update.bugFixes.isNotEmpty()) {
+                                        Text(
+                                            text = "Bug Fixes & Improvements",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.primary
                                         )
+                                        update.bugFixes.forEach { fix ->
+                                            ReleaseBulletRow(
+                                                icon = Icons.Filled.Build,
+                                                iconTint = MaterialTheme.colorScheme.primary,
+                                                text = fix
+                                            )
+                                        }
                                     }
                                 }
                             }
+                        } else {
+                            Text(
+                                text = "A new update is available with performance and stability improvements.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
                         }
                     }
 
