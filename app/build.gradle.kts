@@ -1,4 +1,13 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.io.File
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.cert.X509Certificate
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.TaskAction
 
 plugins {
   alias(libs.plugins.android.application)
@@ -92,6 +101,148 @@ secrets {
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
+
+abstract class PrintSigningFingerprintsTask : DefaultTask() {
+  @get:Internal abstract val applicationId: Property<String>
+  @get:Internal abstract val googleServicesFile: RegularFileProperty
+
+  @get:Internal abstract val debugKeystoreFile: RegularFileProperty
+  @get:Internal abstract val debugKeyAlias: Property<String>
+  @get:Internal abstract val debugStorePassword: Property<String>
+
+  @get:Internal abstract val releaseKeystoreFile: RegularFileProperty
+  @get:Internal abstract val releaseKeyAlias: Property<String>
+  @get:Internal abstract val releaseStorePassword: Property<String>
+
+  @TaskAction
+  fun printFingerprints() {
+    val appId = applicationId.orNull.orEmpty()
+    val gsFile = googleServicesFile.orNull?.asFile
+    val gsContent = if (gsFile != null && gsFile.isFile) gsFile.readText() else null
+
+    val firebaseProjectId = gsContent?.let {
+      Regex("\"project_id\"\\s*:\\s*\"([^\"]+)\"").find(it)?.groupValues?.getOrNull(1)
+    }
+    val registeredHashes = gsContent?.let {
+      Regex("\"certificate_hash\"\\s*:\\s*\"([^\"]+)\"").findAll(it)
+        .map { m -> m.groupValues[1].lowercase() }
+        .toSet()
+    }.orEmpty()
+    val webClientId = gsContent?.let {
+      Regex("\"client_id\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"client_type\"\\s*:\\s*3")
+        .find(it)?.groupValues?.getOrNull(1)
+    }
+
+    println("============================================================")
+    println("Esosa Signing Certificate Fingerprints")
+    println("Package (applicationId): $appId")
+    if (firebaseProjectId != null) {
+      println("Firebase project_id:     $firebaseProjectId")
+    }
+    if (webClientId != null) {
+      println("Default Web Client ID:   $webClientId")
+    }
+    if (registeredHashes.isNotEmpty()) {
+      println("google-services.json SHA-1 hashes: ${registeredHashes.joinToString(", ")}")
+    }
+    println("============================================================")
+
+    inspectVariant(
+      variantName = "debug (debugConfig)",
+      keystoreFile = debugKeystoreFile.orNull?.asFile,
+      alias = debugKeyAlias.orNull.orEmpty(),
+      storePassword = debugStorePassword.orNull.orEmpty(),
+      registeredHashes = registeredHashes
+    )
+
+    inspectVariant(
+      variantName = "release (release)",
+      keystoreFile = releaseKeystoreFile.orNull?.asFile,
+      alias = releaseKeyAlias.orNull.orEmpty(),
+      storePassword = releaseStorePassword.orNull.orEmpty(),
+      registeredHashes = registeredHashes
+    )
+  }
+
+  private fun inspectVariant(
+    variantName: String,
+    keystoreFile: File?,
+    alias: String,
+    storePassword: String,
+    registeredHashes: Set<String>
+  ) {
+    println()
+    println("--- Build Configuration: $variantName ---")
+    if (keystoreFile == null || !keystoreFile.isFile) {
+      println("Keystore: NOT FOUND (${keystoreFile?.path ?: "unset"})")
+      return
+    }
+    println("Keystore: ${keystoreFile.path}")
+    println("Alias:    $alias")
+
+    try {
+      val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
+      keystoreFile.inputStream().use { input ->
+        keyStore.load(input, storePassword.toCharArray())
+      }
+      val resolvedAlias = when {
+        alias.isNotBlank() && keyStore.containsAlias(alias) -> alias
+        else -> keyStore.aliases().toList().firstOrNull() ?: ""
+      }
+      val cert = keyStore.getCertificate(resolvedAlias)
+      if (cert == null) {
+        println("Error: No certificate found for alias '$alias'.")
+        return
+      }
+      val x509 = cert as? X509Certificate
+      if (x509 != null) {
+        println("Subject:  ${x509.subjectX500Principal.name}")
+      }
+
+      val encoded = cert.encoded
+      val sha1Colon = digestHex(encoded, "SHA-1", colonDelimited = true)
+      val sha1Raw = digestHex(encoded, "SHA-1", colonDelimited = false).lowercase()
+      val sha256Colon = digestHex(encoded, "SHA-256", colonDelimited = true)
+
+      println("SHA-1:    $sha1Colon")
+      println("SHA-1 (google-services.json): $sha1Raw")
+      println("SHA-256:  $sha256Colon")
+
+      if (registeredHashes.isNotEmpty()) {
+        val matches = sha1Raw in registeredHashes
+        println("Matches app/google-services.json SHA-1: $matches")
+      }
+    } catch (e: Exception) {
+      println("Error reading keystore: ${e.message}")
+    }
+  }
+
+  private fun digestHex(bytes: ByteArray, algorithm: String, colonDelimited: Boolean): String {
+    val digest = MessageDigest.getInstance(algorithm).digest(bytes)
+    val separator = if (colonDelimited) ":" else ""
+    return digest.joinToString(separator) { "%02X".format(it) }
+  }
+}
+
+tasks.register<PrintSigningFingerprintsTask>("printSigningFingerprints") {
+  group = "verification"
+  description = "Prints SHA-1 and SHA-256 signing fingerprints for debug and release build configurations."
+  outputs.upToDateWhen { false }
+
+  applicationId.set(android.defaultConfig.applicationId ?: android.namespace.orEmpty())
+  googleServicesFile.set(layout.projectDirectory.file("google-services.json"))
+
+  android.signingConfigs.findByName("debugConfig")?.let { cfg ->
+    cfg.storeFile?.let { debugKeystoreFile.set(it) }
+    debugKeyAlias.set(cfg.keyAlias.orEmpty())
+    debugStorePassword.set(cfg.storePassword.orEmpty())
+  }
+  android.signingConfigs.findByName("release")?.let { cfg ->
+    cfg.storeFile?.let { releaseKeystoreFile.set(it) }
+    releaseKeyAlias.set(cfg.keyAlias.orEmpty())
+    releaseStorePassword.set(cfg.storePassword.orEmpty())
+  }
+}
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
