@@ -360,7 +360,7 @@ class RoomsViewModel(
         _searchQuery.value = query
         searchJob?.cancel()
         val trimmed = query.trim()
-        if (trimmed.length < 2) {
+        if (trimmed.isEmpty()) {
             _matchingMessages.value = emptyList()
             _isSearchingMessages.value = false
             return
@@ -374,7 +374,7 @@ class RoomsViewModel(
         searchJob = viewModelScope.launch {
             _isSearchingMessages.value = true
             try {
-                delay(140)
+                delay(120)
                 val hits = repository.searchRoomMessages(rooms, trimmed)
                 if (_searchQuery.value.trim() == trimmed) {
                     _matchingMessages.value = hits

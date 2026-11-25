@@ -333,6 +333,78 @@ class ChatFeaturesTest {
     }
 
     @Test
+    fun `room list filters conversations by contact member name and reveals matching member in preview`() {
+        val nowMillis = System.currentTimeMillis()
+        val roomProject = ChatRoom(
+            id = "room_project",
+            title = "Mobile Engineering",
+            chatKind = ChatKind.GROUP,
+            roomCode = "ES5001",
+            memberCount = 3,
+            memberNames = listOf("Alice Cooper", "Charlie Brown"),
+            lastMessageSenderName = "System",
+            lastMessageText = "Deployment pipeline ready",
+            lastMessageAtMillis = nowMillis
+        )
+        val roomGeneral = ChatRoom(
+            id = "room_general",
+            title = "General Discussion",
+            chatKind = ChatKind.GROUP,
+            roomCode = "ES5002",
+            memberCount = 2,
+            memberNames = listOf("David Smith", "Eva Green"),
+            lastMessageSenderName = "Eva",
+            lastMessageText = "See you tomorrow",
+            lastMessageAtMillis = nowMillis
+        )
+
+        composeTestRule.setContent {
+            var query by remember { mutableStateOf("") }
+            EsosaTheme {
+                MessagesScreen(
+                    currentUserId = "local_me",
+                    roomsState = UiState.Success(listOf(roomProject, roomGeneral)),
+                    selectedRoomId = null,
+                    activeRoom = null,
+                    activeMessagesState = UiState.Success(emptyList()),
+                    searchQuery = query,
+                    matchingMessages = emptyList(),
+                    actionError = null,
+                    isBusy = false,
+                    onOpenRoom = {},
+                    onSearchQueryChanged = { query = it },
+                    onOpenSearchResult = { _, _ -> },
+                    onCreateRoom = { _, _, _ -> },
+                    onSendMessage = { _, _ -> },
+                    onDeleteMessage = { _, _ -> },
+                    onDeleteRoom = {},
+                    onClearError = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("room_card_room_project").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_general").assertIsDisplayed()
+
+        // Search for contact member "Charlie" (present in Mobile Engineering, not General)
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("Charlie")
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("room_card_room_project").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_general").assertDoesNotExist()
+
+        // Search for contact member "Eva"
+        composeTestRule.onNodeWithTag("clear_chat_search_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("chat_list_search_bar").performTextInput("Eva")
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("room_card_room_general").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("room_card_room_project").assertDoesNotExist()
+    }
+
+    @Test
     fun `room displays camera button, photo upload progress, inline photo bubble, and full-screen photo preview`() {
         val nowMillis = System.currentTimeMillis()
         val room = ChatRoom(

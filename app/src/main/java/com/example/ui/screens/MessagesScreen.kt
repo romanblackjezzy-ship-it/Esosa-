@@ -591,7 +591,10 @@ private fun TelegramChatsListView(
                     val trimmedQuery = remember(searchQuery) { searchQuery.trim() }
                     val archivedCount = remember(rooms) { rooms.count { it.isArchived } }
 
-                    val folderFilteredRooms = remember(rooms, selectedFolder, trimmedQuery) {
+                    val matchingRoomIdsFromMessages = remember(matchingMessages) {
+                        matchingMessages.map { it.room.id }.toSet()
+                    }
+                    val folderFilteredRooms = remember(rooms, selectedFolder, trimmedQuery, matchingRoomIdsFromMessages) {
                         val base = if (trimmedQuery.isNotEmpty()) {
                             rooms
                         } else {
@@ -612,7 +615,10 @@ private fun TelegramChatsListView(
                                 room.topic.contains(trimmedQuery, ignoreCase = true) ||
                                 room.handle.contains(trimmedQuery, ignoreCase = true) ||
                                 room.lastMessageText.contains(trimmedQuery, ignoreCase = true) ||
-                                room.lastMessageSenderName.contains(trimmedQuery, ignoreCase = true)
+                                room.lastMessageSenderName.contains(trimmedQuery, ignoreCase = true) ||
+                                room.memberNames.any { it.contains(trimmedQuery, ignoreCase = true) } ||
+                                room.adminNames.any { it.contains(trimmedQuery, ignoreCase = true) } ||
+                                matchingRoomIdsFromMessages.contains(room.id)
                         }
                     }
 
@@ -954,7 +960,17 @@ private fun TelegramChatRow(
                             TypingMiniDots(color = MaterialTheme.colorScheme.primary)
                         }
                     } else {
+                        val cleanSearch = searchQuery.trim()
+                        val matchingMember = if (cleanSearch.isNotEmpty() &&
+                            !room.title.contains(cleanSearch, ignoreCase = true) &&
+                            !room.lastMessageText.contains(cleanSearch, ignoreCase = true)
+                        ) {
+                            room.memberNames.firstOrNull { it.contains(cleanSearch, ignoreCase = true) }
+                                ?: room.adminNames.firstOrNull { it.contains(cleanSearch, ignoreCase = true) }
+                        } else null
+
                         val previewText = when {
+                            matchingMember != null -> "Member: $matchingMember"
                             room.lastMessageSenderName.isNotBlank() && room.lastMessageText.isNotBlank() ->
                                 "${room.lastMessageSenderName}: ${room.lastMessageText}"
                             room.lastMessageText.isNotBlank() -> room.lastMessageText

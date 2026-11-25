@@ -233,7 +233,7 @@ jobs:
 
       - name: Build Debug APK
         env:
-          GRADLE_OPTS: "-Xmx256m -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Xmx1g -Dfile.encoding=UTF-8"
         run: |
           echo "Java: $(java -version 2>&1 | head -n 1)"
           echo "ANDROID_HOME=${ANDROID_HOME}"

@@ -1292,7 +1292,7 @@ class ChatRepository(
         rawQuery: String
     ): List<MessageSearchHit> {
         val query = rawQuery.trim()
-        if (query.length < 2 || rooms.isEmpty()) return emptyList()
+        if (query.isEmpty() || rooms.isEmpty()) return emptyList()
         val roomMap = rooms.associateBy { it.id }
         return try {
             dao.searchRoomMessages(query).mapNotNull { entity ->
