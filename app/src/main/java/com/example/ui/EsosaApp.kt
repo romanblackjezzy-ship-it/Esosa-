@@ -1060,6 +1060,7 @@ private fun EsosaSocialShell(
                                     externalQuery = pendingExploreQuery,
                                     onExternalQueryConsumed = { pendingExploreQuery = null },
                                     onSelectPost = { activeDetailPost = it },
+                                    onToggleFollow = { uid, username -> socialViewModel.toggleFollow(uid, username) },
                                     modifier = Modifier.weight(1f)
                                 )
 
