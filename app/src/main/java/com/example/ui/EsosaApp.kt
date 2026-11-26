@@ -380,6 +380,7 @@ fun EsosaApp(
 
                         LaunchedEffect(signedInUser.uid) {
                             userRepository.syncSignedInUser(signedInUser)
+                            runCatching { userRepository.flushOfflineQueue() }
                             val metadata = pendingSignupMetadata
                             if (metadata.fullName.isNotBlank() || metadata.username.isNotBlank()) {
                                 val latest = profilePreferences.getProfile()

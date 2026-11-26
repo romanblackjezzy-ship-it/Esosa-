@@ -734,6 +734,9 @@ class ChatRepository(
             }
 
             val senderDisplayName = profile.displayName.ifBlank { "You" }
+            val shouldCloudSync = uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && room.ownerId.isNotBlank()
+            var isSuccessfullySynced = !shouldCloudSync
+
             val entity = RoomMessageEntity(
                 id = messageId,
                 roomId = room.id,
@@ -753,7 +756,8 @@ class ChatRepository(
                 attachmentSizeLabel = attachmentSizeLabel,
                 scheduledForMillis = scheduledForMillis,
                 expiresAtMillis = expiresAt,
-                viewCount = if (room.chatKind == ChatKind.CHANNEL) 1 else 0
+                viewCount = if (room.chatKind == ChatKind.CHANNEL) 1 else 0,
+                isSynced = isSuccessfullySynced
             )
             dao.upsertRoomMessage(entity)
             val preview = when {
@@ -772,22 +776,26 @@ class ChatRepository(
                 updatedAt = now
             )
 
-            if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && room.ownerId.isNotBlank()) {
-                return runFirestoreWrite {
-                    syncService.sendMessage(
-                        uid = uid,
-                        room = room,
-                        message = entity.toDomain(),
-                        senderPhotoUrl = profile.photoUrl,
-                        lastMessagePreview = preview
-                    )
+            if (shouldCloudSync) {
+                runCatching {
+                    runFirestoreWrite {
+                        syncService!!.sendMessage(
+                            uid = uid,
+                            room = room,
+                            message = entity.toDomain(),
+                            senderPhotoUrl = profile.photoUrl,
+                            lastMessagePreview = preview
+                        )
+                    }
+                }.onSuccess {
+                    dao.markMessageSynced(entity.id)
                 }
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.success(Unit) // Queue locally even if network throws exception
         }
     }
 
@@ -1369,6 +1377,45 @@ class ChatRepository(
         isBlocked = isBlocked,
         wallpaperId = wallpaperId
     )
+
+    suspend fun flushOfflineQueue(): Result<Unit> {
+        val remoteSync = syncService ?: return Result.success(Unit)
+        val uid = currentUserId()
+        if (uid == LocalProfilePreferences.LOCAL_USER_ID) return Result.success(Unit)
+        return try {
+            val unsynced = dao.getUnsyncedMessages()
+            for (entity in unsynced) {
+                val room = dao.getRoomById(entity.roomId) ?: continue
+                if (room.ownerId.isBlank()) continue
+                val chatRoom = room.toDomain()
+                val profile = profilePreferences.getProfile()
+                val preview = when {
+                    entity.messageType == "sticker" -> entity.text
+                    entity.messageType == "gif" -> "GIF • ${entity.attachmentName ?: entity.text}"
+                    !entity.attachmentName.isNullOrBlank() -> "📎 ${entity.attachmentName}"
+                    !entity.imageUrl.isNullOrBlank() -> "📷 Photo"
+                    entity.messageType == "voice" -> "🎤 Voice message"
+                    else -> entity.text
+                }
+                runCatching {
+                    runFirestoreWrite {
+                        remoteSync.sendMessage(
+                            uid = uid,
+                            room = chatRoom,
+                            message = entity.toDomain(),
+                            senderPhotoUrl = profile.photoUrl,
+                            lastMessagePreview = preview
+                        )
+                    }
+                }.onSuccess {
+                    dao.markMessageSynced(entity.id)
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     private fun resolveUriMetadata(uri: Uri): Pair<String, String> {
         var name = uri.lastPathSegment?.substringAfterLast('/') ?: "Shared_File"

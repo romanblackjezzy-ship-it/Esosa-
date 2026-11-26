@@ -175,7 +175,8 @@ data class RoomMessageEntity(
     val attachmentSizeLabel: String? = null,
     val scheduledForMillis: Long? = null,
     val expiresAtMillis: Long? = null,
-    val viewCount: Int = 0
+    val viewCount: Int = 0,
+    val isSynced: Boolean = true
 ) {
     fun toDomain(): RoomMessage = RoomMessage(
         id = id,

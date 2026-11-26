@@ -136,6 +136,12 @@ interface EsosaDao {
     @Query("UPDATE room_messages SET reactionsJson = :reactionsJson WHERE id = :messageId")
     suspend fun updateRoomMessageReactions(messageId: String, reactionsJson: String)
 
+    @Query("SELECT * FROM room_messages WHERE isSynced = 0 ORDER BY createdAtMillis ASC")
+    suspend fun getUnsyncedMessages(): List<RoomMessageEntity>
+
+    @Query("UPDATE room_messages SET isSynced = 1 WHERE id = :messageId")
+    suspend fun markMessageSynced(messageId: String)
+
     @Query("DELETE FROM room_messages WHERE id = :messageId")
     suspend fun deleteRoomMessageById(messageId: String)
 
