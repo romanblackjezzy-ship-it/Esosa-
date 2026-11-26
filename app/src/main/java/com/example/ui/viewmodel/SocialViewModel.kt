@@ -47,6 +47,8 @@ class SocialViewModel(
     private val _manualPostsFlow = MutableSharedFlow<List<SocialPost>>(extraBufferCapacity = 1)
     private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
     private val _optimisticStoryReactions = MutableStateFlow<Map<String, Map<String, List<String>>>>(emptyMap())
+    private val _optimisticArchivedStates = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    private val autoSyncedArchiveIds = mutableSetOf<String>()
     private val _pagedOlderPosts = MutableStateFlow<List<SocialPost>>(emptyList())
     private val _deletedPostIds = MutableStateFlow<Set<String>>(emptySet())
 
@@ -124,16 +126,83 @@ class SocialViewModel(
     val stories: StateFlow<List<SocialStory>> =
         combine(
             merge(repository.observeStories(), _manualStoriesFlow),
-            _optimisticStoryReactions
-        ) { liveStories, optimisticMap ->
-            if (optimisticMap.isEmpty()) {
+            _optimisticStoryReactions,
+            _optimisticArchivedStates
+        ) { liveStories, optimisticReactions, optimisticArchived ->
+            if (optimisticReactions.isEmpty() && optimisticArchived.isEmpty()) {
                 liveStories
             } else {
                 liveStories.map { story ->
-                    val override = optimisticMap[story.id]
-                    if (override != null) story.copy(reactions = override) else story
+                    val reactionOverride = optimisticReactions[story.id]
+                    val archivedOverride = optimisticArchived[story.id]
+                    story.copy(
+                        reactions = reactionOverride ?: story.reactions,
+                        archived = archivedOverride ?: story.archived
+                    )
                 }
             }
+        }
+            .catch { emit(emptyList()) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = emptyList()
+            )
+
+    val activeStories: StateFlow<List<SocialStory>> =
+        stories
+            .map { list -> list.filter { it.isActiveStory() } }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = emptyList()
+            )
+
+    val archivedStories: StateFlow<List<SocialStory>> =
+        combine(
+            repository.observeUserStories().catch { emit(emptyList()) },
+            stories,
+            _optimisticStoryReactions,
+            _optimisticArchivedStates
+        ) { userStories, liveStories, optimisticReactions, optimisticArchived ->
+            val uid = currentUserId
+            if (uid.isBlank()) return@combine emptyList()
+
+            val merged = LinkedHashMap<String, SocialStory>(userStories.size + liveStories.size)
+            userStories.forEach { story ->
+                if (story.authorId == uid) merged[story.id] = story
+            }
+            liveStories.forEach { story ->
+                if (story.authorId == uid && !merged.containsKey(story.id)) {
+                    merged[story.id] = story
+                }
+            }
+
+            val withOverrides = merged.values.map { story ->
+                val reactionOverride = optimisticReactions[story.id]
+                val archivedOverride = optimisticArchived[story.id]
+                story.copy(
+                    reactions = reactionOverride ?: story.reactions,
+                    archived = archivedOverride ?: story.archived
+                )
+            }
+
+            withOverrides.forEach { story ->
+                if (story.id.isNotBlank() &&
+                    story.isExpired() &&
+                    !story.archived &&
+                    autoSyncedArchiveIds.add(story.id)
+                ) {
+                    viewModelScope.launch {
+                        runCatching { repository.setStoryArchived(story.id, true) }
+                            .onFailure { autoSyncedArchiveIds.remove(story.id) }
+                    }
+                }
+            }
+
+            withOverrides
+                .filter { it.isArchivedStory() }
+                .sortedByDescending { it.createdAtMillis }
         }
             .catch { emit(emptyList()) }
             .stateIn(
@@ -488,6 +557,44 @@ class SocialViewModel(
             runCatching { repository.deleteStory(story) }
                 .onSuccess { showStatusBanner("Story deleted") }
                 .onFailure { _actionError.value = it.localizedMessage ?: "Failed to delete story." }
+        }
+    }
+
+    fun archiveStory(story: SocialStory) {
+        if (story.id.isBlank() || story.authorId != currentUserId) return
+        _optimisticArchivedStates.value = _optimisticArchivedStates.value + (story.id to true)
+        viewModelScope.launch {
+            runCatching { repository.setStoryArchived(story.id, true) }
+                .onSuccess {
+                    showStatusBanner("Story saved to Archive")
+                    delay(400L)
+                    _optimisticArchivedStates.value = _optimisticArchivedStates.value - story.id
+                }
+                .onFailure { err ->
+                    _optimisticArchivedStates.value = _optimisticArchivedStates.value - story.id
+                    _actionError.value = err.localizedMessage ?: "Failed to archive story."
+                }
+        }
+    }
+
+    fun unarchiveStory(story: SocialStory) {
+        if (story.id.isBlank() || story.authorId != currentUserId) return
+        if (story.isExpired()) {
+            showStatusBanner("Stories older than 24 hours stay in Archive")
+            return
+        }
+        _optimisticArchivedStates.value = _optimisticArchivedStates.value + (story.id to false)
+        viewModelScope.launch {
+            runCatching { repository.setStoryArchived(story.id, false) }
+                .onSuccess {
+                    showStatusBanner("Story restored to active stories")
+                    delay(400L)
+                    _optimisticArchivedStates.value = _optimisticArchivedStates.value - story.id
+                }
+                .onFailure { err ->
+                    _optimisticArchivedStates.value = _optimisticArchivedStates.value - story.id
+                    _actionError.value = err.localizedMessage ?: "Failed to restore story."
+                }
         }
     }
 

@@ -495,6 +495,7 @@ private fun EsosaSocialShell(
     var activeDetailPost by remember { mutableStateOf<SocialPost?>(null) }
     var activeStoryAuthorId by remember { mutableStateOf<String?>(null) }
     var activeStoryInitialId by remember { mutableStateOf<String?>(null) }
+    var activeArchiveStoryId by remember { mutableStateOf<String?>(null) }
     var sharingPost by remember { mutableStateOf<SocialPost?>(null) }
     var activeTopicFilter by remember { mutableStateOf<SocialTopicSelection?>(null) }
     var pendingExploreQuery by remember { mutableStateOf<String?>(null) }
@@ -634,7 +635,8 @@ private fun EsosaSocialShell(
     val editingMessage by roomsViewModel.editingMessage.collectAsStateWithLifecycle()
 
     val postsState by socialViewModel.postsState.collectAsStateWithLifecycle()
-    val socialStories by socialViewModel.stories.collectAsStateWithLifecycle()
+    val socialStories by socialViewModel.activeStories.collectAsStateWithLifecycle()
+    val archivedStories by socialViewModel.archivedStories.collectAsStateWithLifecycle()
     val repliesByStory by socialViewModel.repliesByStory.collectAsStateWithLifecycle()
     val savedPostIds by socialViewModel.savedPostIds.collectAsStateWithLifecycle()
     val followEdges by socialViewModel.followEdges.collectAsStateWithLifecycle()
@@ -658,14 +660,21 @@ private fun EsosaSocialShell(
         }
     }
 
-    LaunchedEffect(initialStoryId, socialStories) {
+    LaunchedEffect(initialStoryId, socialStories, archivedStories) {
         if (!initialStoryId.isNullOrBlank()) {
-            val target = socialStories.firstOrNull { it.id == initialStoryId }
-            if (target != null) {
+            val activeTarget = socialStories.firstOrNull { it.id == initialStoryId }
+            if (activeTarget != null) {
                 secondaryRoute = null
                 selectedTab = EsosaTab.HOME
-                activeStoryAuthorId = target.authorId
-                activeStoryInitialId = target.id
+                activeStoryAuthorId = activeTarget.authorId
+                activeStoryInitialId = activeTarget.id
+            } else {
+                val archiveTarget = archivedStories.firstOrNull { it.id == initialStoryId }
+                if (archiveTarget != null) {
+                    secondaryRoute = null
+                    selectedTab = EsosaTab.PROFILE
+                    activeArchiveStoryId = archiveTarget.id
+                }
             }
         }
     }
@@ -1134,6 +1143,7 @@ private fun EsosaSocialShell(
                                     savedPostIds = savedPostIds,
                                     followEdges = followEdges,
                                     stories = socialStories,
+                                    archivedStories = archivedStories,
                                     onOpenCreate = {
                                         createFormat = CreateFormat.POST
                                         selectedTab = EsosaTab.CREATE
@@ -1141,8 +1151,14 @@ private fun EsosaSocialShell(
                                     onOpenStory = { story ->
                                         socialViewModel.markStoryViewed(story)
                                         socialViewModel.observeRepliesForStory(story)
+                                        activeArchiveStoryId = null
                                         activeStoryAuthorId = story.authorId
                                         activeStoryInitialId = story.id
+                                    },
+                                    onOpenArchivedStory = { story ->
+                                        socialViewModel.observeRepliesForStory(story)
+                                        activeStoryAuthorId = null
+                                        activeArchiveStoryId = story.id
                                     },
                                     onAddStoryClick = {
                                         createFormat = CreateFormat.STORY
@@ -1231,6 +1247,12 @@ private fun EsosaSocialShell(
                             activeStoryAuthorId = null
                         }
                     },
+                    onArchiveStory = { targetStory ->
+                        socialViewModel.archiveStory(targetStory)
+                        if (authorSequence.size <= 1) {
+                            activeStoryAuthorId = null
+                        }
+                    },
                     onAddAnotherStory = {
                         activeStoryAuthorId = null
                         createFormat = CreateFormat.STORY
@@ -1239,6 +1261,46 @@ private fun EsosaSocialShell(
                     onDismiss = {
                         activeStoryAuthorId = null
                         activeStoryInitialId = null
+                    }
+                )
+            }
+        }
+
+        // Archived Story Viewer (plays back saved & expired stories from Profile Archive)
+        val archiveTargetId = activeArchiveStoryId
+        if (archiveTargetId != null) {
+            val orderedArchive = remember(archivedStories) {
+                archivedStories.sortedBy { it.createdAtMillis }
+            }
+            if (orderedArchive.isEmpty()) {
+                activeArchiveStoryId = null
+            } else {
+                val initialArchiveIndex = orderedArchive
+                    .indexOfFirst { it.id == archiveTargetId }
+                    .let { if (it >= 0) it else 0 }
+                SocialStoryViewerDialog(
+                    stories = orderedArchive,
+                    initialStoryIndex = initialArchiveIndex,
+                    currentUid = socialViewModel.currentUserId,
+                    repliesByStory = repliesByStory,
+                    isArchiveMode = true,
+                    onStoryChanged = { current ->
+                        socialViewModel.observeRepliesForStory(current)
+                    },
+                    onUnarchiveStory = { targetStory ->
+                        socialViewModel.unarchiveStory(targetStory)
+                        if (orderedArchive.size <= 1) {
+                            activeArchiveStoryId = null
+                        }
+                    },
+                    onDeleteStory = { targetStory ->
+                        socialViewModel.deleteStory(targetStory)
+                        if (orderedArchive.size <= 1) {
+                            activeArchiveStoryId = null
+                        }
+                    },
+                    onDismiss = {
+                        activeArchiveStoryId = null
                     }
                 )
             }

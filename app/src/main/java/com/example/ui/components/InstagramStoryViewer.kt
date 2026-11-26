@@ -53,7 +53,9 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -119,6 +121,9 @@ fun SocialStoryViewerDialog(
     onReactEmoji: ((SocialStory, String) -> Unit)? = null,
     onDeleteStory: (SocialStory) -> Unit,
     onAddAnotherStory: (() -> Unit)? = null,
+    isArchiveMode: Boolean = false,
+    onArchiveStory: ((SocialStory) -> Unit)? = null,
+    onUnarchiveStory: ((SocialStory) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     if (stories.isEmpty()) return
@@ -504,24 +509,58 @@ fun SocialStoryViewerDialog(
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = Color.White,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Text(
-                                    text = SocialFormatters.formatShortTime(story.createdAtMillis),
+                                    text = if (isArchiveMode) {
+                                        SocialFormatters.formatArchiveDate(story.createdAtMillis)
+                                    } else {
+                                        SocialFormatters.formatShortTime(story.createdAtMillis)
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.78f)
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
-                            if (story.hasVideo || isTimerPaused) {
-                                Text(
-                                    text = buildString {
-                                        if (story.hasVideo) append("Video Story")
-                                        if (story.hasVideo && isTimerPaused) append(" • ")
-                                        if (isTimerPaused) append("Paused")
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.78f)
-                                )
+                            if (isArchiveMode || story.hasVideo || isTimerPaused) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    if (isArchiveMode) {
+                                        Surface(
+                                            color = Color.White.copy(alpha = 0.22f),
+                                            shape = RoundedCornerShape(999.dp),
+                                            modifier = Modifier.testTag("story_archived_badge")
+                                        ) {
+                                            Text(
+                                                text = "Archived",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 10.sp
+                                                ),
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    if (story.hasVideo || isTimerPaused) {
+                                        Text(
+                                            text = buildString {
+                                                if (story.hasVideo) append("Video Story")
+                                                if (story.hasVideo && isTimerPaused) append(" • ")
+                                                if (isTimerPaused) append("Paused")
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.78f),
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -557,7 +596,7 @@ fun SocialStoryViewerDialog(
                                 )
                             }
                         }
-                        if (story.authorId == currentUid && onAddAnotherStory != null) {
+                        if (story.authorId == currentUid && !isArchiveMode && onAddAnotherStory != null) {
                             IconButton(
                                 onClick = {
                                     onDismiss()
@@ -570,6 +609,52 @@ fun SocialStoryViewerDialog(
                                 Icon(
                                     imageVector = Icons.Filled.AddCircleOutline,
                                     contentDescription = "Add to your story",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                        if (story.authorId == currentUid && !isArchiveMode && onArchiveStory != null) {
+                            IconButton(
+                                onClick = {
+                                    onArchiveStory(story)
+                                    if (stories.size <= 1) {
+                                        if (hasNextAuthor && onNextAuthor != null) {
+                                            onNextAuthor()
+                                        } else {
+                                            onDismiss()
+                                        }
+                                    } else if (currentIndex >= stories.lastIndex) {
+                                        currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("archive_social_story_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Archive,
+                                    contentDescription = "Save to archive",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                        if (story.authorId == currentUid && isArchiveMode && !story.isExpired() && onUnarchiveStory != null) {
+                            IconButton(
+                                onClick = {
+                                    onUnarchiveStory(story)
+                                    if (stories.size <= 1) {
+                                        onDismiss()
+                                    } else if (currentIndex >= stories.lastIndex) {
+                                        currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("unarchive_social_story_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Unarchive,
+                                    contentDescription = "Restore story",
                                     tint = Color.White
                                 )
                             }
@@ -743,101 +828,103 @@ fun SocialStoryViewerDialog(
                     }
                 }
 
-                // Floating Glassmorphic Emoji Reaction Tray
-                AnimatedVisibility(
-                    visible = showEmojiTray,
-                    enter = fadeIn() + slideInVertically { it / 2 } + scaleIn(initialScale = 0.94f),
-                    exit = fadeOut() + slideOutVertically { it / 2 } + scaleOut(targetScale = 0.94f),
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(bottom = 10.dp)
-                ) {
-                    FloatingStoryEmojiTray(
-                        story = story,
-                        currentUid = currentUid,
-                        isExpanded = isEmojiTrayExpanded,
-                        onToggleExpand = { isEmojiTrayExpanded = !isEmojiTrayExpanded },
-                        onEmojiClick = ::triggerQuickReaction
-                    )
-                }
-
-                // Reply Input Bar + Floating Emoji Tray Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
+                if (!isArchiveMode) {
+                    // Floating Glassmorphic Emoji Reaction Tray
+                    AnimatedVisibility(
+                        visible = showEmojiTray,
+                        enter = fadeIn() + slideInVertically { it / 2 } + scaleIn(initialScale = 0.94f),
+                        exit = fadeOut() + slideOutVertically { it / 2 } + scaleOut(targetScale = 0.94f),
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .padding(bottom = 10.dp)
                     ) {
-                        if (replyDraft.isEmpty()) {
-                            Text(
-                                text = "Send message to @${story.authorUsername}…",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                                color = Color.White.copy(alpha = 0.72f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        FloatingStoryEmojiTray(
+                            story = story,
+                            currentUid = currentUid,
+                            isExpanded = isEmojiTrayExpanded,
+                            onToggleExpand = { isEmojiTrayExpanded = !isEmojiTrayExpanded },
+                            onEmojiClick = ::triggerQuickReaction
+                        )
+                    }
+
+                    // Reply Input Bar + Floating Emoji Tray Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(24.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
+                                .background(Color.Black.copy(alpha = 0.35f))
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            if (replyDraft.isEmpty()) {
+                                Text(
+                                    text = "Send message to @${story.authorUsername}…",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = replyDraft,
+                                onValueChange = { if (it.length <= 500) replyDraft = it },
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                ),
+                                cursorBrush = SolidColor(InstagramBlue),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { isReplyFocused = it.isFocused }
+                                    .testTag("story_reply_input")
                             )
                         }
-                        BasicTextField(
-                            value = replyDraft,
-                            onValueChange = { if (it.length <= 500) replyDraft = it },
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 14.sp
-                            ),
-                            cursorBrush = SolidColor(InstagramBlue),
-                            singleLine = true,
+
+                        Spacer(Modifier.width(4.dp))
+
+                        IconButton(
+                            onClick = { showEmojiTray = !showEmojiTray },
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .onFocusChanged { isReplyFocused = it.isFocused }
-                                .testTag("story_reply_input")
-                        )
-                    }
+                                .minimumInteractiveComponentSize()
+                                .testTag("story_emoji_tray_toggle")
+                        ) {
+                            Icon(
+                                imageVector = if (showEmojiTray) {
+                                    Icons.Filled.EmojiEmotions
+                                } else {
+                                    Icons.Outlined.EmojiEmotions
+                                },
+                                contentDescription = if (showEmojiTray) "Hide emoji tray" else "Show emoji tray",
+                                tint = Color.White
+                            )
+                        }
 
-                    Spacer(Modifier.width(4.dp))
-
-                    IconButton(
-                        onClick = { showEmojiTray = !showEmojiTray },
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("story_emoji_tray_toggle")
-                    ) {
-                        Icon(
-                            imageVector = if (showEmojiTray) {
-                                Icons.Filled.EmojiEmotions
-                            } else {
-                                Icons.Outlined.EmojiEmotions
+                        IconButton(
+                            onClick = {
+                                val clean = replyDraft.trim()
+                                if (clean.isNotEmpty()) {
+                                    onSendReply(story, clean)
+                                    sentReactionFeedback = "Sent reply to @${story.authorUsername}"
+                                    replyDraft = ""
+                                    focusManager.clearFocus()
+                                }
                             },
-                            contentDescription = if (showEmojiTray) "Hide emoji tray" else "Show emoji tray",
-                            tint = Color.White
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            val clean = replyDraft.trim()
-                            if (clean.isNotEmpty()) {
-                                onSendReply(story, clean)
-                                sentReactionFeedback = "Sent reply to @${story.authorUsername}"
-                                replyDraft = ""
-                                focusManager.clearFocus()
-                            }
-                        },
-                        enabled = replyDraft.isNotBlank(),
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("story_reply_send_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.Send,
-                            contentDescription = "Send story reply",
-                            tint = if (replyDraft.isNotBlank()) Color.White else Color.White.copy(alpha = 0.45f)
-                        )
+                            enabled = replyDraft.isNotBlank(),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("story_reply_send_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.Send,
+                                contentDescription = "Send story reply",
+                                tint = if (replyDraft.isNotBlank()) Color.White else Color.White.copy(alpha = 0.45f)
+                            )
+                        }
                     }
                 }
             }

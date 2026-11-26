@@ -183,6 +183,7 @@ service cloud.firestore {
              (('imageUrl' in data) || ('videoUrl' in data) || data.caption.size() >= 1) &&
              data.viewedByUids is list && data.viewedByUids.size() <= 1000 &&
              (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 16)) &&
+             (!('archived' in data) || data.archived is bool) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
@@ -611,8 +612,9 @@ service cloud.firestore {
                        incoming().authorId == request.auth.uid &&
                        incoming().viewedByUids.size() == 0 &&
                        (!('reactions' in incoming()) || incoming().reactions.size() == 0) &&
+                       (!('archived' in incoming()) || incoming().archived == false) &&
                        incoming().keys().hasAll(['authorId', 'authorUsername', 'caption', 'viewedByUids', 'createdAt']) &&
-                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'viewedByUids', 'reactions', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'viewedByUids', 'reactions', 'archived', 'createdAt']) &&
                        isValidSocialStory(incoming());
 
       allow update: if isSignedIn() &&
@@ -637,6 +639,11 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly(['reactions']) &&
                            incoming().reactions is map &&
                            incoming().reactions.size() <= 16
+                         ) ||
+                         (
+                           existing().authorId == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['archived']) &&
+                           incoming().archived is bool
                          )
                        );
 

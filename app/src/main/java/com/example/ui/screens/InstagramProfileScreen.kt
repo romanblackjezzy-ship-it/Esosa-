@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GridOn
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.PersonPin
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -65,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -90,15 +92,18 @@ import com.example.ui.components.InstagramUserAvatar
 import com.example.ui.theme.InstagramBlue
 import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramHeartRed
+import com.example.ui.theme.TelegramAvatarPairs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 
 private enum class ProfileGridTab {
     POSTS,
     REELS,
-    TAGGED
+    TAGGED,
+    ARCHIVE
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,7 +124,9 @@ fun InstagramProfileScreen(
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     stories: List<SocialStory> = emptyList(),
+    archivedStories: List<SocialStory> = emptyList(),
     onOpenStory: (SocialStory) -> Unit = {},
+    onOpenArchivedStory: (SocialStory) -> Unit = onOpenStory,
     onAddStoryClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -206,7 +213,7 @@ fun InstagramProfileScreen(
         userProfile.displayName.lowercase().replace(" ", "_").ifBlank { "esosa_user" }
     }
     val myLatestStory = remember(stories, currentUid) {
-        stories.firstOrNull { it.authorId == currentUid }
+        stories.firstOrNull { it.authorId == currentUid && it.isActiveStory() }
     }
 
     val allPosts = (postsState as? UiState.Success)?.data.orEmpty()
@@ -226,8 +233,10 @@ fun InstagramProfileScreen(
         ProfileGridTab.POSTS -> myPosts
         ProfileGridTab.REELS -> myReels
         ProfileGridTab.TAGGED -> taggedPosts
+        ProfileGridTab.ARCHIVE -> emptyList()
     }
     val chunkedRows = remember(displayedPosts) { displayedPosts.chunked(3) }
+    val chunkedArchiveRows = remember(archivedStories) { archivedStories.chunked(3) }
 
     val followersCount = remember(followEdges, currentUid) {
         followEdges.count { it.targetUid == currentUid }
@@ -419,7 +428,7 @@ fun InstagramProfileScreen(
                 }
             }
 
-            // 3-Tab Switcher: Posts | Reels | Tagged
+            // 4-Tab Switcher: Posts | Reels | Tagged | Archive
             item(key = "profile_tabs") {
                 Row(
                     modifier = Modifier
@@ -447,11 +456,211 @@ fun InstagramProfileScreen(
                         onClick = { activeGridTab = ProfileGridTab.TAGGED },
                         modifier = Modifier.weight(1f).testTag("profile_tab_tagged")
                     )
+                    ProfileGridTabItem(
+                        icon = Icons.Outlined.History,
+                        contentDescription = "Archive",
+                        selected = activeGridTab == ProfileGridTab.ARCHIVE,
+                        onClick = { activeGridTab = ProfileGridTab.ARCHIVE },
+                        modifier = Modifier.weight(1f).testTag("profile_tab_archive")
+                    )
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = InstagramHairline)
             }
 
-            if (displayedPosts.isEmpty()) {
+            if (activeGridTab == ProfileGridTab.ARCHIVE) {
+                item(key = "profile_archive_header") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .testTag("profile_archive_section")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Stories Archive",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Surface(
+                                    color = InstagramBlue.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(999.dp)
+                                ) {
+                                    Text(
+                                        text = "${archivedStories.size} saved",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = InstagramBlue,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Expired stories are saved here privately after 24 hours.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                if (archivedStories.isEmpty()) {
+                    item(key = "profile_archive_empty") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp, vertical = 44.dp)
+                                .testTag("profile_archive_empty"),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(38.dp)
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = "No archived stories yet",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Stories disappear from your profile ring after 24 hours and stay saved here so you can replay them anytime.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            TextButton(onClick = onAddStoryClick) {
+                                Text(
+                                    text = "Create a story",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = InstagramBlue
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(chunkedArchiveRows) { rowStories ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 1.5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                        ) {
+                            for (index in 0 until 3) {
+                                val archivedStory = rowStories.getOrNull(index)
+                                if (archivedStory != null) {
+                                    val pair = TelegramAvatarPairs[
+                                        abs(archivedStory.authorId.hashCode() + index) % TelegramAvatarPairs.size
+                                    ]
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(0.72f)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable { onOpenArchivedStory(archivedStory) }
+                                            .testTag("profile_archive_tile_${archivedStory.id}")
+                                    ) {
+                                        if (archivedStory.imageUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = archivedStory.imageUrl,
+                                                contentDescription = archivedStory.caption.ifBlank { "Archived story" },
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            listOf(pair.first, pair.second, Color(0xFF141414))
+                                                        )
+                                                    )
+                                                    .padding(10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = archivedStory.caption.ifBlank { "Story" },
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                    color = Color.White,
+                                                    maxLines = 4,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            color = Color.Black.copy(alpha = 0.58f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(6.dp)
+                                        ) {
+                                            Text(
+                                                text = SocialFormatters.formatArchiveDate(archivedStory.createdAtMillis),
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 10.sp
+                                                ),
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+
+                                        if (archivedStory.hasVideo) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.PlayCircle,
+                                                contentDescription = "Video story",
+                                                tint = Color.White,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(6.dp)
+                                                    .size(18.dp)
+                                            )
+                                        }
+
+                                        val reactionTotal = archivedStory.totalReactionsCount()
+                                        if (reactionTotal > 0) {
+                                            Surface(
+                                                color = Color.Black.copy(alpha = 0.58f),
+                                                shape = RoundedCornerShape(999.dp),
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomStart)
+                                                    .padding(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "❤️ $reactionTotal",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 10.sp
+                                                    ),
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.weight(1f).aspectRatio(0.72f))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (displayedPosts.isEmpty()) {
                 item(key = "profile_empty_grid") {
                     Column(
                         modifier = Modifier
@@ -464,6 +673,7 @@ fun InstagramProfileScreen(
                             ProfileGridTab.POSTS -> "Capture the moment" to "Photos you share will appear on your profile grid."
                             ProfileGridTab.REELS -> "No Reels yet" to "Share a vertical Reel to showcase it here."
                             ProfileGridTab.TAGGED -> "Photos and videos of you" to "When people tag @$handleLabel in posts, they'll appear here."
+                            ProfileGridTab.ARCHIVE -> "" to ""
                         }
                         Text(
                             text = title,
@@ -561,6 +771,15 @@ fun InstagramProfileScreen(
                     onClick = {
                         showMenuSheet = false
                         onOpenCalls()
+                    }
+                )
+                MenuSheetItem(
+                    icon = Icons.Outlined.History,
+                    label = "Archive (${archivedStories.size})",
+                    modifier = Modifier.testTag("profile_menu_archive"),
+                    onClick = {
+                        showMenuSheet = false
+                        activeGridTab = ProfileGridTab.ARCHIVE
                     }
                 )
                 MenuSheetItem(

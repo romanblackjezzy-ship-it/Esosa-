@@ -225,6 +225,7 @@
         "caption": { "type": "string", "description": "Story caption or status text" },
         "viewedByUids": { "type": "array", "description": "UIDs that have viewed the story" },
         "reactions": { "type": "object", "description": "Optional map of emoji reactions to responder UID lists" },
+        "archived": { "type": "boolean", "description": "Whether the story has expired or been saved into the creator's Archive" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["authorId", "authorUsername", "caption", "viewedByUids", "createdAt"]

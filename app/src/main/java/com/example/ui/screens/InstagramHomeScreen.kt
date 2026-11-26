@@ -114,12 +114,15 @@ fun InstagramHomeScreen(
     val followingSet = remember(followEdges, currentUid) {
         followEdges.filter { it.followerId == currentUid }.map { it.targetUid }.toSet()
     }
-    val myStories = remember(stories, currentUid) {
-        stories.filter { it.authorId == currentUid }
+    val visibleStories = remember(stories) {
+        stories.filter { it.isActiveStory() }
+    }
+    val myStories = remember(visibleStories, currentUid) {
+        visibleStories.filter { it.authorId == currentUid }
     }
     val myLatestStory = myStories.firstOrNull()
-    val otherCreatorsStories = remember(stories, currentUid) {
-        stories.filter { it.authorId != currentUid }
+    val otherCreatorsStories = remember(visibleStories, currentUid) {
+        visibleStories.filter { it.authorId != currentUid }
             .groupBy { it.authorId }
             .values
             .map { creatorList ->
@@ -128,8 +131,8 @@ fun InstagramHomeScreen(
                 latest to allViewed
             }
     }
-    val storiesByAuthor = remember(stories) {
-        stories.associateBy { it.authorId }
+    val storiesByAuthor = remember(visibleStories) {
+        visibleStories.associateBy { it.authorId }
     }
     val posts = (postsState as? UiState.Success)?.data.orEmpty()
 

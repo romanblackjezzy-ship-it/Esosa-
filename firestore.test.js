@@ -672,6 +672,26 @@ test("Instagram social posts, reels, likes, comments, stories, saved posts, and 
     })
   );
 
+  // Story archiving: author can archive/unarchive and query own stories; non-author cannot archive
+  await assertSucceeds(
+    aliceDb.collection("stories").where("authorId", "==", ALICE_UID).get()
+  );
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_1").update({
+      archived: true,
+    })
+  );
+  await assertFails(
+    bobDb.collection("stories").doc("story_1").update({
+      archived: false,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_1").update({
+      archived: false,
+    })
+  );
+
   // Story replies: Bob replies to Alice's story; Alice & Bob can read/query; Charlie cannot read or spoof storyAuthorId
   await assertSucceeds(
     bobDb.collection("stories").doc("story_1").collection("replies").doc("reply_1").set({

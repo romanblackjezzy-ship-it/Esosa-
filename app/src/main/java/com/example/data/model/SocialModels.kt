@@ -1,5 +1,8 @@
 package com.example.data.model
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 enum class SocialMediaType(val id: String) {
@@ -143,14 +146,30 @@ data class SocialStory(
     val caption: String = "",
     val viewedByUids: List<String> = emptyList(),
     val reactions: Map<String, List<String>> = emptyMap(),
+    val archived: Boolean = false,
     val createdAtMillis: Long = 0L
 ) {
+    companion object {
+        const val STORY_LIFETIME_MILLIS = 24L * 60L * 60L * 1000L
+    }
+
     fun isViewedBy(uid: String): Boolean = uid.isNotBlank() && (authorId == uid || viewedByUids.contains(uid))
 
     fun hasReaction(uid: String, emoji: String): Boolean =
         uid.isNotBlank() && reactions[emoji]?.contains(uid) == true
 
     fun totalReactionsCount(): Int = reactions.values.sumOf { it.size }
+
+    fun isExpired(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        if (createdAtMillis <= 0L) return false
+        return (nowMillis - createdAtMillis) >= STORY_LIFETIME_MILLIS
+    }
+
+    fun isArchivedStory(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        archived || isExpired(nowMillis)
+
+    fun isActiveStory(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        !isArchivedStory(nowMillis)
 
     val hasVideo: Boolean
         get() = videoUrl.isNotBlank() ||
@@ -261,5 +280,10 @@ object SocialFormatters {
             days < 7 -> "${days}d"
             else -> "${days / 7}w"
         }
+    }
+
+    fun formatArchiveDate(timestampMillis: Long): String {
+        if (timestampMillis <= 0L) return "Recent"
+        return SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(timestampMillis))
     }
 }

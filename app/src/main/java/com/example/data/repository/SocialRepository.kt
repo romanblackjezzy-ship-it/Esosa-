@@ -37,6 +37,9 @@ class SocialRepository(
 
     fun observeStories(): Flow<List<SocialStory>> = socialService.observeStories()
 
+    fun observeUserStories(uid: String = currentUserId): Flow<List<SocialStory>> =
+        socialService.observeUserStories(uid)
+
     fun observeStoryReplies(story: SocialStory): Flow<List<StoryReply>> =
         socialService.observeStoryReplies(story, currentUserId)
 
@@ -375,6 +378,10 @@ class SocialRepository(
             }
         }
         return updated
+    }
+
+    suspend fun setStoryArchived(storyId: String, archived: Boolean) {
+        socialService.setStoryArchived(storyId, archived)
     }
 
     suspend fun deletePost(post: SocialPost) {

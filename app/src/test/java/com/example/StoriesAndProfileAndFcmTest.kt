@@ -385,4 +385,160 @@ class StoriesAndProfileAndFcmTest {
         composeTestRule.onNodeWithTag("profile_grid_tile_p_tagged").assertIsDisplayed()
         composeTestRule.onNodeWithTag("profile_grid_tile_p_reel").assertDoesNotExist()
     }
+
+    @Test
+    fun `SocialStory expiration and archive helpers distinguish active, 24h expired, and manually archived stories`() {
+        val now = 2_000_000_000L
+        val freshStory = SocialStory(
+            id = "s_fresh",
+            authorId = "u1",
+            archived = false,
+            createdAtMillis = now - 60_000L
+        )
+        val expiredStory = SocialStory(
+            id = "s_expired",
+            authorId = "u1",
+            archived = false,
+            createdAtMillis = now - SocialStory.STORY_LIFETIME_MILLIS - 1_000L
+        )
+        val manuallyArchivedStory = SocialStory(
+            id = "s_manual",
+            authorId = "u1",
+            archived = true,
+            createdAtMillis = now - 60_000L
+        )
+
+        assertFalse(freshStory.isExpired(now))
+        assertFalse(freshStory.isArchivedStory(now))
+        assertTrue(freshStory.isActiveStory(now))
+
+        assertTrue(expiredStory.isExpired(now))
+        assertTrue(expiredStory.isArchivedStory(now))
+        assertFalse(expiredStory.isActiveStory(now))
+
+        assertFalse(manuallyArchivedStory.isExpired(now))
+        assertTrue(manuallyArchivedStory.isArchivedStory(now))
+        assertFalse(manuallyArchivedStory.isActiveStory(now))
+    }
+
+    @Test
+    fun `InstagramProfileScreen Archive tab displays expired and archived stories and opens selected archived story`() {
+        val myUid = "me_uid"
+        val now = System.currentTimeMillis()
+        val archivedOldStory = SocialStory(
+            id = "s_arch_old",
+            authorId = myUid,
+            authorUsername = "alex_mercer",
+            imageUrl = "https://example.com/arch_old.jpg",
+            caption = "Summer trip",
+            reactions = mapOf("🔥" to listOf("friend_1", "friend_2")),
+            archived = true,
+            createdAtMillis = now - (48L * 60L * 60L * 1000L)
+        )
+        val archivedTextStory = SocialStory(
+            id = "s_arch_text",
+            authorId = myUid,
+            authorUsername = "alex_mercer",
+            caption = "Midnight studio session",
+            archived = true,
+            createdAtMillis = now - (30L * 60L * 60L * 1000L)
+        )
+        val openedArchived = mutableListOf<String>()
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                InstagramProfileScreen(
+                    currentUid = myUid,
+                    userProfile = UserProfile(
+                        id = myUid,
+                        displayName = "Alex Mercer",
+                        username = "alex_mercer"
+                    ),
+                    postsState = UiState.Success(emptyList()),
+                    savedPostIds = emptySet(),
+                    followEdges = emptyList(),
+                    stories = emptyList(),
+                    archivedStories = listOf(archivedOldStory, archivedTextStory),
+                    onOpenCreate = {},
+                    onSelectPost = {},
+                    onOpenArchivedStory = { openedArchived += it.id },
+                    onOpenMessages = {},
+                    onOpenCalls = {},
+                    onOpenSettings = {},
+                    onUpdateLocalProfile = { _, _, _ -> },
+                    onUpdateProfilePhoto = { _, _ -> },
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("profile_tab_archive").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("profile_archive_section").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Stories Archive").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 saved").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_archive_tile_s_arch_old").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_archive_tile_s_arch_text").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("profile_archive_tile_s_arch_old").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(listOf("s_arch_old"), openedArchived)
+    }
+
+    @Test
+    fun `story viewer renders archive badge in archive mode and supports archiving an active author story`() {
+        val myUid = "author_alex"
+        val now = System.currentTimeMillis()
+        var archiveMode by mutableStateOf(false)
+        val archivedCalls = mutableListOf<String>()
+        val unarchivedCalls = mutableListOf<String>()
+        val activeStory = SocialStory(
+            id = "s_active_mine",
+            authorId = myUid,
+            authorUsername = "alex_mercer",
+            imageUrl = "https://example.com/active.jpg",
+            caption = "Fresh morning coffee",
+            reactions = mapOf("❤️" to listOf("u_friend")),
+            createdAtMillis = now - 60_000L
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                SocialStoryViewerDialog(
+                    stories = listOf(activeStory),
+                    initialStoryIndex = 0,
+                    currentUid = myUid,
+                    isArchiveMode = archiveMode,
+                    onArchiveStory = {
+                        archivedCalls += it.id
+                        archiveMode = true
+                    },
+                    onUnarchiveStory = {
+                        unarchivedCalls += it.id
+                    },
+                    onDeleteStory = {},
+                    onDismiss = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("archive_social_story_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_archived_badge").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("story_floating_emoji_tray").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("archive_social_story_button").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf("s_active_mine"), archivedCalls)
+        composeTestRule.onNodeWithTag("story_archived_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("unarchive_social_story_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_floating_emoji_tray").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("unarchive_social_story_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(listOf("s_active_mine"), unarchivedCalls)
+    }
 }

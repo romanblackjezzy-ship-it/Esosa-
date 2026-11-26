@@ -57,6 +57,29 @@ class FirestoreSocialService(
         awaitClose { reg.remove() }
     }
 
+    fun observeUserStories(uid: String, limitCount: Long = 100L): Flow<List<SocialStory>> = callbackFlow {
+        if (uid.isBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val reg = db.collection(STORIES_COLLECTION)
+            .whereEqualTo("authorId", uid)
+            .limit(limitCount)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    FirestoreErrorHandler.handleFirestoreError(err, OperationType.LIST, STORIES_COLLECTION, auth)
+                    close(err)
+                    return@addSnapshotListener
+                }
+                val list = snap?.documents.orEmpty()
+                    .mapNotNull(::parseStory)
+                    .sortedByDescending { it.createdAtMillis }
+                trySend(list)
+            }
+        awaitClose { reg.remove() }
+    }
+
     suspend fun fetchLatestPosts(limitCount: Long = DEFAULT_POSTS_PAGE_SIZE): List<SocialPost> {
         return try {
             val snap = db.collection(POSTS_COLLECTION)
@@ -482,6 +505,19 @@ class FirestoreSocialService(
         }
     }
 
+    suspend fun setStoryArchived(storyId: String, archived: Boolean) {
+        if (storyId.isBlank()) return
+        val path = "$STORIES_COLLECTION/$storyId"
+        try {
+            db.collection(STORIES_COLLECTION).document(storyId)
+                .update("archived", archived)
+                .await()
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.UPDATE, path, auth)
+            throw e
+        }
+    }
+
     suspend fun deletePost(postId: String) {
         val path = "$POSTS_COLLECTION/$postId"
         try {
@@ -561,6 +597,7 @@ class FirestoreSocialService(
             caption = doc.getString("caption").orEmpty(),
             viewedByUids = parseStringList(doc.get("viewedByUids")),
             reactions = parseReactionsMap(doc.get("reactions")),
+            archived = doc.getBoolean("archived") ?: false,
             createdAtMillis = FirestoreSnapshotMappers.timestampToMillis(doc.getTimestamp("createdAt", estimate))
         )
     }
