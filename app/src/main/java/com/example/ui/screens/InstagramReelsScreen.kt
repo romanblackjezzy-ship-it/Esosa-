@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -272,18 +273,37 @@ private fun ReelPagerItem(
                 )
             }
     ) {
-        AsyncImage(
-            model = reel.imageUrl,
-            contentDescription = reel.caption.ifBlank { "Reel by ${reel.authorUsername}" },
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val scale = if (isPaused) 1f else kenBurnsScale
-                    scaleX = scale
-                    scaleY = scale
-                }
-        )
+        val activeVideoUrl = reel.videoUrl.ifBlank { if (reel.hasVideo) reel.imageUrl else "" }
+        if (activeVideoUrl.isNotBlank()) {
+            if (reel.imageUrl.isNotBlank() && reel.imageUrl != activeVideoUrl) {
+                AsyncImage(
+                    model = reel.imageUrl,
+                    contentDescription = reel.caption.ifBlank { "Reel by ${reel.authorUsername}" },
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            ReelVideoPlayerLayer(
+                videoUrl = activeVideoUrl,
+                isPaused = isPaused,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("reel_video_player_${reel.id}")
+            )
+        } else {
+            AsyncImage(
+                model = reel.imageUrl,
+                contentDescription = reel.caption.ifBlank { "Reel by ${reel.authorUsername}" },
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = if (isPaused) 1f else kenBurnsScale
+                        scaleX = scale
+                        scaleY = scale
+                    }
+            )
+        }
 
         // Bottom & top legibility scrim
         Box(
@@ -472,6 +492,46 @@ private fun ReelPagerItem(
             }
         }
     }
+}
+
+@Composable
+private fun ReelVideoPlayerLayer(
+    videoUrl: String,
+    isPaused: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    androidx.compose.runtime.DisposableEffect(videoUrl) {
+        onDispose {
+            mediaPlayerRef = null
+        }
+    }
+
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            android.widget.VideoView(ctx).apply {
+                setOnPreparedListener { mp ->
+                    mediaPlayerRef = mp
+                    mp.isLooping = true
+                    mp.setVolume(1f, 1f)
+                    if (!isPaused) {
+                        start()
+                    }
+                }
+                setOnErrorListener { _, _, _ -> true }
+                setVideoURI(Uri.parse(videoUrl))
+            }
+        },
+        update = { videoView ->
+            if (isPaused && videoView.isPlaying) {
+                videoView.pause()
+            } else if (!isPaused && !videoView.isPlaying) {
+                videoView.start()
+            }
+        },
+        modifier = modifier
+    )
 }
 
 @Composable
