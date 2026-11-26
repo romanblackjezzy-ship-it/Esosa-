@@ -77,7 +77,8 @@ data class PreparedUploadFile(
     val contentType: String,
     val fileExtension: String,
     val sizeBytes: Long,
-    val originalUri: Uri? = null
+    val originalUri: Uri? = null,
+    val compressionMetrics: CompressionMetrics? = null
 )
 
 object CameraPhotoHelper {
@@ -152,27 +153,26 @@ object CameraPhotoHelper {
     fun compressUriToJpegBytesWithSizeCap(
         context: Context,
         uri: Uri,
-        maxBytes: Int = 9_500_000
+        maxBytes: Int = 9_500_000,
+        preset: ImageCompressionPreset = ImageCompressionPreset.CHAT_PHOTO
     ): ByteArray {
-        val attempts = listOf(
-            1600 to 84,
-            1280 to 72,
-            1024 to 58
+        val oriented = decodeOrientedBitmapFromUri(
+            context = context,
+            uri = uri,
+            maxTargetDimension = preset.maxDimension * 2,
+            openErrorMessage = "Could not open captured photo.",
+            emptyErrorMessage = "Captured image is empty or unreadable.",
+            decodeErrorMessage = "Could not decode captured photo."
         )
-        var lastBytes = ByteArray(0)
-        for ((dimension, quality) in attempts) {
-            val encoded = compressUriToJpegBytes(
-                context = context,
-                uri = uri,
-                maxDimension = dimension,
-                quality = quality
+        return try {
+            ImageCompressionUtil.compressBitmapToJpegBytes(
+                bitmap = oriented,
+                preset = preset,
+                maxBytesOverride = maxBytes
             )
-            lastBytes = encoded
-            if (encoded.size <= maxBytes) {
-                return encoded
-            }
+        } finally {
+            if (!oriented.isRecycled) oriented.recycle()
         }
-        return lastBytes
     }
 
     fun deleteLocalPhotoIfOwned(context: Context, storagePath: String?) {
@@ -490,8 +490,9 @@ object CameraPhotoHelper {
         uri: Uri,
         cropSpec: MediaCropSpec? = null,
         filter: PostFilter = PostFilter.NORMAL,
-        maxDimension: Int = 1600,
-        maxBytes: Int = 9_500_000
+        preset: ImageCompressionPreset = ImageCompressionPreset.FEED_POST,
+        maxDimension: Int = preset.maxDimension,
+        maxBytes: Int = preset.hardMaxBytes
     ): PreparedUploadFile {
         val stagedSource = copyUriToTempFile(
             context = context,
@@ -500,46 +501,70 @@ object CameraPhotoHelper {
             emptyErrorMessage = "Selected image is empty or unreadable."
         )
         try {
+            val originalBytes = stagedSource.length()
             val format = detectImageFormat(context, uri, stagedSource)
+            val rawExt = uri.lastPathSegment?.substringAfterLast('.', "")
+                ?.lowercase()
+                ?.takeIf { it.isNotBlank() }
+                ?: format.extension
             val isUneditedCrop = cropSpec == null || (
                 cropSpec.scale <= 1.01f &&
                     kotlin.math.abs(cropSpec.offsetXFraction) < 0.01f &&
                     kotlin.math.abs(cropSpec.offsetYFraction) < 0.01f
                 )
 
-            if (isUneditedCrop && filter == PostFilter.NORMAL && stagedSource.length() in 1L..maxBytes.toLong()) {
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(stagedSource.absolutePath, bounds)
-                val orientation = runCatching {
-                    ExifInterface(stagedSource.absolutePath).getAttributeInt(
-                        ExifInterface.TAG_ORIENTATION,
-                        ExifInterface.ORIENTATION_NORMAL
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(stagedSource.absolutePath, bounds)
+            val orientation = runCatching {
+                ExifInterface(stagedSource.absolutePath).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+            val normalOrientation = orientation == ExifInterface.ORIENTATION_NORMAL ||
+                orientation == ExifInterface.ORIENTATION_UNDEFINED
+            val aspectMatches = cropSpec == null || (
+                bounds.outWidth > 0 && bounds.outHeight > 0 &&
+                    kotlin.math.abs((bounds.outWidth.toFloat() / bounds.outHeight.toFloat()) - cropSpec.targetAspectRatio) < 0.03f
+                )
+
+            if (isUneditedCrop &&
+                filter == PostFilter.NORMAL &&
+                ImageCompressionUtil.canKeepCompactUneditedFile(
+                    originalBytes = originalBytes,
+                    width = bounds.outWidth,
+                    height = bounds.outHeight,
+                    normalOrientation = normalOrientation,
+                    aspectMatches = aspectMatches,
+                    preset = preset,
+                    maxBytesCap = maxBytes
+                )
+            ) {
+                val keepExt = if (format == SupportedImageFormat.JPEG && rawExt == "jpeg") "jpeg" else format.extension
+                val directOut = createUploadStagingFile(context, keepExt)
+                stagedSource.copyTo(directOut, overwrite = true)
+                return PreparedUploadFile(
+                    file = directOut,
+                    fileUri = Uri.fromFile(directOut),
+                    contentType = format.mimeType,
+                    fileExtension = keepExt,
+                    sizeBytes = directOut.length(),
+                    originalUri = uri,
+                    compressionMetrics = CompressionMetrics(
+                        preset = preset,
+                        originalBytes = originalBytes,
+                        compressedBytes = directOut.length(),
+                        width = bounds.outWidth,
+                        height = bounds.outHeight,
+                        format = format,
+                        wasReencoded = false
                     )
-                }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-                val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
-                val aspectMatches = cropSpec == null || (
-                    bounds.outWidth > 0 && bounds.outHeight > 0 &&
-                        kotlin.math.abs((bounds.outWidth.toFloat() / bounds.outHeight.toFloat()) - cropSpec.targetAspectRatio) < 0.03f
-                    )
-                val normalOrientation = orientation == ExifInterface.ORIENTATION_NORMAL ||
-                    orientation == ExifInterface.ORIENTATION_UNDEFINED
-                if (maxSide in 1..maxDimension && normalOrientation && aspectMatches) {
-                    val directOut = createUploadStagingFile(context, format.extension)
-                    stagedSource.copyTo(directOut, overwrite = true)
-                    return PreparedUploadFile(
-                        file = directOut,
-                        fileUri = Uri.fromFile(directOut),
-                        contentType = format.mimeType,
-                        fileExtension = format.extension,
-                        sizeBytes = directOut.length(),
-                        originalUri = uri
-                    )
-                }
+                )
             }
 
             val oriented = decodeOrientedBitmapFromFile(
                 tempFile = stagedSource,
-                maxTargetDimension = 3200,
+                maxTargetDimension = (maxDimension * 2).coerceAtLeast(2048),
                 emptyErrorMessage = "Selected image is empty or unreadable.",
                 decodeErrorMessage = "Could not decode selected image."
             )
@@ -573,14 +598,51 @@ object CameraPhotoHelper {
             }
 
             return try {
-                encodeBitmapToUploadFile(
+                val compressed = ImageCompressionUtil.compressBitmapForUpload(
                     context = context,
                     bitmap = filtered,
                     preferredFormat = format,
-                    maxDimension = maxDimension,
-                    maxBytes = maxBytes,
-                    originalUri = uri
+                    preferredExtension = rawExt,
+                    preset = preset,
+                    originalBytes = originalBytes,
+                    maxDimensionOverride = maxDimension,
+                    maxBytesOverride = maxBytes,
+                    originalUri = uri,
+                    stagingFileCreator = ::createUploadStagingFile
                 )
+                val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+                if (isUneditedCrop &&
+                    filter == PostFilter.NORMAL &&
+                    normalOrientation &&
+                    aspectMatches &&
+                    maxSide in 1..maxDimension &&
+                    originalBytes in 1L..maxBytes.toLong() &&
+                    compressed.sizeBytes > originalBytes
+                ) {
+                    compressed.file.delete()
+                    val keepExt = if (format == SupportedImageFormat.JPEG && rawExt == "jpeg") "jpeg" else format.extension
+                    val directOut = createUploadStagingFile(context, keepExt)
+                    stagedSource.copyTo(directOut, overwrite = true)
+                    PreparedUploadFile(
+                        file = directOut,
+                        fileUri = Uri.fromFile(directOut),
+                        contentType = format.mimeType,
+                        fileExtension = keepExt,
+                        sizeBytes = directOut.length(),
+                        originalUri = uri,
+                        compressionMetrics = CompressionMetrics(
+                            preset = preset,
+                            originalBytes = originalBytes,
+                            compressedBytes = directOut.length(),
+                            width = bounds.outWidth,
+                            height = bounds.outHeight,
+                            format = format,
+                            wasReencoded = false
+                        )
+                    )
+                } else {
+                    compressed
+                }
             } finally {
                 if (filtered !== cropped && !filtered.isRecycled) filtered.recycle()
                 if (cropped !== oriented && !cropped.isRecycled) cropped.recycle()
@@ -670,84 +732,7 @@ object CameraPhotoHelper {
         )
     }
 
-    private fun encodeBitmapToUploadFile(
-        context: Context,
-        bitmap: Bitmap,
-        preferredFormat: SupportedImageFormat,
-        maxDimension: Int,
-        maxBytes: Int,
-        originalUri: Uri
-    ): PreparedUploadFile {
-        val attempts = listOf(
-            maxDimension to 86,
-            minOf(maxDimension, 1280) to 74,
-            minOf(maxDimension, 1024) to 60
-        )
 
-        val formatSequence = if (preferredFormat == SupportedImageFormat.PNG) {
-            // Try PNG across dimension caps first, falling back to WEBP if lossless PNG exceeds size cap
-            listOf(SupportedImageFormat.PNG, SupportedImageFormat.WEBP, SupportedImageFormat.JPEG)
-        } else {
-            listOf(preferredFormat)
-        }
-
-        for (targetFormat in formatSequence) {
-            for ((dim, quality) in attempts) {
-                val scaled = scaleDownIfNeeded(bitmap, dim)
-                val bytes = try {
-                    ByteArrayOutputStream().use { out ->
-                        if (!scaled.compress(targetFormat.bitmapCompressFormat(), quality, out)) {
-                            throw IllegalStateException("Could not encode ${targetFormat.name} image.")
-                        }
-                        out.toByteArray()
-                    }
-                } finally {
-                    if (scaled !== bitmap && !scaled.isRecycled) scaled.recycle()
-                }
-                if (bytes.isNotEmpty() && bytes.size <= maxBytes) {
-                    val outFile = createUploadStagingFile(context, targetFormat.extension)
-                    FileOutputStream(outFile).use { output ->
-                        output.write(bytes)
-                        output.flush()
-                    }
-                    return PreparedUploadFile(
-                        file = outFile,
-                        fileUri = Uri.fromFile(outFile),
-                        contentType = targetFormat.mimeType,
-                        fileExtension = targetFormat.extension,
-                        sizeBytes = outFile.length(),
-                        originalUri = originalUri
-                    )
-                }
-            }
-        }
-
-        // Last resort JPEG attempt if image was exceptionally dense
-        val fallbackScaled = scaleDownIfNeeded(bitmap, 960)
-        val fallbackBytes = try {
-            ByteArrayOutputStream().use { out ->
-                if (!fallbackScaled.compress(Bitmap.CompressFormat.JPEG, 55, out)) {
-                    throw IllegalStateException("Could not encode image for upload.")
-                }
-                out.toByteArray()
-            }
-        } finally {
-            if (fallbackScaled !== bitmap && !fallbackScaled.isRecycled) fallbackScaled.recycle()
-        }
-        val outFile = createUploadStagingFile(context, SupportedImageFormat.JPEG.extension)
-        FileOutputStream(outFile).use { output ->
-            output.write(fallbackBytes)
-            output.flush()
-        }
-        return PreparedUploadFile(
-            file = outFile,
-            fileUri = Uri.fromFile(outFile),
-            contentType = SupportedImageFormat.JPEG.mimeType,
-            fileExtension = SupportedImageFormat.JPEG.extension,
-            sizeBytes = outFile.length(),
-            originalUri = originalUri
-        )
-    }
 
     private fun detectImageFormatFromFileHeader(file: File): SupportedImageFormat? {
         val header = ByteArray(12)

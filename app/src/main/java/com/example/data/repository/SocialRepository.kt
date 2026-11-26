@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.example.core.LocalProfilePreferences
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.ImageCompressionPreset
 import com.example.data.model.MediaCropSpec
 import com.example.data.model.PostComment
 import com.example.data.model.PostFilter
@@ -30,7 +31,9 @@ class SocialRepository(
     val currentUserId: String
         get() = auth.currentUser?.uid ?: profilePreferences.getProfile().userId
 
-    fun observePosts(): Flow<List<SocialPost>> = socialService.observePosts()
+    fun observePosts(
+        limitCount: Long = FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE
+    ): Flow<List<SocialPost>> = socialService.observePosts(limitCount)
 
     fun observeStories(): Flow<List<SocialStory>> = socialService.observeStories()
 
@@ -43,7 +46,14 @@ class SocialRepository(
 
     fun observeFollows(): Flow<List<UserFollowEdge>> = socialService.observeFollows()
 
-    suspend fun fetchLatestPosts(): List<SocialPost> = socialService.fetchLatestPosts()
+    suspend fun fetchLatestPosts(
+        limitCount: Long = FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE
+    ): List<SocialPost> = socialService.fetchLatestPosts(limitCount)
+
+    suspend fun fetchPostsAfter(
+        beforeCreatedAtMillis: Long,
+        limitCount: Long = FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE
+    ): List<SocialPost> = socialService.fetchPostsAfter(beforeCreatedAtMillis, limitCount)
 
     suspend fun fetchLatestStories(): List<SocialStory> = socialService.fetchLatestStories()
 
@@ -136,7 +146,8 @@ class SocialRepository(
                     context = appContext,
                     uri = imageUri,
                     cropSpec = cropSpec,
-                    filter = filter
+                    filter = filter,
+                    preset = ImageCompressionPreset.FEED_POST
                 )
             }
             val uploaded = try {
@@ -241,7 +252,8 @@ class SocialRepository(
                         context = appContext,
                         uri = imageUri,
                         cropSpec = cropSpec,
-                        filter = filter
+                        filter = filter,
+                        preset = ImageCompressionPreset.STORY
                     )
                 }
                 val uploaded = try {

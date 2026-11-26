@@ -14,6 +14,7 @@ import com.example.data.local.RoomMessageEntity
 import com.example.data.local.StoryEntity
 import com.example.data.local.StringListJsonCodec
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.ImageCompressionPreset
 import com.example.data.media.EsosaImageCache
 import com.example.data.model.ActiveSession
 import com.example.data.model.AppThemeMode
@@ -870,7 +871,11 @@ class ChatRepository(
         return try {
             onProgress(0.08f)
             val preparedFile = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.prepareUploadImageFile(appContext, photoUri)
+                CameraPhotoHelper.prepareUploadImageFile(
+                    context = appContext,
+                    uri = photoUri,
+                    preset = ImageCompressionPreset.CHAT_PHOTO
+                )
             }
             onProgress(0.14f)
             val profile = profilePreferences.getProfile()

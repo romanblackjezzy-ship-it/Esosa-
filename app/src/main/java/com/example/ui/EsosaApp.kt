@@ -22,12 +22,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -36,6 +39,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,11 +92,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import androidx.core.app.ActivityCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
@@ -486,6 +496,8 @@ private fun EsosaSocialShell(
     var activeStoryAuthorId by remember { mutableStateOf<String?>(null) }
     var activeStoryInitialId by remember { mutableStateOf<String?>(null) }
     var sharingPost by remember { mutableStateOf<SocialPost?>(null) }
+    var activeTopicFilter by remember { mutableStateOf<SocialTopicSelection?>(null) }
+    var pendingExploreQuery by remember { mutableStateOf<String?>(null) }
 
     var hasMicPermission by remember {
         mutableStateOf(VoiceCallAudioController.hasMicrophonePermission(context))
@@ -631,6 +643,8 @@ private fun EsosaSocialShell(
     val socialUploadProgress by socialViewModel.uploadProgress.collectAsStateWithLifecycle()
     val socialActionError by socialViewModel.actionError.collectAsStateWithLifecycle()
     val isRefreshingFeed by socialViewModel.isRefreshingFeed.collectAsStateWithLifecycle()
+    val isLoadingMorePosts by socialViewModel.isLoadingMorePosts.collectAsStateWithLifecycle()
+    val hasMorePosts by socialViewModel.hasMorePosts.collectAsStateWithLifecycle()
     val socialBanner by socialViewModel.statusBanner.collectAsStateWithLifecycle()
 
     LaunchedEffect(initialPostId, postsState) {
@@ -993,8 +1007,18 @@ private fun EsosaSocialShell(
                                     savedPostIds = savedPostIds,
                                     followEdges = followEdges,
                                     unreadDmCount = unreadDmCount,
+                                    commentsByPost = commentsByPost,
                                     isRefreshing = isRefreshingFeed,
                                     onRefreshFeed = { socialViewModel.refreshFeed() },
+                                    isLoadingMore = isLoadingMorePosts,
+                                    hasMorePosts = hasMorePosts,
+                                    onLoadMorePosts = { socialViewModel.loadMorePosts() },
+                                    onHashtagClick = { tag ->
+                                        activeTopicFilter = SocialTopicSelection.Hashtag(tag)
+                                    },
+                                    onUsernameClick = { handle ->
+                                        activeTopicFilter = SocialTopicSelection.Username(handle)
+                                    },
                                     onOpenDirectMessages = { secondaryRoute = EsosaSecondaryRoute.MESSAGES },
                                     onAddStoryClick = {
                                         createFormat = CreateFormat.STORY
@@ -1024,6 +1048,8 @@ private fun EsosaSocialShell(
                                     currentUid = socialViewModel.currentUserId,
                                     postsState = postsState,
                                     followEdges = followEdges,
+                                    externalQuery = pendingExploreQuery,
+                                    onExternalQueryConsumed = { pendingExploreQuery = null },
                                     onSelectPost = { activeDetailPost = it },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1199,6 +1225,15 @@ private fun EsosaSocialShell(
                 currentUid = socialViewModel.currentUserId,
                 isSaved = savedPostIds.contains(freshPost.id),
                 isFollowingAuthor = followingSet.contains(freshPost.authorId),
+                previewComments = commentsByPost[freshPost.id].orEmpty(),
+                onHashtagClick = { tag ->
+                    activeDetailPost = null
+                    activeTopicFilter = SocialTopicSelection.Hashtag(tag)
+                },
+                onUsernameClick = { handle ->
+                    activeDetailPost = null
+                    activeTopicFilter = SocialTopicSelection.Username(handle)
+                },
                 onDismiss = { activeDetailPost = null },
                 onToggleLike = { socialViewModel.toggleLike(freshPost) },
                 onDoubleTapLike = { socialViewModel.likeOnly(freshPost) },
@@ -1209,6 +1244,31 @@ private fun EsosaSocialShell(
                 },
                 onShareToDm = { sharingPost = freshPost },
                 onDeletePost = { socialViewModel.deletePost(freshPost) }
+            )
+        }
+
+        // Hashtag / Creator Profile Sheet from Feed taps
+        val topicSelection = activeTopicFilter
+        if (topicSelection != null) {
+            val allFeedPosts = (postsState as? UiState.Success)?.data.orEmpty()
+            SocialTopicOrUserSheet(
+                selection = topicSelection,
+                allPosts = allFeedPosts,
+                followEdges = followEdges,
+                currentUid = socialViewModel.currentUserId,
+                onDismiss = { activeTopicFilter = null },
+                onSelectPost = { post ->
+                    activeTopicFilter = null
+                    activeDetailPost = post
+                },
+                onToggleFollow = { targetUid, targetUsername ->
+                    socialViewModel.toggleFollow(targetUid, targetUsername)
+                },
+                onOpenInExplore = { queryText ->
+                    activeTopicFilter = null
+                    pendingExploreQuery = queryText
+                    selectedTab = EsosaTab.EXPLORE
+                }
             )
         }
 
@@ -1527,5 +1587,157 @@ private fun SecondaryOverlayHeader(
             )
         }
         HorizontalDivider(thickness = 0.5.dp, color = InstagramHairline)
+    }
+}
+
+private sealed interface SocialTopicSelection {
+    data class Hashtag(val tag: String) : SocialTopicSelection
+    data class Username(val username: String) : SocialTopicSelection
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SocialTopicOrUserSheet(
+    selection: SocialTopicSelection,
+    allPosts: List<SocialPost>,
+    followEdges: List<com.example.data.model.UserFollowEdge>,
+    currentUid: String,
+    onDismiss: () -> Unit,
+    onSelectPost: (SocialPost) -> Unit,
+    onToggleFollow: (String, String) -> Unit,
+    onOpenInExplore: (String) -> Unit
+) {
+    val cleanQuery = when (selection) {
+        is SocialTopicSelection.Hashtag -> "#${selection.tag.removePrefix("#")}"
+        is SocialTopicSelection.Username -> "@${selection.username.removePrefix("@")}"
+    }
+    val matchingPosts = remember(selection, allPosts) {
+        when (selection) {
+            is SocialTopicSelection.Hashtag -> {
+                val needle = "#${selection.tag.removePrefix("#").lowercase()}"
+                allPosts.filter { it.caption.lowercase().contains(needle) }
+            }
+            is SocialTopicSelection.Username -> {
+                val handle = selection.username.removePrefix("@").lowercase()
+                allPosts.filter { post ->
+                    post.authorUsername.removePrefix("@").lowercase() == handle ||
+                        post.taggedUsernames.any { it.removePrefix("@").lowercase() == handle } ||
+                        post.caption.lowercase().contains("@$handle")
+                }
+            }
+        }
+    }
+    val matchedAuthor = remember(selection, allPosts) {
+        if (selection is SocialTopicSelection.Username) {
+            val handle = selection.username.removePrefix("@").lowercase()
+            allPosts.firstOrNull { it.authorUsername.removePrefix("@").lowercase() == handle }
+        } else {
+            null
+        }
+    }
+    val isFollowing = remember(followEdges, currentUid, matchedAuthor) {
+        val targetUid = matchedAuthor?.authorId ?: return@remember false
+        followEdges.any { it.followerId == currentUid && it.targetUid == targetUid }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 260.dp, max = 520.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp)
+                .testTag("topic_or_user_sheet"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (matchedAuthor != null) {
+                        InstagramUserAvatar(
+                            displayName = matchedAuthor.authorDisplayName,
+                            photoUrl = matchedAuthor.authorPhotoUrl,
+                            seedKey = matchedAuthor.authorId,
+                            size = 44.dp
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = cleanQuery,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${matchingPosts.size} ${if (matchingPosts.size == 1) "post" else "posts"} in feed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (matchedAuthor != null && matchedAuthor.authorId != currentUid) {
+                    Button(
+                        onClick = {
+                            onToggleFollow(matchedAuthor.authorId, matchedAuthor.authorUsername)
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(if (isFollowing) "Following" else "Follow")
+                    }
+                } else {
+                    TextButton(onClick = { onOpenInExplore(cleanQuery) }) {
+                        Text("Explore")
+                    }
+                }
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            if (matchingPosts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No loaded posts match $cleanQuery yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(bottom = 8.dp)
+                ) {
+                    items(matchingPosts, key = { it.id }) { post ->
+                        AsyncImage(
+                            model = post.imageUrl,
+                            contentDescription = post.caption.ifBlank { post.authorUsername },
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { onSelectPost(post) }
+                        )
+                    }
+                }
+            }
+        }
     }
 }

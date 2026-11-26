@@ -90,11 +90,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -143,6 +146,8 @@ fun InstagramUserAvatar(
     showStoryRing: Boolean = false,
     isStoryViewed: Boolean = false,
     showAddBadge: Boolean = false,
+    addBadgeTestTag: String? = null,
+    onAddBadgeClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
@@ -192,23 +197,39 @@ fun InstagramUserAvatar(
         }
 
         if (showAddBadge) {
-            Box(
+            GradientStoryAddBadge(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(InstagramBlue)
-                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "Add story",
-                    tint = Color.White,
-                    modifier = Modifier.size(13.dp)
-                )
-            }
+                    .let { base ->
+                        if (!addBadgeTestTag.isNullOrBlank()) base.testTag(addBadgeTestTag) else base
+                    }
+                    .let { base ->
+                        if (onAddBadgeClick != null) base.clickable(onClick = onAddBadgeClick) else base
+                    }
+            )
         }
+    }
+}
+
+@Composable
+fun GradientStoryAddBadge(
+    size: Dp = 22.dp,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(InstagramStoryGradient), CircleShape)
+            .border(2.dp, MaterialTheme.colorScheme.background, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "Add your story",
+            tint = Color.White,
+            modifier = Modifier.size(size * 0.62f)
+        )
     }
 }
 
@@ -226,6 +247,9 @@ fun InstagramPostCard(
     onShareToDm: () -> Unit,
     onDeletePost: () -> Unit,
     modifier: Modifier = Modifier,
+    previewComments: List<PostComment> = emptyList(),
+    onHashtagClick: (String) -> Unit = {},
+    onUsernameClick: (String) -> Unit = {},
     authorHasStory: Boolean = false,
     isAuthorStoryViewed: Boolean = false,
     onAuthorStoryClick: (() -> Unit)? = null
@@ -277,7 +301,11 @@ fun InstagramPostCard(
                 size = if (authorHasStory) 38.dp else 34.dp,
                 showStoryRing = authorHasStory,
                 isStoryViewed = isAuthorStoryViewed,
-                onClick = if (authorHasStory) onAuthorStoryClick else null
+                onClick = if (authorHasStory && onAuthorStoryClick != null) {
+                    onAuthorStoryClick
+                } else {
+                    { onUsernameClick(post.authorUsername) }
+                }
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -290,7 +318,9 @@ fun InstagramPostCard(
                     color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("post_author_username_${post.id}")
+                    modifier = Modifier
+                        .clickable { onUsernameClick(post.authorUsername) }
+                        .testTag("post_author_username_${post.id}")
                 )
                 val subtitle = when {
                     post.location.isNotBlank() -> post.location
@@ -412,7 +442,8 @@ fun InstagramPostCard(
                             onDoubleTapLike()
                         }
                     )
-                },
+                }
+                .testTag("post_media_container_${post.id}"),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
@@ -571,9 +602,11 @@ fun InstagramPostCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Favorite,
-                    contentDescription = null,
+                    contentDescription = "Liked",
                     tint = Color.White.copy(alpha = 0.94f),
-                    modifier = Modifier.size(92.dp)
+                    modifier = Modifier
+                        .size(92.dp)
+                        .testTag("post_double_tap_heart_${post.id}")
                 )
             }
         }
@@ -666,29 +699,26 @@ fun InstagramPostCard(
 
             if (post.caption.isNotBlank()) {
                 val captionTextColor = MaterialTheme.colorScheme.onBackground
-                val annotatedCaption = remember(post.id, post.authorUsername, post.caption, captionTextColor) {
-                    buildAnnotatedString {
-                        withStyle(
-                            SpanStyle(
-                                fontWeight = FontWeight.SemiBold,
-                                color = captionTextColor
-                            )
-                        ) {
-                            append(post.authorUsername)
-                            append("  ")
-                        }
-                        val words = post.caption.split(" ")
-                        words.forEachIndexed { idx, token ->
-                            if (token.startsWith("#") || token.startsWith("@")) {
-                                withStyle(SpanStyle(color = InstagramBlueDeep)) {
-                                    append(token)
-                                }
-                            } else {
-                                append(token)
-                            }
-                            if (idx < words.lastIndex) append(" ")
-                        }
-                    }
+                val linkStyle = TextLinkStyles(
+                    style = SpanStyle(
+                        color = InstagramBlueDeep,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+                val annotatedCaption = remember(
+                    post.id,
+                    post.authorUsername,
+                    post.caption,
+                    captionTextColor
+                ) {
+                    buildRichCaptionAnnotatedString(
+                        authorUsername = post.authorUsername,
+                        body = post.caption,
+                        authorColor = captionTextColor,
+                        linkStyle = linkStyle,
+                        onHashtagClick = onHashtagClick,
+                        onUsernameClick = onUsernameClick
+                    )
                 }
                 Text(
                     text = annotatedCaption,
@@ -729,13 +759,40 @@ fun InstagramPostCard(
             }
 
             if (post.taggedUsernames.isNotEmpty()) {
+                val taggedLinkStyle = TextLinkStyles(
+                    style = SpanStyle(
+                        color = InstagramBlueDeep,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+                val taggedAnnotated = remember(post.id, post.taggedUsernames) {
+                    buildAnnotatedString {
+                        append("With ")
+                        post.taggedUsernames.forEachIndexed { index, rawUser ->
+                            val cleanUser = rawUser.removePrefix("@").trim()
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = "tagged_user_$cleanUser",
+                                    styles = taggedLinkStyle
+                                ) {
+                                    onUsernameClick(cleanUser)
+                                }
+                            ) {
+                                append("@$cleanUser")
+                            }
+                            if (index < post.taggedUsernames.lastIndex) {
+                                append(", ")
+                            }
+                        }
+                    }
+                }
                 Text(
-                    text = "With " + post.taggedUsernames.joinToString(", ") { "@${it.removePrefix("@")}" },
+                    text = taggedAnnotated,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium
                     ),
-                    color = InstagramBlueDeep,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
@@ -752,8 +809,65 @@ fun InstagramPostCard(
                     modifier = Modifier
                         .padding(top = 2.dp)
                         .clickable(onClick = onOpenComments)
+                        .testTag("post_view_all_comments_${post.id}")
                 )
             }
+
+            if (previewComments.isNotEmpty()) {
+                val recentPreviews = remember(previewComments) {
+                    previewComments.takeLast(2)
+                }
+                val commentLinkStyle = TextLinkStyles(
+                    style = SpanStyle(
+                        color = InstagramBlueDeep,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+                val authorTextColor = MaterialTheme.colorScheme.onBackground
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("post_comments_preview_${post.id}"),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    recentPreviews.forEach { comment ->
+                        val annotatedComment = remember(comment.id, comment.authorUsername, comment.text, authorTextColor) {
+                            buildRichCaptionAnnotatedString(
+                                authorUsername = comment.authorUsername,
+                                body = comment.text,
+                                authorColor = authorTextColor,
+                                linkStyle = commentLinkStyle,
+                                onHashtagClick = onHashtagClick,
+                                onUsernameClick = onUsernameClick
+                            )
+                        }
+                        Text(
+                            text = annotatedComment,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.sp,
+                                lineHeight = 17.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onOpenComments)
+                                .testTag("post_comment_preview_item_${comment.id}")
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = "Add a comment...",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable(onClick = onOpenComments)
+                    .padding(vertical = 2.dp)
+                    .testTag("post_add_comment_prompt_${post.id}")
+            )
 
             Text(
                 text = SocialFormatters.formatTimeAgo(post.createdAtMillis),
@@ -765,8 +879,69 @@ fun InstagramPostCard(
 
         HorizontalDivider(
             thickness = 0.5.dp,
-            color = InstagramHairline.copy(alpha = 0.7f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
         )
+    }
+}
+
+private val SOCIAL_ENTITY_REGEX = Regex("([#@][A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)")
+
+private fun buildRichCaptionAnnotatedString(
+    authorUsername: String,
+    body: String,
+    authorColor: Color,
+    linkStyle: TextLinkStyles,
+    onHashtagClick: (String) -> Unit,
+    onUsernameClick: (String) -> Unit
+) = buildAnnotatedString {
+    val cleanAuthor = authorUsername.removePrefix("@").trim()
+    if (cleanAuthor.isNotBlank()) {
+        withLink(
+            LinkAnnotation.Clickable(
+                tag = "author_$cleanAuthor",
+                styles = TextLinkStyles(
+                    style = SpanStyle(
+                        fontWeight = FontWeight.SemiBold,
+                        color = authorColor
+                    )
+                )
+            ) {
+                onUsernameClick(cleanAuthor)
+            }
+        ) {
+            append(cleanAuthor)
+        }
+        append("  ")
+    }
+
+    var cursor = 0
+    for (match in SOCIAL_ENTITY_REGEX.findAll(body)) {
+        val start = match.range.first
+        val end = match.range.last + 1
+        if (start > cursor) {
+            append(body.substring(cursor, start))
+        }
+        val token = match.value
+        val isHashtag = token.startsWith("#")
+        val cleanTarget = token.substring(1)
+        withLink(
+            LinkAnnotation.Clickable(
+                tag = token,
+                styles = linkStyle
+            ) {
+                if (isHashtag) {
+                    onHashtagClick(cleanTarget)
+                } else {
+                    onUsernameClick(cleanTarget)
+                }
+            }
+        ) {
+            append(token)
+        }
+        cursor = end
+    }
+    if (cursor < body.length) {
+        append(body.substring(cursor))
     }
 }
 
@@ -1077,7 +1252,10 @@ fun InstagramPostDetailDialog(
     onToggleSave: () -> Unit,
     onToggleFollow: () -> Unit,
     onShareToDm: () -> Unit,
-    onDeletePost: () -> Unit
+    onDeletePost: () -> Unit,
+    previewComments: List<PostComment> = emptyList(),
+    onHashtagClick: (String) -> Unit = {},
+    onUsernameClick: (String) -> Unit = {}
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -1119,6 +1297,9 @@ fun InstagramPostDetailDialog(
                             currentUid = currentUid,
                             isSaved = isSaved,
                             isFollowingAuthor = isFollowingAuthor,
+                            previewComments = previewComments,
+                            onHashtagClick = onHashtagClick,
+                            onUsernameClick = onUsernameClick,
                             onToggleLike = onToggleLike,
                             onDoubleTapLike = onDoubleTapLike,
                             onOpenComments = onOpenComments,

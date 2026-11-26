@@ -79,6 +79,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.core.UiState
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.ImageCompressionPreset
 import com.example.data.model.SocialFormatters
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
@@ -136,7 +137,14 @@ fun InstagramProfileScreen(
         isUploadingAvatar = true
         scope.launch {
             val bytesResult = withContext(Dispatchers.IO) {
-                runCatching { CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri, 2_500_000) }
+                runCatching {
+                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(
+                        context = context,
+                        uri = uri,
+                        maxBytes = ImageCompressionPreset.PROFILE_AVATAR.hardMaxBytes,
+                        preset = ImageCompressionPreset.PROFILE_AVATAR
+                    )
+                }
             }
             bytesResult.onSuccess { bytes ->
                 onUpdateProfilePhoto(bytes) {

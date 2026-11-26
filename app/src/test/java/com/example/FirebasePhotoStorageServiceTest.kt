@@ -206,4 +206,67 @@ class FirebasePhotoStorageServiceTest {
             prepared.file.delete()
         }
     }
+
+    @Test
+    fun `image compression utility downscales oversized high-entropy images and records bandwidth savings`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val cacheDir = File(context.cacheDir, "camera_photos").apply { mkdirs() }
+        val largeFile = File(cacheDir, "large_noisy_${System.currentTimeMillis()}.png")
+
+        // Create a 2200x1600 high-entropy bitmap so lossless PNG is large (> 1 MB)
+        val width = 2200
+        val height = 1600
+        val pixels = IntArray(width * height)
+        var seed = 1337
+        for (i in pixels.indices) {
+            seed = seed * 1664525 + 1013904223
+            pixels[i] = (0xFF shl 24) or (seed and 0x00FFFFFF)
+        }
+        val bigBitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        FileOutputStream(largeFile).use { out ->
+            assertTrue(bigBitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+        }
+        bigBitmap.recycle()
+
+        val originalBytes = largeFile.length()
+        assertTrue("Expected large PNG fixture > 900 KB, got $originalBytes", originalBytes > 900_000L)
+
+        val uri = Uri.parse("content://media/picker/0/photo/large_noisy.png")
+        Shadows.shadowOf(context.contentResolver).registerInputStream(uri, largeFile.inputStream())
+
+        val preparedFeed = CameraPhotoHelper.prepareUploadImageFile(
+            context = context,
+            uri = uri,
+            preset = com.example.data.media.ImageCompressionPreset.FEED_POST
+        )
+        assertTrue(preparedFeed.file.exists())
+        assertTrue(
+            "Expected compressed upload (${preparedFeed.sizeBytes}) < original ($originalBytes)",
+            preparedFeed.sizeBytes < originalBytes
+        )
+        assertTrue(
+            "Expected feed image to compress under 900 KB budget, got ${preparedFeed.sizeBytes}",
+            preparedFeed.sizeBytes <= 900_000L
+        )
+        val feedMetrics = preparedFeed.compressionMetrics
+        assertNotNull(feedMetrics)
+        assertTrue(feedMetrics!!.wasReencoded)
+        assertTrue(feedMetrics.savingsPercent > 0)
+        assertTrue(maxOf(feedMetrics.width, feedMetrics.height) <= 1440)
+
+        Shadows.shadowOf(context.contentResolver).registerInputStream(uri, largeFile.inputStream())
+        val avatarBytes = CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(
+            context = context,
+            uri = uri,
+            preset = com.example.data.media.ImageCompressionPreset.PROFILE_AVATAR
+        )
+        assertTrue(avatarBytes.isNotEmpty())
+        assertTrue(
+            "Expected avatar bytes (${avatarBytes.size}) <= 180 KB",
+            avatarBytes.size <= 180_000
+        )
+
+        preparedFeed.file.delete()
+        largeFile.delete()
+    }
 }

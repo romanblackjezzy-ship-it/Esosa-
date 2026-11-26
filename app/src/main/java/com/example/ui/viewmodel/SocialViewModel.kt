@@ -13,6 +13,7 @@ import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
+import com.example.data.remote.FirestoreSocialService
 import com.example.data.repository.SocialRepository
 import com.example.notifications.EsosaNotificationManager
 import kotlinx.coroutines.CancellationException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
@@ -43,13 +45,46 @@ class SocialViewModel(
 
     private val _manualPostsFlow = MutableSharedFlow<List<SocialPost>>(extraBufferCapacity = 1)
     private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
+    private val _pagedOlderPosts = MutableStateFlow<List<SocialPost>>(emptyList())
+    private val _deletedPostIds = MutableStateFlow<Set<String>>(emptySet())
+
+    private val _isLoadingMorePosts = MutableStateFlow(false)
+    val isLoadingMorePosts: StateFlow<Boolean> = _isLoadingMorePosts.asStateFlow()
+
+    private val _hasMorePosts = MutableStateFlow(true)
+    val hasMorePosts: StateFlow<Boolean> = _hasMorePosts.asStateFlow()
 
     private var hasInitializedLikeBaseline = false
     private val knownLikesByMyPost = mutableMapOf<String, Set<String>>()
 
     val postsState: StateFlow<UiState<List<SocialPost>>> =
-        merge(repository.observePosts(), _manualPostsFlow)
+        combine(
+            merge(repository.observePosts(), _manualPostsFlow)
+                .onEach { headPosts ->
+                    if (_pagedOlderPosts.value.isEmpty() &&
+                        headPosts.size < FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE.toInt()
+                    ) {
+                        _hasMorePosts.value = false
+                    } else if (headPosts.size >= FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE.toInt()) {
+                        _hasMorePosts.value = true
+                    }
+                },
+            _pagedOlderPosts,
+            _deletedPostIds
+        ) { headPosts, olderPosts, deletedIds ->
+            val combined = LinkedHashMap<String, SocialPost>(headPosts.size + olderPosts.size)
+            headPosts.forEach { post ->
+                if (post.id !in deletedIds) combined[post.id] = post
+            }
+            olderPosts.forEach { post ->
+                if (post.id !in deletedIds && !combined.containsKey(post.id)) {
+                    combined[post.id] = post
+                }
+            }
+            combined.values.sortedByDescending { it.createdAtMillis }
+        }
             .onEach { posts ->
+                prefetchPreviewComments(posts)
                 val uid = currentUserId
                 val myPosts = posts.filter { it.authorId == uid }
                 if (!hasInitializedLikeBaseline) {
@@ -144,6 +179,9 @@ class SocialViewModel(
                     }
                     val latestPosts = postsDeferred.await()
                     val latestStories = storiesDeferred.await()
+                    _pagedOlderPosts.value = emptyList()
+                    _deletedPostIds.value = emptySet()
+                    _hasMorePosts.value = latestPosts.size >= FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE.toInt()
                     _manualPostsFlow.tryEmit(latestPosts)
                     if (latestStories != null) {
                         _manualStoriesFlow.tryEmit(latestStories)
@@ -157,6 +195,50 @@ class SocialViewModel(
                 _isRefreshingFeed.value = false
             }
         }
+    }
+
+    fun loadMorePosts() {
+        if (_isLoadingMorePosts.value || !_hasMorePosts.value) return
+        val currentPosts = (postsState.value as? UiState.Success)?.data.orEmpty()
+        val cursorMillis = currentPosts.minOfOrNull { it.createdAtMillis } ?: return
+        if (cursorMillis <= 0L) {
+            _hasMorePosts.value = false
+            return
+        }
+        viewModelScope.launch {
+            _isLoadingMorePosts.value = true
+            try {
+                val pageSize = FirestoreSocialService.DEFAULT_POSTS_PAGE_SIZE
+                val fetched = repository.fetchPostsAfter(
+                    beforeCreatedAtMillis = cursorMillis,
+                    limitCount = pageSize
+                )
+                val existingIds = currentPosts.mapTo(HashSet()) { it.id }
+                val newUnique = fetched.filter { it.id !in existingIds && it.id !in _deletedPostIds.value }
+                if (newUnique.isNotEmpty()) {
+                    _pagedOlderPosts.value = _pagedOlderPosts.value + newUnique
+                }
+                if (fetched.size < pageSize.toInt() || newUnique.isEmpty()) {
+                    _hasMorePosts.value = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showStatusBanner(e.localizedMessage ?: "Could not load older posts.")
+            } finally {
+                _isLoadingMorePosts.value = false
+            }
+        }
+    }
+
+    private fun prefetchPreviewComments(posts: List<SocialPost>) {
+        if (commentObserverJobs.size >= 24) return
+        posts.asSequence()
+            .filter { it.commentCount > 0 && commentObserverJobs[it.id]?.isActive != true }
+            .take((24 - commentObserverJobs.size).coerceAtLeast(0))
+            .forEach { post ->
+                observeCommentsForPost(post.id)
+            }
     }
 
     fun observeCommentsForPost(postId: String) {
@@ -253,6 +335,17 @@ class SocialViewModel(
     }
 
     fun toggleLike(post: SocialPost) {
+        val uid = currentUserId
+        if (uid.isNotBlank() && _pagedOlderPosts.value.any { it.id == post.id }) {
+            val nextLikes = if (post.isLikedBy(uid)) {
+                post.likedByUids.filterNot { it == uid }
+            } else {
+                (post.likedByUids + uid).distinct()
+            }
+            _pagedOlderPosts.value = _pagedOlderPosts.value.map {
+                if (it.id == post.id) it.copy(likedByUids = nextLikes) else it
+            }
+        }
         viewModelScope.launch {
             runCatching { repository.toggleLike(post) }
                 .onFailure { _actionError.value = it.localizedMessage ?: "Failed to update like." }
@@ -266,6 +359,12 @@ class SocialViewModel(
 
     fun addComment(post: SocialPost, text: String) {
         if (text.isBlank()) return
+        observeCommentsForPost(post.id)
+        if (_pagedOlderPosts.value.any { it.id == post.id }) {
+            _pagedOlderPosts.value = _pagedOlderPosts.value.map {
+                if (it.id == post.id) it.copy(commentCount = it.commentCount + 1) else it
+            }
+        }
         viewModelScope.launch {
             runCatching { repository.addComment(post, text) }
                 .onFailure { _actionError.value = it.localizedMessage ?: "Failed to post comment." }
@@ -339,7 +438,11 @@ class SocialViewModel(
     fun deletePost(post: SocialPost) {
         viewModelScope.launch {
             runCatching { repository.deletePost(post) }
-                .onSuccess { showStatusBanner("Post deleted") }
+                .onSuccess {
+                    _deletedPostIds.value = _deletedPostIds.value + post.id
+                    _pagedOlderPosts.value = _pagedOlderPosts.value.filterNot { it.id == post.id }
+                    showStatusBanner("Post deleted")
+                }
                 .onFailure { _actionError.value = it.localizedMessage ?: "Failed to delete post." }
         }
     }

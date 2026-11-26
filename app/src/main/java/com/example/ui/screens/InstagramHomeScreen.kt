@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,10 +42,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,18 +59,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.UiState
+import com.example.data.model.PostComment
 import com.example.data.model.SocialFormatters
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
 import com.example.data.model.UserFollowEdge
 import com.example.data.model.UserProfile
+import com.example.ui.components.EsosaBrandLogo
 import com.example.ui.components.EsosaHeaderWordmark
+import com.example.ui.components.GradientStoryAddBadge
 import com.example.ui.components.InstagramPostCard
 import com.example.ui.components.InstagramUserAvatar
 import com.example.ui.theme.InstagramBlue
-import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramHeartRed
-import com.example.ui.theme.InstagramWhite
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,8 +97,14 @@ fun InstagramHomeScreen(
     onShareToDm: (SocialPost) -> Unit,
     onDeletePost: (SocialPost) -> Unit,
     modifier: Modifier = Modifier,
+    commentsByPost: Map<String, List<PostComment>> = emptyMap(),
     isRefreshing: Boolean = false,
-    onRefreshFeed: () -> Unit = {}
+    onRefreshFeed: () -> Unit = {},
+    isLoadingMore: Boolean = false,
+    hasMorePosts: Boolean = false,
+    onLoadMorePosts: () -> Unit = {},
+    onHashtagClick: (String) -> Unit = {},
+    onUsernameClick: (String) -> Unit = {}
 ) {
     var showActivitySheet by remember { mutableStateOf(false) }
     val feedListState = rememberLazyListState()
@@ -121,13 +133,29 @@ fun InstagramHomeScreen(
     }
     val posts = (postsState as? UiState.Success)?.data.orEmpty()
 
+    LaunchedEffect(feedListState, posts.size, hasMorePosts, isLoadingMore) {
+        snapshotFlow {
+            val layoutInfo = feedListState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            totalItems > 0 && lastVisible >= totalItems - 3
+        }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect {
+                if (hasMorePosts && !isLoadingMore && posts.isNotEmpty()) {
+                    onLoadMorePosts()
+                }
+            }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .testTag("instagram_home_screen")
     ) {
-        // Instagram Top Header Bar
+        // Instagram Top Navigation Bar with App Logo
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -136,7 +164,14 @@ fun InstagramHomeScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            EsosaHeaderWordmark(height = 30.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.testTag("home_top_app_logo")
+            ) {
+                EsosaBrandLogo(size = 28.dp)
+                EsosaHeaderWordmark(height = 28.dp)
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
@@ -198,7 +233,7 @@ fun InstagramHomeScreen(
                 PullToRefreshDefaults.Indicator(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
-                    containerColor = InstagramWhite,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     color = InstagramBlue,
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
@@ -229,7 +264,7 @@ fun InstagramHomeScreen(
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .width(72.dp)
+                                    .width(74.dp)
                                     .clickable {
                                         if (myLatestStory != null) {
                                             onOpenStory(myLatestStory)
@@ -247,31 +282,22 @@ fun InstagramHomeScreen(
                                         size = 68.dp,
                                         showStoryRing = myLatestStory != null,
                                         isStoryViewed = false,
-                                        showAddBadge = myLatestStory == null
+                                        showAddBadge = myLatestStory == null,
+                                        addBadgeTestTag = "your_story_add_badge",
+                                        onAddBadgeClick = onAddStoryClick
                                     )
                                     if (myLatestStory != null) {
-                                        Surface(
-                                            color = InstagramBlue,
-                                            shape = CircleShape,
+                                        GradientStoryAddBadge(
+                                            size = 22.dp,
                                             modifier = Modifier
-                                                .size(22.dp)
                                                 .clickable { onAddStoryClick() }
                                                 .testTag("your_story_add_badge")
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Text(
-                                                    text = "+",
-                                                    color = Color.White,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp
-                                                )
-                                            }
-                                        }
+                                        )
                                     }
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(
-                                    text = "Your story",
+                                    text = if (myLatestStory == null) "Add story" else "Your story",
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                                     color = MaterialTheme.colorScheme.onBackground,
                                     maxLines = 1,
@@ -310,7 +336,7 @@ fun InstagramHomeScreen(
                     }
                     HorizontalDivider(
                         thickness = 0.5.dp,
-                        color = InstagramHairline.copy(alpha = 0.8f)
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
                     )
                 }
 
@@ -429,6 +455,9 @@ fun InstagramHomeScreen(
                                 currentUid = currentUid,
                                 isSaved = savedPostIds.contains(post.id),
                                 isFollowingAuthor = followingSet.contains(post.authorId),
+                                previewComments = commentsByPost[post.id].orEmpty(),
+                                onHashtagClick = onHashtagClick,
+                                onUsernameClick = onUsernameClick,
                                 authorHasStory = authorStory != null,
                                 isAuthorStoryViewed = authorStory?.isViewedBy(currentUid) ?: false,
                                 onAuthorStoryClick = authorStory?.let { story -> { onOpenStory(story) } },
@@ -440,6 +469,60 @@ fun InstagramHomeScreen(
                                 onShareToDm = { onShareToDm(post) },
                                 onDeletePost = { onDeletePost(post) }
                             )
+                        }
+
+                        if (isLoadingMore) {
+                            item(key = "feed_loading_more", contentType = "feed_footer") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 20.dp)
+                                        .testTag("home_feed_loading_more"),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = InstagramBlue,
+                                        strokeWidth = 2.5.dp,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = "Loading more posts...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else if (!hasMorePosts) {
+                            item(key = "feed_end_indicator", contentType = "feed_footer") {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 22.dp, horizontal = 16.dp)
+                                        .testTag("home_feed_end_indicator"),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CheckCircle,
+                                        contentDescription = null,
+                                        tint = InstagramBlue,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text(
+                                        text = "You're all caught up",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
+                                    Text(
+                                        text = "You've seen all recent posts from your community.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
                         }
                     }
                 }

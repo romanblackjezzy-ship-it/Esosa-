@@ -72,10 +72,20 @@ fun InstagramExploreScreen(
     postsState: UiState<List<SocialPost>>,
     followEdges: List<UserFollowEdge>,
     onSelectPost: (SocialPost) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    externalQuery: String? = null,
+    onExternalQueryConsumed: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var activeFilter by remember { mutableStateOf(ExploreFilter.FOR_YOU) }
+
+    androidx.compose.runtime.LaunchedEffect(externalQuery) {
+        if (!externalQuery.isNullOrBlank()) {
+            query = externalQuery
+            activeFilter = ExploreFilter.FOR_YOU
+            onExternalQueryConsumed()
+        }
+    }
 
     val followingSet = remember(followEdges, currentUid) {
         followEdges.filter { it.followerId == currentUid }.map { it.targetUid }.toSet()

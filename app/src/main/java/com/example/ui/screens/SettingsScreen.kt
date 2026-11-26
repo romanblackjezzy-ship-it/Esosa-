@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.ImageCompressionPreset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -162,7 +163,11 @@ fun SettingsScreen(
             isUploadingDirectPhoto = true
             scope.launch {
                 val bytes = runCatching {
-                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri)
+                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(
+                        context = context,
+                        uri = uri,
+                        preset = ImageCompressionPreset.PROFILE_AVATAR
+                    )
                 }.getOrNull()
                 file?.delete()
                 if (bytes != null && bytes.isNotEmpty()) {
@@ -944,7 +949,11 @@ private fun EditLocalProfileDialog(
             isUploadingPhoto = true
             scope.launch {
                 val bytes = runCatching {
-                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(context, uri)
+                    CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(
+                        context = context,
+                        uri = uri,
+                        preset = ImageCompressionPreset.PROFILE_AVATAR
+                    )
                 }.getOrNull()
                 file?.delete()
                 if (bytes != null && bytes.isNotEmpty()) {

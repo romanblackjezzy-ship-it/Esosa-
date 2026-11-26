@@ -63,6 +63,12 @@ class FirebasePhotoStorageService(
             .setCustomMetadata("senderId", senderUid)
             .build()
 
+        preparedFile.compressionMetrics?.let { metrics ->
+            Log.i(
+                TAG,
+                "Uploading compressed room photo [${metrics.preset.label}]: ${metrics.originalBytes}B -> ${metrics.compressedBytes}B (saved ${metrics.savingsPercent}%)"
+            )
+        }
         return uploadFileAndGetDownloadUrl(
             fileUri = preparedFile.fileUri,
             originalUri = preparedFile.originalUri ?: preparedFile.fileUri,
@@ -173,6 +179,12 @@ class FirebasePhotoStorageService(
             .setCustomMetadata("userId", uid)
             .build()
 
+        preparedFile.compressionMetrics?.let { metrics ->
+            Log.i(
+                TAG,
+                "Uploading compressed social media [${metrics.preset.label}]: ${metrics.originalBytes}B -> ${metrics.compressedBytes}B (saved ${metrics.savingsPercent}%)"
+            )
+        }
         return uploadFileAndGetDownloadUrl(
             fileUri = preparedFile.fileUri,
             originalUri = preparedFile.originalUri ?: preparedFile.fileUri,

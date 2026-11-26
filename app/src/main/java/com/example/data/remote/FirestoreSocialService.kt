@@ -6,6 +6,7 @@ import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -23,7 +24,7 @@ class FirestoreSocialService(
 ) {
     private val estimate = DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
 
-    fun observePosts(limitCount: Long = 100L): Flow<List<SocialPost>> = callbackFlow {
+    fun observePosts(limitCount: Long = DEFAULT_POSTS_PAGE_SIZE): Flow<List<SocialPost>> = callbackFlow {
         val reg = db.collection(POSTS_COLLECTION)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(limitCount)
@@ -55,12 +56,34 @@ class FirestoreSocialService(
         awaitClose { reg.remove() }
     }
 
-    suspend fun fetchLatestPosts(limitCount: Long = 100L): List<SocialPost> {
+    suspend fun fetchLatestPosts(limitCount: Long = DEFAULT_POSTS_PAGE_SIZE): List<SocialPost> {
         return try {
             val snap = db.collection(POSTS_COLLECTION)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limitCount)
                 .get(Source.SERVER)
+                .await()
+            snap.documents.mapNotNull(::parsePost)
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.LIST, POSTS_COLLECTION, auth)
+            throw e
+        }
+    }
+
+    suspend fun fetchPostsAfter(
+        beforeCreatedAtMillis: Long,
+        limitCount: Long = DEFAULT_POSTS_PAGE_SIZE
+    ): List<SocialPost> {
+        if (beforeCreatedAtMillis <= 0L) return emptyList()
+        return try {
+            val safeSeconds = beforeCreatedAtMillis / 1000L
+            val safeNanos = ((beforeCreatedAtMillis % 1000L).toInt().coerceAtLeast(0)) * 1_000_000
+            val cursorTimestamp = Timestamp(safeSeconds, safeNanos)
+            val snap = db.collection(POSTS_COLLECTION)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .startAfter(cursorTimestamp)
+                .limit(limitCount)
+                .get()
                 .await()
             snap.documents.mapNotNull(::parsePost)
         } catch (e: Exception) {
@@ -558,6 +581,7 @@ class FirestoreSocialService(
     }
 
     companion object {
+        const val DEFAULT_POSTS_PAGE_SIZE = 15L
         private const val POSTS_COLLECTION = "posts"
         private const val COMMENTS_SUBCOLLECTION = "comments"
         private const val STORIES_COLLECTION = "stories"
