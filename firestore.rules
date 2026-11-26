@@ -182,6 +182,7 @@ service cloud.firestore {
              data.caption is string && data.caption.size() <= 300 &&
              (('imageUrl' in data) || ('videoUrl' in data) || data.caption.size() >= 1) &&
              data.viewedByUids is list && data.viewedByUids.size() <= 1000 &&
+             (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 16)) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
@@ -609,8 +610,9 @@ service cloud.firestore {
                        isValidId(storyId) &&
                        incoming().authorId == request.auth.uid &&
                        incoming().viewedByUids.size() == 0 &&
+                       (!('reactions' in incoming()) || incoming().reactions.size() == 0) &&
                        incoming().keys().hasAll(['authorId', 'authorUsername', 'caption', 'viewedByUids', 'createdAt']) &&
-                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'viewedByUids', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl', 'imageUrl', 'videoUrl', 'storagePath', 'caption', 'viewedByUids', 'reactions', 'createdAt']) &&
                        isValidSocialStory(incoming());
 
       allow update: if isSignedIn() &&
@@ -623,11 +625,20 @@ service cloud.firestore {
                        (!('imageUrl' in existing()) ? !('imageUrl' in incoming()) : incoming().imageUrl == existing().imageUrl) &&
                        (!('videoUrl' in existing()) ? !('videoUrl' in incoming()) : incoming().videoUrl == existing().videoUrl) &&
                        (!('storagePath' in existing()) ? !('storagePath' in incoming()) : incoming().storagePath == existing().storagePath) &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids']) &&
-                       !(request.auth.uid in existing().viewedByUids) &&
-                       (request.auth.uid in incoming().viewedByUids) &&
-                       incoming().viewedByUids.hasAll(existing().viewedByUids) &&
-                       incoming().viewedByUids.size() == existing().viewedByUids.size() + 1;
+                       (
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids']) &&
+                           !(request.auth.uid in existing().viewedByUids) &&
+                           (request.auth.uid in incoming().viewedByUids) &&
+                           incoming().viewedByUids.hasAll(existing().viewedByUids) &&
+                           incoming().viewedByUids.size() == existing().viewedByUids.size() + 1
+                         ) ||
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['reactions']) &&
+                           incoming().reactions is map &&
+                           incoming().reactions.size() <= 16
+                         )
+                       );
 
       allow delete: if isSignedIn() && isValidId(storyId) && existing().authorId == request.auth.uid;
 

@@ -1168,9 +1168,19 @@ private fun EsosaSocialShell(
             }
         }
 
-        // Story Viewer (supports creator multi-segment sequence, video, progress bars, & replies)
+        // Story Viewer (supports creator multi-segment sequence, cross-creator navigation, tap pause/play, emoji reactions, video & replies)
         val storyAuthorId = activeStoryAuthorId
         if (storyAuthorId != null) {
+            val currentUid = socialViewModel.currentUserId
+            val orderedAuthorIds = remember(socialStories, currentUid) {
+                val distinctAuthors = socialStories.map { it.authorId }.distinct()
+                if (currentUid.isNotBlank() && distinctAuthors.contains(currentUid)) {
+                    listOf(currentUid) + distinctAuthors.filterNot { it == currentUid }
+                } else {
+                    distinctAuthors
+                }
+            }
+            val currentAuthorPos = orderedAuthorIds.indexOf(storyAuthorId)
             val authorSequence = remember(socialStories, storyAuthorId) {
                 socialStories.filter { it.authorId == storyAuthorId }.reversed()
             }
@@ -1180,17 +1190,40 @@ private fun EsosaSocialShell(
                 val initialIndex = authorSequence
                     .indexOfFirst { it.id == activeStoryInitialId }
                     .let { if (it >= 0) it else 0 }
+                val hasPreviousAuthor = currentAuthorPos > 0
+                val hasNextAuthor = currentAuthorPos >= 0 && currentAuthorPos < orderedAuthorIds.lastIndex
                 SocialStoryViewerDialog(
                     stories = authorSequence,
                     initialStoryIndex = initialIndex,
-                    currentUid = socialViewModel.currentUserId,
+                    currentUid = currentUid,
                     repliesByStory = repliesByStory,
+                    hasPreviousAuthor = hasPreviousAuthor,
+                    hasNextAuthor = hasNextAuthor,
+                    onPreviousAuthor = if (hasPreviousAuthor) {
+                        {
+                            val prevAuthorId = orderedAuthorIds[currentAuthorPos - 1]
+                            val prevStories = socialStories.filter { it.authorId == prevAuthorId }.reversed()
+                            activeStoryAuthorId = prevAuthorId
+                            activeStoryInitialId = prevStories.lastOrNull()?.id
+                        }
+                    } else null,
+                    onNextAuthor = if (hasNextAuthor) {
+                        {
+                            val nextAuthorId = orderedAuthorIds[currentAuthorPos + 1]
+                            val nextStories = socialStories.filter { it.authorId == nextAuthorId }.reversed()
+                            activeStoryAuthorId = nextAuthorId
+                            activeStoryInitialId = nextStories.firstOrNull()?.id
+                        }
+                    } else null,
                     onStoryChanged = { current ->
                         socialViewModel.markStoryViewed(current)
                         socialViewModel.observeRepliesForStory(current)
                     },
                     onSendReply = { targetStory, replyText ->
                         socialViewModel.sendStoryReply(targetStory, replyText)
+                    },
+                    onReactEmoji = { targetStory, emoji ->
+                        socialViewModel.toggleStoryReaction(targetStory, emoji)
                     },
                     onDeleteStory = { targetStory ->
                         socialViewModel.deleteStory(targetStory)

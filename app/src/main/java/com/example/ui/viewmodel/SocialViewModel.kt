@@ -11,6 +11,7 @@ import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.example.data.remote.FirestoreSocialService
@@ -45,6 +46,7 @@ class SocialViewModel(
 
     private val _manualPostsFlow = MutableSharedFlow<List<SocialPost>>(extraBufferCapacity = 1)
     private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
+    private val _optimisticStoryReactions = MutableStateFlow<Map<String, Map<String, List<String>>>>(emptyMap())
     private val _pagedOlderPosts = MutableStateFlow<List<SocialPost>>(emptyList())
     private val _deletedPostIds = MutableStateFlow<Set<String>>(emptySet())
 
@@ -120,7 +122,19 @@ class SocialViewModel(
             )
 
     val stories: StateFlow<List<SocialStory>> =
-        merge(repository.observeStories(), _manualStoriesFlow)
+        combine(
+            merge(repository.observeStories(), _manualStoriesFlow),
+            _optimisticStoryReactions
+        ) { liveStories, optimisticMap ->
+            if (optimisticMap.isEmpty()) {
+                liveStories
+            } else {
+                liveStories.map { story ->
+                    val override = optimisticMap[story.id]
+                    if (override != null) story.copy(reactions = override) else story
+                }
+            }
+        }
             .catch { emit(emptyList()) }
             .stateIn(
                 scope = viewModelScope,
@@ -432,6 +446,28 @@ class SocialViewModel(
     fun markStoryViewed(story: SocialStory) {
         viewModelScope.launch {
             runCatching { repository.markStoryViewed(story) }
+        }
+    }
+
+    fun toggleStoryReaction(story: SocialStory, emoji: String) {
+        val uid = currentUserId
+        if (story.id.isBlank() || uid.isBlank()) return
+        val wasSelected = story.hasReaction(uid, emoji)
+        val optimisticNext = StoryReactions.toggle(story.reactions, uid, emoji)
+        _optimisticStoryReactions.value = _optimisticStoryReactions.value + (story.id to optimisticNext)
+        viewModelScope.launch {
+            runCatching { repository.toggleStoryReaction(story, emoji) }
+                .onSuccess {
+                    if (!wasSelected) {
+                        showStatusBanner("Reacted $emoji to @${story.authorUsername}'s story")
+                    }
+                    delay(400L)
+                    _optimisticStoryReactions.value = _optimisticStoryReactions.value - story.id
+                }
+                .onFailure { err ->
+                    _optimisticStoryReactions.value = _optimisticStoryReactions.value - story.id
+                    _actionError.value = err.localizedMessage ?: "Failed to react to story."
+                }
         }
     }
 

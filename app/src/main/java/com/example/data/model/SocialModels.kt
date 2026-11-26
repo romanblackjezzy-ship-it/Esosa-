@@ -142,9 +142,15 @@ data class SocialStory(
     val storagePath: String? = null,
     val caption: String = "",
     val viewedByUids: List<String> = emptyList(),
+    val reactions: Map<String, List<String>> = emptyMap(),
     val createdAtMillis: Long = 0L
 ) {
     fun isViewedBy(uid: String): Boolean = uid.isNotBlank() && (authorId == uid || viewedByUids.contains(uid))
+
+    fun hasReaction(uid: String, emoji: String): Boolean =
+        uid.isNotBlank() && reactions[emoji]?.contains(uid) == true
+
+    fun totalReactionsCount(): Int = reactions.values.sumOf { it.size }
 
     val hasVideo: Boolean
         get() = videoUrl.isNotBlank() ||
@@ -152,6 +158,42 @@ data class SocialStory(
             imageUrl.contains(".mov", ignoreCase = true) ||
             imageUrl.contains(".webm", ignoreCase = true) ||
             imageUrl.contains(".m3u8", ignoreCase = true)
+}
+
+object StoryReactions {
+    val QUICK_EMOJIS = listOf("❤️", "😂", "😮", "😢", "👏", "🔥")
+    const val MAX_TYPES_PER_STORY = 16
+
+    fun toggle(
+        existing: Map<String, List<String>>,
+        uid: String,
+        rawEmoji: String
+    ): Map<String, List<String>> {
+        val emoji = rawEmoji.trim()
+        if (uid.isBlank() || emoji.isBlank()) return existing
+        val next = linkedMapOf<String, List<String>>()
+        existing.forEach { (key, list) ->
+            val cleanList = list.filter { it.isNotBlank() }.distinct()
+            if (cleanList.isNotEmpty()) {
+                next[key] = cleanList
+            }
+        }
+        val currentUsers = next[emoji].orEmpty()
+        if (uid in currentUsers) {
+            val remaining = currentUsers.filterNot { it == uid }
+            if (remaining.isEmpty()) {
+                next.remove(emoji)
+            } else {
+                next[emoji] = remaining
+            }
+        } else {
+            if (!next.containsKey(emoji) && next.size >= MAX_TYPES_PER_STORY) {
+                return existing
+            }
+            next[emoji] = (currentUsers + uid).distinct()
+        }
+        return next
+    }
 }
 
 data class StoryReply(

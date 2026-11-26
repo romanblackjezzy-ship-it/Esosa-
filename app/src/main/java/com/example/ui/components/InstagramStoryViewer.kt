@@ -2,10 +2,19 @@ package com.example.ui.components
 
 import android.net.Uri
 import android.widget.VideoView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +25,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -30,6 +41,8 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,17 +61,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -67,11 +84,14 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.model.SocialFormatters
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.ui.theme.InstagramBlue
+import com.example.ui.theme.InstagramStoryGradient
 import com.example.ui.theme.TelegramAvatarPairs
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun SocialStoryViewerDialog(
@@ -79,14 +99,20 @@ fun SocialStoryViewerDialog(
     initialStoryIndex: Int = 0,
     currentUid: String,
     repliesByStory: Map<String, List<StoryReply>> = emptyMap(),
+    hasPreviousAuthor: Boolean = false,
+    hasNextAuthor: Boolean = false,
+    onPreviousAuthor: (() -> Unit)? = null,
+    onNextAuthor: (() -> Unit)? = null,
     onStoryChanged: (SocialStory) -> Unit = {},
     onSendReply: (SocialStory, String) -> Unit = { _, _ -> },
+    onReactEmoji: ((SocialStory, String) -> Unit)? = null,
     onDeleteStory: (SocialStory) -> Unit,
     onAddAnotherStory: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     if (stories.isEmpty()) return
 
+    val focusManager = LocalFocusManager.current
     var currentIndex by remember(stories.map { it.id }, initialStoryIndex) {
         mutableIntStateOf(initialStoryIndex.coerceIn(0, stories.lastIndex))
     }
@@ -95,36 +121,72 @@ fun SocialStoryViewerDialog(
 
     var segmentProgress by remember(story.id) { mutableFloatStateOf(0f) }
     var isHoldingPause by remember { mutableStateOf(false) }
+    var isTapPaused by remember(story.id) { mutableStateOf(false) }
     var isReplyFocused by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(false) }
     var replyDraft by remember(story.id) { mutableStateOf("") }
+    var burstEmoji by remember(story.id) { mutableStateOf<String?>(null) }
+    var burstSequence by remember(story.id) { mutableIntStateOf(0) }
+    val burstProgress = remember(story.id, burstSequence) { Animatable(0f) }
 
-    val isTimerPaused = isHoldingPause || isReplyFocused || replyDraft.isNotBlank()
+    val isTimerPaused = isTapPaused || isHoldingPause || isReplyFocused || replyDraft.isNotBlank()
     val replies = repliesByStory[story.id].orEmpty()
+
+    fun goNextStory() {
+        isTapPaused = false
+        if (currentIndex < stories.lastIndex) {
+            currentIndex += 1
+        } else if (hasNextAuthor && onNextAuthor != null) {
+            onNextAuthor()
+        } else {
+            onDismiss()
+        }
+    }
+
+    fun goPreviousStory() {
+        isTapPaused = false
+        if (currentIndex > 0) {
+            currentIndex -= 1
+        } else if (segmentProgress <= 0.25f && hasPreviousAuthor && onPreviousAuthor != null) {
+            onPreviousAuthor()
+        } else {
+            segmentProgress = 0f
+        }
+    }
 
     LaunchedEffect(story.id) {
         onStoryChanged(story)
     }
 
-    LaunchedEffect(story.id, isTimerPaused, stories.size) {
+    LaunchedEffect(burstEmoji, burstSequence) {
+        if (burstEmoji != null) {
+            burstProgress.snapTo(0f)
+            burstProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing)
+            )
+            burstEmoji = null
+        }
+    }
+
+    LaunchedEffect(story.id, isTimerPaused, stories.size, hasNextAuthor) {
         val totalDurationMs = if (story.hasVideo) 15_000L else 6_000L
-        val tickMs = 50L
+        val tickMs = 32L
         while (segmentProgress < 1f) {
             if (!isTimerPaused) {
                 segmentProgress = (segmentProgress + tickMs.toFloat() / totalDurationMs.toFloat()).coerceAtMost(1f)
             }
             delay(tickMs)
         }
-        if (currentIndex < stories.lastIndex) {
-            currentIndex += 1
-        } else {
-            onDismiss()
-        }
+        goNextStory()
     }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Box(
             modifier = Modifier
@@ -132,7 +194,7 @@ fun SocialStoryViewerDialog(
                 .background(Color.Black)
                 .testTag("social_story_viewer_dialog")
         ) {
-            // Media Canvas (Video or Photo or Text Gradient)
+            // Full-Screen Media Canvas (Video or Photo or Rich Gradient)
             when {
                 story.hasVideo -> {
                     val activeVideoUrl = story.videoUrl.ifBlank { story.imageUrl }
@@ -183,34 +245,30 @@ fun SocialStoryViewerDialog(
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                Color.Black.copy(alpha = 0.55f),
+                                Color.Black.copy(alpha = 0.58f),
                                 Color.Transparent,
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.72f)
+                                Color.Black.copy(alpha = 0.78f)
                             )
                         )
                     )
             )
 
-            // Left / Right navigation tap zones + Long-press to pause
+            // Navigation & Tap-to-Pause Gesture Layer:
+            // Left: Previous Story | Center: Tap to Pause/Continue | Right: Next Story
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 96.dp, bottom = 128.dp)
+                    .padding(top = 96.dp, bottom = 152.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .weight(0.32f)
+                        .weight(0.28f)
                         .fillMaxSize()
-                        .pointerInput(currentIndex) {
+                        .pointerInput(currentIndex, hasPreviousAuthor) {
                             detectTapGestures(
-                                onTap = {
-                                    if (currentIndex > 0) {
-                                        currentIndex -= 1
-                                    } else {
-                                        segmentProgress = 0f
-                                    }
-                                },
+                                onTap = { goPreviousStory() },
+                                onLongPress = { /* hold handled by onPress */ },
                                 onPress = {
                                     isHoldingPause = true
                                     tryAwaitRelease()
@@ -222,17 +280,35 @@ fun SocialStoryViewerDialog(
                 )
                 Box(
                     modifier = Modifier
-                        .weight(0.68f)
+                        .weight(0.44f)
                         .fillMaxSize()
-                        .pointerInput(currentIndex, stories.size) {
+                        .pointerInput(story.id) {
                             detectTapGestures(
                                 onTap = {
-                                    if (currentIndex < stories.lastIndex) {
-                                        currentIndex += 1
+                                    if (isReplyFocused) {
+                                        focusManager.clearFocus()
                                     } else {
-                                        onDismiss()
+                                        isTapPaused = !isTapPaused
                                     }
                                 },
+                                onLongPress = { /* hold pauses without toggling tap state */ },
+                                onPress = {
+                                    isHoldingPause = true
+                                    tryAwaitRelease()
+                                    isHoldingPause = false
+                                }
+                            )
+                        }
+                        .testTag("story_pause_zone")
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(0.28f)
+                        .fillMaxSize()
+                        .pointerInput(currentIndex, stories.size, hasNextAuthor) {
+                            detectTapGestures(
+                                onTap = { goNextStory() },
+                                onLongPress = { /* hold handled by onPress */ },
                                 onPress = {
                                     isHoldingPause = true
                                     tryAwaitRelease()
@@ -244,7 +320,63 @@ fun SocialStoryViewerDialog(
                 )
             }
 
-            // Top Chrome + Bottom Reply Overlay
+            // Floating Animated Emoji Reaction Burst
+            val activeBurst = burstEmoji
+            if (activeBurst != null) {
+                val p = burstProgress.value
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 180.dp)
+                        .offset { IntOffset(0, (-220f * p).roundToInt()) }
+                        .scale(0.8f + (1f - p) * 0.85f)
+                        .alpha((1f - p).coerceIn(0f, 1f))
+                        .testTag("story_emoji_burst")
+                ) {
+                    Text(
+                        text = activeBurst,
+                        fontSize = 54.sp
+                    )
+                }
+            }
+
+            // Center Paused Badge (visible when tapped to pause)
+            AnimatedVisibility(
+                visible = isTapPaused && !isReplyFocused,
+                enter = fadeIn() + scaleIn(initialScale = 0.88f),
+                exit = fadeOut() + scaleOut(targetScale = 0.88f),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.68f),
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(999.dp))
+                        .clickable { isTapPaused = false }
+                        .testTag("story_paused_indicator")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "Continue story",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Paused • Tap to continue",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            // Top Chrome + Bottom Reply & Emoji Reaction Overlay
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -253,7 +385,7 @@ fun SocialStoryViewerDialog(
                     .imePadding()
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
-                // Multi-segment Progress Bars
+                // Multi-segment Progress Bars at the Top
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -272,7 +404,7 @@ fun SocialStoryViewerDialog(
                             trackColor = Color.White.copy(alpha = 0.32f),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(2.5.dp)
+                                .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp))
                                 .testTag("story_progress_bar_$idx")
                         )
@@ -281,7 +413,7 @@ fun SocialStoryViewerDialog(
 
                 Spacer(Modifier.height(10.dp))
 
-                // Header Row
+                // Header Row with Circular Gradient-Bordered Author Avatar + Controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -296,7 +428,9 @@ fun SocialStoryViewerDialog(
                             displayName = story.authorUsername,
                             photoUrl = story.authorPhotoUrl,
                             seedKey = story.authorId,
-                            size = 36.dp
+                            size = 40.dp,
+                            showStoryRing = true,
+                            isStoryViewed = false
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
@@ -316,17 +450,33 @@ fun SocialStoryViewerDialog(
                                     color = Color.White.copy(alpha = 0.78f)
                                 )
                             }
-                            if (story.hasVideo) {
+                            if (story.hasVideo || isTimerPaused) {
                                 Text(
-                                    text = "Video Story",
+                                    text = buildString {
+                                        if (story.hasVideo) append("Video Story")
+                                        if (story.hasVideo && isTimerPaused) append(" • ")
+                                        if (isTimerPaused) append("Paused")
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.72f)
+                                    color = Color.White.copy(alpha = 0.78f)
                                 )
                             }
                         }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { isTapPaused = !isTapPaused },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("story_pause_toggle")
+                        ) {
+                            Icon(
+                                imageVector = if (isTimerPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                                contentDescription = if (isTimerPaused) "Continue story" else "Pause story",
+                                tint = Color.White
+                            )
+                        }
                         if (story.hasVideo) {
                             IconButton(
                                 onClick = { isMuted = !isMuted },
@@ -367,7 +517,11 @@ fun SocialStoryViewerDialog(
                                 onClick = {
                                     onDeleteStory(story)
                                     if (stories.size <= 1) {
-                                        onDismiss()
+                                        if (hasNextAuthor && onNextAuthor != null) {
+                                            onNextAuthor()
+                                        } else {
+                                            onDismiss()
+                                        }
                                     } else if (currentIndex >= stories.lastIndex) {
                                         currentIndex = (currentIndex - 1).coerceAtLeast(0)
                                     }
@@ -403,7 +557,7 @@ fun SocialStoryViewerDialog(
                 // Caption Pill
                 if (story.caption.isNotBlank()) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.45f),
+                        color = Color.Black.copy(alpha = 0.48f),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -422,6 +576,60 @@ fun SocialStoryViewerDialog(
                     }
                 }
 
+                // Persisted Emoji Reaction Summary Chips (if story has reactions)
+                if (story.reactions.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp)
+                            .testTag("story_reactions_summary"),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        story.reactions.entries
+                            .sortedByDescending { it.value.size }
+                            .forEach { (emoji, uids) ->
+                                val selectedByMe = uids.contains(currentUid)
+                                Surface(
+                                    color = if (selectedByMe) {
+                                        Color.White.copy(alpha = 0.28f)
+                                    } else {
+                                        Color.Black.copy(alpha = 0.55f)
+                                    },
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .border(
+                                            width = 1.dp,
+                                            brush = if (selectedByMe) {
+                                                Brush.linearGradient(InstagramStoryGradient)
+                                            } else {
+                                                SolidColor(Color.White.copy(alpha = 0.25f))
+                                            },
+                                            shape = CircleShape
+                                        )
+                                        .clickable {
+                                            burstEmoji = emoji
+                                            burstSequence += 1
+                                            if (onReactEmoji != null) {
+                                                onReactEmoji(story, emoji)
+                                            } else {
+                                                onSendReply(story, emoji)
+                                            }
+                                        }
+                                        .testTag("story_reaction_chip_$emoji")
+                                ) {
+                                    Text(
+                                        text = "$emoji ${uids.size}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                    }
+                }
+
                 // Replies Thread Pill (visible to story creator & sender)
                 if (replies.isNotEmpty()) {
                     Column(
@@ -433,7 +641,7 @@ fun SocialStoryViewerDialog(
                     ) {
                         replies.takeLast(3).forEach { reply ->
                             Surface(
-                                color = Color.Black.copy(alpha = 0.52f),
+                                color = Color.Black.copy(alpha = 0.56f),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text(
@@ -449,27 +657,66 @@ fun SocialStoryViewerDialog(
                     }
                 }
 
-                // Quick Reaction Chips
+                // Quick Emoji Reactions Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 8.dp)
+                        .testTag("story_quick_reactions_bar"),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("❤️", "😂", "😮", "🔥").forEach { emoji ->
+                    StoryReactions.QUICK_EMOJIS.forEach { emoji ->
+                        val reactedByMe = story.hasReaction(currentUid, emoji)
+                        val count = story.reactions[emoji]?.size ?: 0
                         Surface(
-                            color = Color.White.copy(alpha = 0.14f),
+                            color = if (reactedByMe) {
+                                Color.White.copy(alpha = 0.26f)
+                            } else {
+                                Color.White.copy(alpha = 0.14f)
+                            },
                             shape = CircleShape,
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .clickable { onSendReply(story, emoji) }
+                                .then(
+                                    if (reactedByMe) {
+                                        Modifier.border(
+                                            width = 1.5.dp,
+                                            brush = Brush.linearGradient(InstagramStoryGradient),
+                                            shape = CircleShape
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .clickable {
+                                    burstEmoji = emoji
+                                    burstSequence += 1
+                                    if (onReactEmoji != null) {
+                                        onReactEmoji(story, emoji)
+                                    } else {
+                                        onSendReply(story, emoji)
+                                    }
+                                }
                                 .testTag("story_quick_reaction_$emoji")
                         ) {
-                            Text(
-                                text = emoji,
-                                fontSize = 18.sp,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
+                            ) {
+                                Text(
+                                    text = emoji,
+                                    fontSize = 18.sp
+                                )
+                                if (count > 0) {
+                                    Text(
+                                        text = count.toString(),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -520,6 +767,7 @@ fun SocialStoryViewerDialog(
                             if (clean.isNotEmpty()) {
                                 onSendReply(story, clean)
                                 replyDraft = ""
+                                focusManager.clearFocus()
                             }
                         },
                         enabled = replyDraft.isNotBlank(),

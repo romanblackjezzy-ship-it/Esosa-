@@ -353,6 +353,11 @@ class SocialRepository(
         socialService.markStoryViewed(story, uid)
     }
 
+    suspend fun toggleStoryReaction(story: SocialStory, emoji: String): Map<String, List<String>> {
+        val uid = auth.currentUser?.uid ?: return story.reactions
+        return socialService.toggleStoryReaction(story, uid, emoji)
+    }
+
     suspend fun deletePost(post: SocialPost) {
         socialService.deletePost(post.id)
         runCatching {

@@ -4,6 +4,7 @@ import com.example.data.model.PostComment
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.google.firebase.Timestamp
@@ -462,6 +463,25 @@ class FirestoreSocialService(
         }
     }
 
+    suspend fun toggleStoryReaction(
+        story: SocialStory,
+        currentUid: String,
+        emoji: String
+    ): Map<String, List<String>> {
+        if (story.id.isBlank() || currentUid.isBlank()) return story.reactions
+        val updated = StoryReactions.toggle(story.reactions, currentUid, emoji)
+        val path = "$STORIES_COLLECTION/${story.id}"
+        try {
+            db.collection(STORIES_COLLECTION).document(story.id)
+                .update("reactions", updated)
+                .await()
+            return updated
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.UPDATE, path, auth)
+            throw e
+        }
+    }
+
     suspend fun deletePost(postId: String) {
         val path = "$POSTS_COLLECTION/$postId"
         try {
@@ -540,6 +560,7 @@ class FirestoreSocialService(
             storagePath = doc.getString("storagePath"),
             caption = doc.getString("caption").orEmpty(),
             viewedByUids = parseStringList(doc.get("viewedByUids")),
+            reactions = parseReactionsMap(doc.get("reactions")),
             createdAtMillis = FirestoreSnapshotMappers.timestampToMillis(doc.getTimestamp("createdAt", estimate))
         )
     }
@@ -578,6 +599,19 @@ class FirestoreSocialService(
     private fun parseStringList(raw: Any?): List<String> {
         val list = raw as? List<*> ?: return emptyList()
         return list.mapNotNull { (it as? String)?.takeIf { s -> s.isNotBlank() } }
+    }
+
+    private fun parseReactionsMap(raw: Any?): Map<String, List<String>> {
+        val map = raw as? Map<*, *> ?: return emptyMap()
+        val result = linkedMapOf<String, List<String>>()
+        map.forEach { (key, value) ->
+            val emoji = (key as? String)?.takeIf { it.isNotBlank() } ?: return@forEach
+            val uids = parseStringList(value).distinct()
+            if (uids.isNotEmpty()) {
+                result[emoji] = uids
+            }
+        }
+        return result
     }
 
     companion object {

@@ -649,6 +649,29 @@ test("Instagram social posts, reels, likes, comments, stories, saved posts, and 
     })
   );
 
+  // Story emoji reactions: signed-in viewers can react; immutable fields & unauthenticated updates fail
+  await assertSucceeds(
+    bobDb.collection("stories").doc("story_1").update({
+      reactions: { "❤️": [BOB_UID] },
+    })
+  );
+  await assertSucceeds(
+    charlieDb.collection("stories").doc("story_1").update({
+      reactions: { "❤️": [BOB_UID], "🔥": [CHARLIE_UID] },
+    })
+  );
+  await assertFails(
+    bobDb.collection("stories").doc("story_1").update({
+      caption: "Tampered caption",
+      reactions: { "❤️": [BOB_UID] },
+    })
+  );
+  await assertFails(
+    unauthDb.collection("stories").doc("story_1").update({
+      reactions: { "😂": ["anon"] },
+    })
+  );
+
   // Story replies: Bob replies to Alice's story; Alice & Bob can read/query; Charlie cannot read or spoof storyAuthorId
   await assertSucceeds(
     bobDb.collection("stories").doc("story_1").collection("replies").doc("reply_1").set({

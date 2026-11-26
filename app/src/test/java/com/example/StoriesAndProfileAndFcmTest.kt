@@ -1,5 +1,8 @@
 package com.example
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -10,6 +13,7 @@ import com.example.core.UiState
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.example.data.model.UserProfile
@@ -162,6 +166,115 @@ class StoriesAndProfileAndFcmTest {
         composeTestRule.waitForIdle()
 
         assertEquals(listOf("s_video" to "Awesome clip!"), sentReplies)
+    }
+
+    @Test
+    fun `story viewer supports tap to pause and continue, prev next navigation, emoji reactions, and close`() {
+        val viewerUid = "viewer_alex"
+        var storiesState by mutableStateOf(
+            listOf(
+                SocialStory(
+                    id = "s_1",
+                    authorId = "author_maya",
+                    authorUsername = "maya.studio",
+                    imageUrl = "https://example.com/story_1.jpg",
+                    caption = "Morning espresso",
+                    reactions = mapOf("❤️" to listOf("other_user")),
+                    createdAtMillis = System.currentTimeMillis() - 60_000L
+                ),
+                SocialStory(
+                    id = "s_2",
+                    authorId = "author_maya",
+                    authorUsername = "maya.studio",
+                    imageUrl = "https://example.com/story_2.jpg",
+                    caption = "Afternoon sketch",
+                    createdAtMillis = System.currentTimeMillis() - 30_000L
+                )
+            )
+        )
+        var nextAuthorCalls = 0
+        var prevAuthorCalls = 0
+        var dismissedCalls = 0
+        val reacted = mutableListOf<Pair<String, String>>()
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                SocialStoryViewerDialog(
+                    stories = storiesState,
+                    initialStoryIndex = 0,
+                    currentUid = viewerUid,
+                    hasPreviousAuthor = true,
+                    hasNextAuthor = true,
+                    onPreviousAuthor = { prevAuthorCalls += 1 },
+                    onNextAuthor = { nextAuthorCalls += 1 },
+                    onReactEmoji = { story, emoji ->
+                        reacted += (story.id to emoji)
+                        storiesState = storiesState.map {
+                            if (it.id == story.id) {
+                                it.copy(reactions = StoryReactions.toggle(it.reactions, viewerUid, emoji))
+                            } else {
+                                it
+                            }
+                        }
+                    },
+                    onDeleteStory = {},
+                    onDismiss = { dismissedCalls += 1 }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Morning espresso").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_reactions_summary").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_reaction_chip_❤️").assertIsDisplayed()
+
+        // Tap center pause zone -> shows Paused indicator; tap again -> resumes and hides indicator
+        composeTestRule.onNodeWithTag("story_pause_zone").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_paused_indicator").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("story_pause_toggle").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_paused_indicator").assertDoesNotExist()
+
+        // React with fire emoji -> updates story reactions & summary
+        composeTestRule.onNodeWithTag("story_quick_reaction_🔥").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(listOf("s_1" to "🔥"), reacted)
+        composeTestRule.onNodeWithTag("story_reaction_chip_🔥").assertIsDisplayed()
+
+        // Prev at index 0 triggers previous author; Next advances segment then next author
+        composeTestRule.onNodeWithTag("story_prev_zone").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, prevAuthorCalls)
+
+        composeTestRule.onNodeWithTag("story_next_zone").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Afternoon sketch").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("story_next_zone").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, nextAuthorCalls)
+
+        // Close story button dismisses viewer
+        composeTestRule.onNodeWithTag("close_social_story_viewer").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, dismissedCalls)
+    }
+
+    @Test
+    fun `StoryReactions toggle adds, deduplicates, and removes reactions cleanly`() {
+        val afterAdd = StoryReactions.toggle(emptyMap(), "u1", "🔥")
+        assertEquals(mapOf("🔥" to listOf("u1")), afterAdd)
+
+        val afterSecondUser = StoryReactions.toggle(afterAdd, "u2", "🔥")
+        assertEquals(mapOf("🔥" to listOf("u1", "u2")), afterSecondUser)
+
+        val afterRemove = StoryReactions.toggle(afterSecondUser, "u1", "🔥")
+        assertEquals(mapOf("🔥" to listOf("u2")), afterRemove)
+
+        val afterLastRemove = StoryReactions.toggle(afterRemove, "u2", "🔥")
+        assertTrue(afterLastRemove.isEmpty())
     }
 
     @Test
