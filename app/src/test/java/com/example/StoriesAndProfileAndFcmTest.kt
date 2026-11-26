@@ -227,6 +227,10 @@ class StoriesAndProfileAndFcmTest {
         composeTestRule.onNodeWithText("Morning espresso").assertIsDisplayed()
         composeTestRule.onNodeWithTag("story_reactions_summary").assertIsDisplayed()
         composeTestRule.onNodeWithTag("story_reaction_chip_❤️").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_floating_emoji_tray").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_quick_reaction_❤️").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_quick_reaction_🔥").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_quick_reaction_😂").assertIsDisplayed()
 
         // Tap center pause zone -> shows Paused indicator; tap again -> resumes and hides indicator
         composeTestRule.onNodeWithTag("story_pause_zone").performClick()
@@ -237,11 +241,28 @@ class StoriesAndProfileAndFcmTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("story_paused_indicator").assertDoesNotExist()
 
-        // React with fire emoji -> updates story reactions & summary
+        // React with fire emoji from floating tray -> updates story reactions, summary & confirmation banner
         composeTestRule.onNodeWithTag("story_quick_reaction_🔥").performClick()
         composeTestRule.waitForIdle()
         assertEquals(listOf("s_1" to "🔥"), reacted)
         composeTestRule.onNodeWithTag("story_reaction_chip_🔥").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sent 🔥 to @maya.studio").assertIsDisplayed()
+
+        // Expand floating emoji tray -> shows extended emojis and sends celebration reaction
+        composeTestRule.onNodeWithTag("story_floating_tray_expand").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_extended_reactions_row").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("story_quick_reaction_🎉").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(listOf("s_1" to "🔥", "s_1" to "🎉"), reacted)
+
+        // Toggle floating emoji tray off and back on via reply bar button
+        composeTestRule.onNodeWithTag("story_emoji_tray_toggle").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_floating_emoji_tray").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("story_emoji_tray_toggle").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_floating_emoji_tray").assertIsDisplayed()
 
         // Prev at index 0 triggers previous author; Next advances segment then next author
         composeTestRule.onNodeWithTag("story_prev_zone").performClick()

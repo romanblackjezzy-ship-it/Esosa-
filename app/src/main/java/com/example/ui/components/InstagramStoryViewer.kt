@@ -3,13 +3,19 @@ package com.example.ui.components
 import android.net.Uri
 import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,11 +45,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -125,15 +136,39 @@ fun SocialStoryViewerDialog(
     var isReplyFocused by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(false) }
     var replyDraft by remember(story.id) { mutableStateOf("") }
+    var showEmojiTray by remember(story.id) { mutableStateOf(true) }
+    var isEmojiTrayExpanded by remember(story.id) { mutableStateOf(false) }
+    var sentReactionFeedback by remember(story.id) { mutableStateOf<String?>(null) }
     var burstEmoji by remember(story.id) { mutableStateOf<String?>(null) }
     var burstSequence by remember(story.id) { mutableIntStateOf(0) }
     val burstProgress = remember(story.id, burstSequence) { Animatable(0f) }
 
-    val isTimerPaused = isTapPaused || isHoldingPause || isReplyFocused || replyDraft.isNotBlank()
+    val isTimerPaused = isTapPaused ||
+        isHoldingPause ||
+        isReplyFocused ||
+        replyDraft.isNotBlank() ||
+        isEmojiTrayExpanded
     val replies = repliesByStory[story.id].orEmpty()
+
+    fun triggerQuickReaction(emoji: String) {
+        val alreadyReacted = story.hasReaction(currentUid, emoji)
+        burstEmoji = emoji
+        burstSequence += 1
+        sentReactionFeedback = if (!alreadyReacted) {
+            if (story.authorId == currentUid) "Reacted $emoji" else "Sent $emoji to @${story.authorUsername}"
+        } else {
+            "Removed $emoji reaction"
+        }
+        if (onReactEmoji != null) {
+            onReactEmoji(story, emoji)
+        } else {
+            onSendReply(story, emoji)
+        }
+    }
 
     fun goNextStory() {
         isTapPaused = false
+        isEmojiTrayExpanded = false
         if (currentIndex < stories.lastIndex) {
             currentIndex += 1
         } else if (hasNextAuthor && onNextAuthor != null) {
@@ -145,6 +180,7 @@ fun SocialStoryViewerDialog(
 
     fun goPreviousStory() {
         isTapPaused = false
+        isEmojiTrayExpanded = false
         if (currentIndex > 0) {
             currentIndex -= 1
         } else if (segmentProgress <= 0.25f && hasPreviousAuthor && onPreviousAuthor != null) {
@@ -156,6 +192,13 @@ fun SocialStoryViewerDialog(
 
     LaunchedEffect(story.id) {
         onStoryChanged(story)
+    }
+
+    LaunchedEffect(sentReactionFeedback) {
+        if (sentReactionFeedback != null) {
+            delay(1_800L)
+            sentReactionFeedback = null
+        }
     }
 
     LaunchedEffect(burstEmoji, burstSequence) {
@@ -320,22 +363,41 @@ fun SocialStoryViewerDialog(
                 )
             }
 
-            // Floating Animated Emoji Reaction Burst
+            // Floating Animated Multi-Emoji Reaction Burst
             val activeBurst = burstEmoji
             if (activeBurst != null) {
                 val p = burstProgress.value
+                val alpha = (1f - p).coerceIn(0f, 1f)
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 180.dp)
-                        .offset { IntOffset(0, (-220f * p).roundToInt()) }
-                        .scale(0.8f + (1f - p) * 0.85f)
-                        .alpha((1f - p).coerceIn(0f, 1f))
-                        .testTag("story_emoji_burst")
+                        .padding(bottom = 190.dp)
+                        .testTag("story_emoji_burst"),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = activeBurst,
-                        fontSize = 54.sp
+                        fontSize = 30.sp,
+                        modifier = Modifier
+                            .offset { IntOffset((-44f * p - 18f).roundToInt(), (-185f * p).roundToInt()) }
+                            .scale(0.75f + (1f - p) * 0.45f)
+                            .alpha(alpha * 0.85f)
+                    )
+                    Text(
+                        text = activeBurst,
+                        fontSize = 34.sp,
+                        modifier = Modifier
+                            .offset { IntOffset((42f * p + 18f).roundToInt(), (-195f * p).roundToInt()) }
+                            .scale(0.75f + (1f - p) * 0.55f)
+                            .alpha(alpha * 0.9f)
+                    )
+                    Text(
+                        text = activeBurst,
+                        fontSize = 56.sp,
+                        modifier = Modifier
+                            .offset { IntOffset(0, (-245f * p).roundToInt()) }
+                            .scale(0.85f + (1f - p) * 0.85f)
+                            .alpha(alpha)
                     )
                 }
             }
@@ -608,15 +670,7 @@ fun SocialStoryViewerDialog(
                                             },
                                             shape = CircleShape
                                         )
-                                        .clickable {
-                                            burstEmoji = emoji
-                                            burstSequence += 1
-                                            if (onReactEmoji != null) {
-                                                onReactEmoji(story, emoji)
-                                            } else {
-                                                onSendReply(story, emoji)
-                                            }
-                                        }
+                                        .clickable { triggerQuickReaction(emoji) }
                                         .testTag("story_reaction_chip_$emoji")
                                 ) {
                                     Text(
@@ -657,71 +711,57 @@ fun SocialStoryViewerDialog(
                     }
                 }
 
-                // Quick Emoji Reactions Bar
-                Row(
+                // In-Viewer Sent Reaction / Reply Confirmation Pill
+                AnimatedVisibility(
+                    visible = sentReactionFeedback != null,
+                    enter = fadeIn() + scaleIn(initialScale = 0.9f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.9f),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
+                        .align(Alignment.CenterHorizontally)
                         .padding(bottom = 8.dp)
-                        .testTag("story_quick_reactions_bar"),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    StoryReactions.QUICK_EMOJIS.forEach { emoji ->
-                        val reactedByMe = story.hasReaction(currentUid, emoji)
-                        val count = story.reactions[emoji]?.size ?: 0
-                        Surface(
-                            color = if (reactedByMe) {
-                                Color.White.copy(alpha = 0.26f)
-                            } else {
-                                Color.White.copy(alpha = 0.14f)
-                            },
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .then(
-                                    if (reactedByMe) {
-                                        Modifier.border(
-                                            width = 1.5.dp,
-                                            brush = Brush.linearGradient(InstagramStoryGradient),
-                                            shape = CircleShape
-                                        )
-                                    } else {
-                                        Modifier
-                                    }
-                                )
-                                .clickable {
-                                    burstEmoji = emoji
-                                    burstSequence += 1
-                                    if (onReactEmoji != null) {
-                                        onReactEmoji(story, emoji)
-                                    } else {
-                                        onSendReply(story, emoji)
-                                    }
-                                }
-                                .testTag("story_quick_reaction_$emoji")
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = emoji,
-                                    fontSize = 18.sp
-                                )
-                                if (count > 0) {
-                                    Text(
-                                        text = count.toString(),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
+                    Surface(
+                        color = Color(0xE61C1C22),
+                        shape = CircleShape,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(InstagramStoryGradient),
+                                shape = CircleShape
+                            )
+                            .testTag("story_reaction_sent_banner")
+                    ) {
+                        Text(
+                            text = sentReactionFeedback.orEmpty(),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
                     }
                 }
 
-                // Reply Input Bar
+                // Floating Glassmorphic Emoji Reaction Tray
+                AnimatedVisibility(
+                    visible = showEmojiTray,
+                    enter = fadeIn() + slideInVertically { it / 2 } + scaleIn(initialScale = 0.94f),
+                    exit = fadeOut() + slideOutVertically { it / 2 } + scaleOut(targetScale = 0.94f),
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = 10.dp)
+                ) {
+                    FloatingStoryEmojiTray(
+                        story = story,
+                        currentUid = currentUid,
+                        isExpanded = isEmojiTrayExpanded,
+                        onToggleExpand = { isEmojiTrayExpanded = !isEmojiTrayExpanded },
+                        onEmojiClick = ::triggerQuickReaction
+                    )
+                }
+
+                // Reply Input Bar + Floating Emoji Tray Toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -759,13 +799,31 @@ fun SocialStoryViewerDialog(
                         )
                     }
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = { showEmojiTray = !showEmojiTray },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("story_emoji_tray_toggle")
+                    ) {
+                        Icon(
+                            imageVector = if (showEmojiTray) {
+                                Icons.Filled.EmojiEmotions
+                            } else {
+                                Icons.Outlined.EmojiEmotions
+                            },
+                            contentDescription = if (showEmojiTray) "Hide emoji tray" else "Show emoji tray",
+                            tint = Color.White
+                        )
+                    }
 
                     IconButton(
                         onClick = {
                             val clean = replyDraft.trim()
                             if (clean.isNotEmpty()) {
                                 onSendReply(story, clean)
+                                sentReactionFeedback = "Sent reply to @${story.authorUsername}"
                                 replyDraft = ""
                                 focusManager.clearFocus()
                             }
@@ -782,6 +840,141 @@ fun SocialStoryViewerDialog(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingStoryEmojiTray(
+    story: SocialStory,
+    currentUid: String,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onEmojiClick: (String) -> Unit
+) {
+    Surface(
+        color = Color(0xD916161B),
+        shape = RoundedCornerShape(28.dp),
+        shadowElevation = 12.dp,
+        modifier = Modifier
+            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(28.dp))
+            .animateContentSize()
+            .testTag("story_floating_emoji_tray")
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .testTag("story_quick_reactions_bar")
+            ) {
+                StoryReactions.QUICK_EMOJIS.forEach { emoji ->
+                    FloatingEmojiPill(
+                        emoji = emoji,
+                        count = story.reactions[emoji]?.size ?: 0,
+                        isSelected = story.hasReaction(currentUid, emoji),
+                        onClick = { onEmojiClick(emoji) }
+                    )
+                }
+
+                IconButton(
+                    onClick = onToggleExpand,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .size(48.dp)
+                        .padding(4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .testTag("story_floating_tray_expand")
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.Add,
+                        contentDescription = if (isExpanded) "Show fewer reactions" else "More reactions",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("story_extended_reactions_row")
+                ) {
+                    StoryReactions.EXTENDED_EMOJIS.forEach { emoji ->
+                        FloatingEmojiPill(
+                            emoji = emoji,
+                            count = story.reactions[emoji]?.size ?: 0,
+                            isSelected = story.hasReaction(currentUid, emoji),
+                            onClick = { onEmojiClick(emoji) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingEmojiPill(
+    emoji: String,
+    count: Int,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) 1.08f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "floating_emoji_scale_$emoji"
+    )
+    Surface(
+        color = if (isSelected) Color.White.copy(alpha = 0.24f) else Color.Transparent,
+        shape = CircleShape,
+        modifier = Modifier
+            .defaultMinSize(minWidth = 44.dp, minHeight = 48.dp)
+            .scale(scale)
+            .clip(CircleShape)
+            .then(
+                if (isSelected) {
+                    Modifier.border(
+                        width = 1.5.dp,
+                        brush = Brush.linearGradient(InstagramStoryGradient),
+                        shape = CircleShape
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .clickable(onClick = onClick)
+            .testTag("story_quick_reaction_$emoji")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = emoji,
+                fontSize = 20.sp
+            )
+            if (count > 0) {
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
             }
         }
     }

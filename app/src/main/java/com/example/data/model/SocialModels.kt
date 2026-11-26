@@ -161,7 +161,8 @@ data class SocialStory(
 }
 
 object StoryReactions {
-    val QUICK_EMOJIS = listOf("❤️", "😂", "😮", "😢", "👏", "🔥")
+    val QUICK_EMOJIS = listOf("❤️", "🔥", "😂", "😮", "😢", "👏")
+    val EXTENDED_EMOJIS = listOf("🙌", "🎉", "🤩", "💯", "🥳", "🫶")
     const val MAX_TYPES_PER_STORY = 16
 
     fun toggle(

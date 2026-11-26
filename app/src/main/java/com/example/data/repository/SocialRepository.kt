@@ -354,8 +354,27 @@ class SocialRepository(
     }
 
     suspend fun toggleStoryReaction(story: SocialStory, emoji: String): Map<String, List<String>> {
-        val uid = auth.currentUser?.uid ?: return story.reactions
-        return socialService.toggleStoryReaction(story, uid, emoji)
+        val user = auth.currentUser ?: return story.reactions
+        val uid = user.uid
+        val wasSelected = story.hasReaction(uid, emoji)
+        val updated = socialService.toggleStoryReaction(story, uid, emoji)
+        if (!wasSelected && story.authorId.isNotBlank() && story.authorId != uid) {
+            runCatching {
+                val profile = profilePreferences.getProfile()
+                val username = resolveUsername(profile.username, profile.displayName, user.email, uid)
+                val photoUrl = profile.photoUrl.ifBlank { user.photoUrl?.toString().orEmpty() }
+                val replyId = "sr_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+                socialService.addStoryReply(
+                    story = story,
+                    replyId = replyId,
+                    authorId = uid,
+                    authorUsername = username,
+                    authorPhotoUrl = photoUrl,
+                    text = emoji.trim()
+                )
+            }
+        }
+        return updated
     }
 
     suspend fun deletePost(post: SocialPost) {
