@@ -869,8 +869,8 @@ class ChatRepository(
     ): Result<Unit> {
         return try {
             onProgress(0.08f)
-            val jpegBytes = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.compressUriToJpegBytesWithSizeCap(appContext, photoUri)
+            val preparedFile = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.prepareUploadImageFile(appContext, photoUri)
             }
             onProgress(0.14f)
             val profile = profilePreferences.getProfile()
@@ -880,38 +880,44 @@ class ChatRepository(
             val now = System.currentTimeMillis()
             val messageId = "msg_${now}_${UUID.randomUUID().toString().take(8)}"
 
+            val remoteSync = syncService
+            val storageService = photoStorageService
             val isCloudSyncedRoom = uid != LocalProfilePreferences.LOCAL_USER_ID &&
-                syncService != null &&
+                remoteSync != null &&
                 room.ownerId.isNotBlank()
 
             val imageUrl: String
             val storagePath: String
-            val uploadedPhotoResult = if (isCloudSyncedRoom && photoStorageService != null) {
-                runCatching {
-                    photoStorageService!!.uploadRoomPhoto(
+            try {
+                if (isCloudSyncedRoom && storageService != null) {
+                    val uploaded = storageService.uploadRoomPhotoFile(
                         roomId = room.id,
                         messageId = messageId,
                         senderUid = uid,
-                        jpegBytes = jpegBytes,
+                        preparedFile = preparedFile,
                         onProgress = onProgress
                     )
+                    imageUrl = uploaded.downloadUrl
+                    storagePath = uploaded.storagePath
+                    EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
+                } else {
+                    val savedFile = withContext(Dispatchers.IO) {
+                        val dir = java.io.File(appContext.filesDir, "chat_photos").apply {
+                            if (!exists()) mkdirs()
+                        }
+                        val dest = java.io.File(
+                            dir,
+                            "photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.${preparedFile.fileExtension}"
+                        )
+                        preparedFile.file.copyTo(dest, overwrite = true)
+                        dest
+                    }
+                    imageUrl = Uri.fromFile(savedFile).toString()
+                    storagePath = savedFile.absolutePath
+                    onProgress(0.85f)
                 }
-            } else {
-                Result.failure(IllegalStateException("Not cloud synced"))
-            }
-
-            if (uploadedPhotoResult.isSuccess) {
-                val uploaded = uploadedPhotoResult.getOrThrow()
-                imageUrl = uploaded.downloadUrl
-                storagePath = uploaded.storagePath
-                EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
-            } else {
-                val savedFile = withContext(Dispatchers.IO) {
-                    CameraPhotoHelper.saveJpegBytesToLocalChatPhotos(appContext, jpegBytes)
-                }
-                imageUrl = Uri.fromFile(savedFile).toString()
-                storagePath = savedFile.absolutePath
-                onProgress(0.85f)
+            } finally {
+                preparedFile.file.delete()
             }
 
             val entity = RoomMessageEntity(
@@ -937,9 +943,9 @@ class ChatRepository(
                 lastAt = now,
                 updatedAt = now
             )
-            val syncResult = if (isCloudSyncedRoom) {
+            val syncResult = if (isCloudSyncedRoom && remoteSync != null) {
                 runFirestoreWrite {
-                    syncService!!.sendMessage(
+                    remoteSync.sendMessage(
                         uid = uid,
                         room = room,
                         message = entity.toDomain(),

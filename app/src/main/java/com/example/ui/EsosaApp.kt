@@ -150,10 +150,10 @@ import com.example.ui.viewmodel.AppUpdateViewModel
 import com.example.ui.viewmodel.RoomsViewModel
 import com.example.ui.viewmodel.SocialViewModel
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.storage.storage
 
 enum class EsosaTab(
     val label: String,
@@ -315,7 +315,10 @@ fun EsosaApp(
                 else -> {
                     key(signedInUser.uid) {
                         val photoStorageService = remember {
-                            FirebasePhotoStorageService(Firebase.storage)
+                            FirebasePhotoStorageService.createConfigured(
+                                app = FirebaseApp.getInstance(),
+                                auth = Firebase.auth
+                            )
                         }
                         val userRepository = remember(signedInUser.uid, firestoreDb) {
                             val app = context.applicationContext

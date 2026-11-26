@@ -82,24 +82,36 @@ class SocialRepository(
                     filter = filter
                 )
             }
-            onProgress(0.16f)
-            val uploadedPoster = photoStorageService.uploadSocialMedia(
-                uid = uid,
-                mediaId = postId,
-                prefix = "post_poster",
-                jpegBytes = posterBytes,
-                onProgress = { p -> onProgress(0.16f + p * 0.18f) }
-            )
-            onProgress(0.35f)
-            val videoBytes = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.readVideoBytesWithSizeCap(appContext, imageUri)
+            val preparedPoster = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.writeBytesToUploadTempFile(appContext, posterBytes)
             }
-            val uploadedVideo = photoStorageService.uploadSocialVideo(
-                uid = uid,
-                mediaId = postId,
-                videoBytes = videoBytes,
-                onProgress = { p -> onProgress(0.35f + p * 0.58f) }
-            )
+            val uploadedPoster = try {
+                onProgress(0.16f)
+                photoStorageService.uploadSocialMediaFile(
+                    uid = uid,
+                    mediaId = postId,
+                    prefix = "post_poster",
+                    preparedFile = preparedPoster,
+                    onProgress = { p -> onProgress(0.16f + p * 0.18f) }
+                )
+            } finally {
+                preparedPoster.file.delete()
+            }
+
+            onProgress(0.35f)
+            val preparedVideo = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.prepareUploadVideoFile(appContext, imageUri)
+            }
+            val uploadedVideo = try {
+                photoStorageService.uploadSocialVideoFile(
+                    uid = uid,
+                    mediaId = postId,
+                    preparedFile = preparedVideo,
+                    onProgress = { p -> onProgress(0.35f + p * 0.58f) }
+                )
+            } finally {
+                preparedVideo.file.delete()
+            }
 
             socialService.createPost(
                 postId = postId,
@@ -119,22 +131,26 @@ class SocialRepository(
             )
         } else {
             onProgress(0.08f)
-            val jpegBytes = withContext(Dispatchers.IO) {
-                CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+            val preparedImage = withContext(Dispatchers.IO) {
+                CameraPhotoHelper.prepareUploadImageFile(
                     context = appContext,
                     uri = imageUri,
                     cropSpec = cropSpec,
                     filter = filter
                 )
             }
-            onProgress(0.15f)
-            val uploaded = photoStorageService.uploadSocialMedia(
-                uid = uid,
-                mediaId = postId,
-                prefix = if (mediaType == SocialMediaType.REEL) "reel" else "post",
-                jpegBytes = jpegBytes,
-                onProgress = onProgress
-            )
+            val uploaded = try {
+                onProgress(0.15f)
+                photoStorageService.uploadSocialMediaFile(
+                    uid = uid,
+                    mediaId = postId,
+                    prefix = if (mediaType == SocialMediaType.REEL) "reel" else "post",
+                    preparedFile = preparedImage,
+                    onProgress = onProgress
+                )
+            } finally {
+                preparedImage.file.delete()
+            }
 
             socialService.createPost(
                 postId = postId,
@@ -186,45 +202,60 @@ class SocialRepository(
                         filter = filter
                     )
                 }
-                onProgress(0.16f)
-                val uploadedPoster = photoStorageService.uploadSocialMedia(
-                    uid = uid,
-                    mediaId = storyId,
-                    prefix = "story_poster",
-                    jpegBytes = posterBytes,
-                    onProgress = { p -> onProgress(0.16f + p * 0.18f) }
-                )
+                val preparedPoster = withContext(Dispatchers.IO) {
+                    CameraPhotoHelper.writeBytesToUploadTempFile(appContext, posterBytes)
+                }
+                val uploadedPoster = try {
+                    onProgress(0.16f)
+                    photoStorageService.uploadSocialMediaFile(
+                        uid = uid,
+                        mediaId = storyId,
+                        prefix = "story_poster",
+                        preparedFile = preparedPoster,
+                        onProgress = { p -> onProgress(0.16f + p * 0.18f) }
+                    )
+                } finally {
+                    preparedPoster.file.delete()
+                }
                 imageUrl = uploadedPoster.downloadUrl
                 storagePath = uploadedPoster.storagePath
 
                 onProgress(0.35f)
-                val videoBytes = withContext(Dispatchers.IO) {
-                    CameraPhotoHelper.readVideoBytesWithSizeCap(appContext, imageUri)
+                val preparedVideo = withContext(Dispatchers.IO) {
+                    CameraPhotoHelper.prepareUploadVideoFile(appContext, imageUri)
                 }
-                val uploadedVideo = photoStorageService.uploadSocialVideo(
-                    uid = uid,
-                    mediaId = storyId,
-                    videoBytes = videoBytes,
-                    onProgress = { p -> onProgress(0.35f + p * 0.58f) }
-                )
+                val uploadedVideo = try {
+                    photoStorageService.uploadSocialVideoFile(
+                        uid = uid,
+                        mediaId = storyId,
+                        preparedFile = preparedVideo,
+                        onProgress = { p -> onProgress(0.35f + p * 0.58f) }
+                    )
+                } finally {
+                    preparedVideo.file.delete()
+                }
                 videoUrl = uploadedVideo.downloadUrl
             } else {
-                val jpegBytes = withContext(Dispatchers.IO) {
-                    CameraPhotoHelper.processImageToJpegBytesWithCropAndFilter(
+                val preparedImage = withContext(Dispatchers.IO) {
+                    CameraPhotoHelper.prepareUploadImageFile(
                         context = appContext,
                         uri = imageUri,
                         cropSpec = cropSpec,
                         filter = filter
                     )
                 }
-                onProgress(0.15f)
-                val uploaded = photoStorageService.uploadSocialMedia(
-                    uid = uid,
-                    mediaId = storyId,
-                    prefix = "story",
-                    jpegBytes = jpegBytes,
-                    onProgress = onProgress
-                )
+                val uploaded = try {
+                    onProgress(0.15f)
+                    photoStorageService.uploadSocialMediaFile(
+                        uid = uid,
+                        mediaId = storyId,
+                        prefix = "story",
+                        preparedFile = preparedImage,
+                        onProgress = onProgress
+                    )
+                } finally {
+                    preparedImage.file.delete()
+                }
                 imageUrl = uploaded.downloadUrl
                 storagePath = uploaded.storagePath
             }

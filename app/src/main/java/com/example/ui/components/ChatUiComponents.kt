@@ -263,52 +263,57 @@ fun TelegramWallpaperBackground(
 ) {
     val telegram = MaterialTheme.telegramColors
     val (canvasColor, rawPatternTint) = wallpaperCanvasAndPattern(wallpaper, telegram.isDark)
+    val hasPattern = rawPatternTint != Color.Transparent
     val patternColor = rawPatternTint.copy(alpha = if (telegram.isDark) 0.44f else 0.56f)
     Box(
         modifier = modifier
             .background(canvasColor)
-            .drawBehind {
-                val step = 52.dp.toPx()
-                val cols = (size.width / step).toInt() + 2
-                val rows = (size.height / step).toInt() + 2
-                val stroke = Stroke(width = 1.2.dp.toPx())
-                for (r in 0..rows) {
-                    val y = r * step
-                    val xShift = if (r % 2 == 0) 0f else step * 0.5f
-                    for (c in 0..cols) {
-                        val x = c * step + xShift
-                        val glyph = (r * 3 + c) % 4
-                        when (glyph) {
-                            0 -> drawCircle(
-                                color = patternColor,
-                                radius = 5.dp.toPx(),
-                                center = Offset(x, y),
-                                style = stroke
-                            )
-                            1 -> drawCircle(
-                                color = patternColor,
-                                radius = 2.dp.toPx(),
-                                center = Offset(x + 6.dp.toPx(), y - 4.dp.toPx())
-                            )
-                            2 -> drawLine(
-                                color = patternColor,
-                                start = Offset(x - 4.dp.toPx(), y + 4.dp.toPx()),
-                                end = Offset(x + 4.dp.toPx(), y - 4.dp.toPx()),
-                                strokeWidth = 1.2.dp.toPx()
-                            )
-                            else -> drawArc(
-                                color = patternColor,
-                                startAngle = 15f,
-                                sweepAngle = 150f,
-                                useCenter = false,
-                                topLeft = Offset(x - 6.dp.toPx(), y - 6.dp.toPx()),
-                                size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 12.dp.toPx()),
-                                style = stroke
-                            )
+            .then(
+                if (hasPattern) {
+                    Modifier.drawBehind {
+                        val step = 52.dp.toPx()
+                        val cols = (size.width / step).toInt() + 2
+                        val rows = (size.height / step).toInt() + 2
+                        val stroke = Stroke(width = 1.2.dp.toPx())
+                        for (r in 0..rows) {
+                            val y = r * step
+                            val xShift = if (r % 2 == 0) 0f else step * 0.5f
+                            for (c in 0..cols) {
+                                val x = c * step + xShift
+                                val glyph = (r * 3 + c) % 4
+                                when (glyph) {
+                                    0 -> drawCircle(
+                                        color = patternColor,
+                                        radius = 5.dp.toPx(),
+                                        center = Offset(x, y),
+                                        style = stroke
+                                    )
+                                    1 -> drawCircle(
+                                        color = patternColor,
+                                        radius = 2.dp.toPx(),
+                                        center = Offset(x + 6.dp.toPx(), y - 4.dp.toPx())
+                                    )
+                                    2 -> drawLine(
+                                        color = patternColor,
+                                        start = Offset(x - 4.dp.toPx(), y + 4.dp.toPx()),
+                                        end = Offset(x + 4.dp.toPx(), y - 4.dp.toPx()),
+                                        strokeWidth = 1.2.dp.toPx()
+                                    )
+                                    else -> drawArc(
+                                        color = patternColor,
+                                        startAngle = 15f,
+                                        sweepAngle = 150f,
+                                        useCenter = false,
+                                        topLeft = Offset(x - 6.dp.toPx(), y - 6.dp.toPx()),
+                                        size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 12.dp.toPx()),
+                                        style = stroke
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-            },
+                } else Modifier
+            ),
         content = content
     )
 }

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -142,18 +143,10 @@ fun ConversationMessageBubble(
     }
     val alignedEnd = isMine && !isChannelPost
     val bubbleShape = RoundedCornerShape(
-        topStart = if (!alignedEnd && !isFirstInGroup) 8.dp else 20.dp,
-        topEnd = if (alignedEnd && !isFirstInGroup) 8.dp else 20.dp,
-        bottomStart = when {
-            alignedEnd -> 20.dp
-            isLastInGroup -> 4.dp
-            else -> 8.dp
-        },
-        bottomEnd = when {
-            !alignedEnd -> 20.dp
-            isLastInGroup -> 4.dp
-            else -> 8.dp
-        }
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = if (!alignedEnd && isLastInGroup) 4.dp else 18.dp,
+        bottomEnd = if (alignedEnd && isLastInGroup) 4.dp else 18.dp
     )
 
     val isPureSticker = message.messageType == "sticker" &&
@@ -173,9 +166,7 @@ fun ConversationMessageBubble(
 
     val bubbleBorder = when {
         isHighlighted -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-        isPureSticker -> null
-        isMine -> BorderStroke(0.6.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-        else -> BorderStroke(0.6.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        else -> null
     }
 
     Row(
@@ -222,7 +213,7 @@ fun ConversationMessageBubble(
                 color = bubbleColor,
                 contentColor = textColor,
                 border = bubbleBorder,
-                shadowElevation = if (isPureSticker) 0.dp else 1.5.dp,
+                shadowElevation = 0.dp,
                 shape = bubbleShape,
                 modifier = Modifier
                     .clip(bubbleShape)
@@ -880,26 +871,24 @@ fun ConversationBottomComposer(
                             IconButton(
                                 onClick = onLaunchCamera,
                                 enabled = room != null && !isSendingMessage && photoUploadProgress == null,
-                                modifier = Modifier.minimumInteractiveComponentSize().testTag("room_camera_button")
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0095F6))
+                                    .testTag("room_camera_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.PhotoCamera,
                                     contentDescription = stringResource(R.string.room_camera_capture),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             Surface(
                                 color = telegram.composerInput,
                                 shape = RoundedCornerShape(24.dp),
-                                border = BorderStroke(
-                                    width = 1.dp,
-                                    color = if (draft.isNotBlank()) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                                    } else {
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                    }
-                                ),
+                                border = null,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 TextField(
@@ -910,7 +899,7 @@ fun ConversationBottomComposer(
                                             text = if (room?.chatKind == ChatKind.CHANNEL) {
                                                 stringResource(R.string.conversation_channel_placeholder)
                                             } else {
-                                                stringResource(R.string.conversation_input_placeholder)
+                                                "Message..."
                                             },
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -929,46 +918,44 @@ fun ConversationBottomComposer(
                             }
 
                             if (draft.isBlank() && editingMessage == null) {
-                                IconButton(
-                                    onClick = onStartVoiceRecording,
-                                    enabled = room != null,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            Brush.verticalGradient(
-                                                listOf(telegram.sendFab, MaterialTheme.colorScheme.tertiary)
-                                            )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = onStartVoiceRecording,
+                                        enabled = room != null,
+                                        modifier = Modifier.minimumInteractiveComponentSize().testTag("room_mic_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Mic,
+                                            contentDescription = "Record voice message",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                        .testTag("room_mic_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Mic,
-                                        contentDescription = "Record voice message",
-                                        tint = telegram.onSendFab
-                                    )
+                                    }
+                                    IconButton(
+                                        onClick = { onDraftChange("❤️") },
+                                        enabled = room != null,
+                                        modifier = Modifier.minimumInteractiveComponentSize().testTag("room_heart_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Favorite,
+                                            contentDescription = "Send Heart",
+                                            tint = Color(0xFFFF3040),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
                                 }
                             } else {
-                                IconButton(
+                                TextButton(
                                     onClick = onSendMessage,
                                     enabled = draft.isNotBlank() && room != null && !isSendingMessage,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (draft.isNotBlank() && !isSendingMessage) telegram.sendFab
-                                            else MaterialTheme.colorScheme.surfaceContainerHigh
-                                        )
-                                        .testTag("room_send_button")
+                                    modifier = Modifier.testTag("room_send_button")
                                 ) {
                                     if (isSendingMessage) {
                                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                     } else {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.Send,
-                                            contentDescription = "Send message",
-                                            tint = if (draft.isNotBlank()) telegram.onSendFab
-                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        Text(
+                                            text = "Send",
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = Color(0xFF0095F6)
                                         )
                                     }
                                 }

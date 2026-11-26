@@ -39,10 +39,15 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -107,8 +112,8 @@ import com.example.ui.components.formatRelativeThreadTime
 import com.example.ui.theme.telegramColors
 
 enum class ChatFolderFilter(val label: String, val tag: String) {
-    ALL("All", "folder_all"),
-    PERSONAL("Personal", "folder_personal"),
+    ALL("Primary", "folder_all"),
+    PERSONAL("General", "folder_personal"),
     GROUPS("Groups", "folder_groups"),
     CHANNELS("Channels", "folder_channels"),
     ARCHIVED("Archived", "folder_archived")
@@ -493,13 +498,19 @@ private fun TelegramChatsListView(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.clickable { showCreateDialog = true }
                     ) {
-                        EsosaBrandLogo(size = 30.dp)
                         Text(
-                            text = stringResource(R.string.app_name),
+                            text = userProfile.username.ifBlank { stringResource(R.string.app_name) },
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = telegram.onTopBar
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "Switch account",
+                            tint = telegram.onTopBar,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 },
@@ -509,8 +520,8 @@ private fun TelegramChatsListView(
                         modifier = Modifier.testTag("top_bar_new_chat_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "New Chat",
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "New Message",
                             tint = telegram.onTopBar
                         )
                     }
@@ -922,15 +933,12 @@ private fun TelegramChatRow(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (room.lastMessageIsMine) {
-                            Icon(Icons.Filled.DoneAll, contentDescription = "Delivered", tint = telegram.checkTint, modifier = Modifier.size(16.dp))
-                        }
                         Text(
                             text = formatRelativeThreadTime(
                                 if (room.lastMessageAtMillis > 0L) room.lastMessageAtMillis else room.createdAtMillis
                             ),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (room.unreadCount > 0) MaterialTheme.colorScheme.primary
+                            color = if (room.unreadCount > 0) Color(0xFF0095F6)
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -953,11 +961,11 @@ private fun TelegramChatRow(
                             Text(
                                 text = "$firstTyper is typing",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.primary,
+                                color = Color(0xFF0095F6),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            TypingMiniDots(color = MaterialTheme.colorScheme.primary)
+                            TypingMiniDots(color = Color(0xFF0095F6))
                         }
                     } else {
                         val cleanSearch = searchQuery.trim()
@@ -984,8 +992,10 @@ private fun TelegramChatRow(
                                 highlightBackground = highlightBg,
                                 highlightTextColor = highlightFg
                             ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (room.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
+                            ),
+                            color = if (room.unreadCount > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -994,23 +1004,24 @@ private fun TelegramChatRow(
                     Spacer(Modifier.width(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (room.unreadCount > 0) {
-                            Surface(
-                                color = if (room.isMuted) MaterialTheme.colorScheme.outline else telegram.unreadBadge,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(
-                                    text = room.unreadCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = telegram.onUnreadBadge,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0095F6))
+                            )
                         } else if (room.isPinned) {
                             Icon(Icons.Filled.PushPin, contentDescription = "Pinned", tint = telegram.pinnedTint, modifier = Modifier.size(16.dp))
                         }
+                        Icon(
+                            imageVector = Icons.Outlined.PhotoCamera,
+                            contentDescription = "Camera",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }

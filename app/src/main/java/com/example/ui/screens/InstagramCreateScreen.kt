@@ -58,10 +58,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -137,10 +142,13 @@ fun InstagramCreateScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var format by remember(initialFormat) { mutableStateOf(initialFormat) }
     var currentStep by remember { mutableStateOf(CreateStep.PICKER) }
     var selectedUri by remember(initialSelectedUri) { mutableStateOf(initialSelectedUri) }
     var isVideo by remember(initialSelectedUri, initialIsVideo) { mutableStateOf(initialIsVideo) }
+    var stagedLocalFile by remember { mutableStateOf<File?>(null) }
+    var isStagingMedia by remember { mutableStateOf(false) }
 
     var cropSpec by remember(initialFormat) {
         mutableStateOf(
@@ -162,18 +170,46 @@ fun InstagramCreateScreen(
     var pendingCaptureMode by remember { mutableStateOf(PendingCameraCapture.PHOTO) }
     var localError by remember { mutableStateOf<String?>(null) }
 
+    fun stageIncomingUri(rawUri: Uri, forcedIsVideo: Boolean? = null, sourceTempFile: File? = null) {
+        val detectedVideo = forcedIsVideo ?: CameraPhotoHelper.isVideoUri(context, rawUri)
+        selectedUri = rawUri
+        isVideo = detectedVideo
+        cropSpec = MediaCropSpec(
+            targetAspectRatio = if (format == CreateFormat.REEL || format == CreateFormat.STORY) 0.8f else 1f
+        )
+        selectedFilter = PostFilter.NORMAL
+        localError = null
+        onClearError()
+        isStagingMedia = true
+        val previousStaged = stagedLocalFile
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { CameraPhotoHelper.stageSelectedMediaForUpload(context, rawUri) }
+            }
+            isStagingMedia = false
+            result.onSuccess { staged ->
+                previousStaged?.delete()
+                stagedLocalFile = staged.file
+                selectedUri = staged.fileUri
+                isVideo = forcedIsVideo ?: staged.isVideo
+                sourceTempFile?.delete()
+            }.onFailure { err ->
+                localError = err.localizedMessage ?: "Selected image URI could not be read. Please choose another file."
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            stagedLocalFile?.delete()
+        }
+    }
+
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            selectedUri = uri
-            isVideo = CameraPhotoHelper.isVideoUri(context, uri)
-            cropSpec = MediaCropSpec(
-                targetAspectRatio = if (format == CreateFormat.REEL || format == CreateFormat.STORY) 0.8f else 1f
-            )
-            selectedFilter = PostFilter.NORMAL
-            localError = null
-            onClearError()
+            stageIncomingUri(rawUri = uri)
         }
     }
 
@@ -181,14 +217,11 @@ fun InstagramCreateScreen(
         contract = ActivityResultContracts.TakePicture()
     ) { saved ->
         if (saved && cameraTempUri != null) {
-            selectedUri = cameraTempUri
-            isVideo = false
-            cropSpec = MediaCropSpec(
-                targetAspectRatio = if (format == CreateFormat.REEL || format == CreateFormat.STORY) 0.8f else 1f
-            )
-            selectedFilter = PostFilter.NORMAL
-            localError = null
-            onClearError()
+            val capturedUri = cameraTempUri!!
+            val tempFile = cameraTempFile
+            cameraTempUri = null
+            cameraTempFile = null
+            stageIncomingUri(rawUri = capturedUri, forcedIsVideo = false, sourceTempFile = tempFile)
         } else {
             cameraTempFile?.delete()
         }
@@ -198,14 +231,11 @@ fun InstagramCreateScreen(
         contract = ActivityResultContracts.CaptureVideo()
     ) { saved ->
         if (saved && cameraTempUri != null) {
-            selectedUri = cameraTempUri
-            isVideo = true
-            cropSpec = MediaCropSpec(
-                targetAspectRatio = if (format == CreateFormat.POST) 1f else 0.8f
-            )
-            selectedFilter = PostFilter.NORMAL
-            localError = null
-            onClearError()
+            val capturedUri = cameraTempUri!!
+            val tempFile = cameraTempFile
+            cameraTempUri = null
+            cameraTempFile = null
+            stageIncomingUri(rawUri = capturedUri, forcedIsVideo = true, sourceTempFile = tempFile)
         } else {
             cameraTempFile?.delete()
         }
@@ -311,7 +341,7 @@ fun InstagramCreateScreen(
         stepBack()
     }
 
-    val canShare = !isPublishing && when (format) {
+    val canShare = !isPublishing && !isStagingMedia && when (format) {
         CreateFormat.POST, CreateFormat.REEL -> selectedUri != null
         CreateFormat.STORY -> selectedUri != null || caption.isNotBlank()
     }
@@ -498,6 +528,8 @@ fun InstagramCreateScreen(
                     onTakePhoto = { launchCameraCapture(PendingCameraCapture.PHOTO) },
                     onRecordVideo = { launchCameraCapture(PendingCameraCapture.VIDEO) },
                     onClearMedia = {
+                        stagedLocalFile?.delete()
+                        stagedLocalFile = null
                         selectedUri = null
                         isVideo = false
                     },
