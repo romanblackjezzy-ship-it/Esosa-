@@ -12,6 +12,11 @@
     <string name="notification_social_channel_id">esosa_social</string>
     <string name="notification_social_channel_name">Likes &amp; Stories</string>
     <string name="notification_social_channel_description">Notifications when someone likes your post or replies to your story</string>
+    <string name="notification_storage_channel_id">esosa_storage_alerts</string>
+    <string name="notification_storage_channel_name">Moderator Storage Alerts</string>
+    <string name="notification_storage_channel_description">Moderator-only warnings when Firebase Storage usage exceeds the configured threshold</string>
+    <string name="storage_dashboard_title">Firebase Storage Usage</string>
+    <string name="storage_dashboard_moderator_only_note">Threshold warning alerts notify moderators only.</string>
     <string name="update_dialog_title">New Update Available</string>
     <string name="update_download_action">Download Update</string>
     <string name="update_later_action">Later</string>

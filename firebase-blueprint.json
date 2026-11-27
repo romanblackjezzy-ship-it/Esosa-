@@ -19,6 +19,7 @@
         "fcmToken": { "type": "string", "description": "Latest Firebase Cloud Messaging registration token" },
         "fcmTokens": { "type": "array", "description": "Registered device FCM tokens for push notifications" },
         "notificationsEnabled": { "type": "boolean", "description": "Whether incoming message and social notifications are enabled" },
+        "role": { "type": "string", "enum": ["member", "moderator"], "description": "Server-assigned role controlling moderator alerts" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -267,6 +268,56 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
       "required": ["followerId", "targetUid", "targetUsername", "createdAt"]
+    },
+    "MediaBlob": {
+      "title": "MediaBlob",
+      "description": "Metadata for chunked photo, video, avatar, or voice note stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "description": "Uploader Firebase Auth UID" },
+        "contentType": { "type": "string", "description": "MIME content type" },
+        "fileExtension": { "type": "string", "description": "Normalized file extension" },
+        "totalBytes": { "type": "integer", "description": "Total raw byte length" },
+        "totalChunks": { "type": "integer", "description": "Number of Base64 chunks" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["ownerId", "contentType", "fileExtension", "totalBytes", "totalChunks", "createdAt"]
+    },
+    "MediaBlobChunk": {
+      "title": "MediaBlobChunk",
+      "description": "Base64-encoded chunk of a MediaBlob file.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "description": "Uploader Firebase Auth UID" },
+        "index": { "type": "integer", "description": "Zero-based chunk index" },
+        "data": { "type": "string", "description": "Base64-encoded bytes" }
+      },
+      "required": ["ownerId", "index", "data"]
+    },
+    "ModeratorGrant": {
+      "title": "ModeratorGrant",
+      "description": "Read-only server-managed moderator grant per user UID.",
+      "type": "object",
+      "properties": {
+        "assignedBy": { "type": "string", "description": "Admin identifier" }
+      }
+    },
+    "StorageUsageSummary": {
+      "title": "StorageUsageSummary",
+      "description": "Global Firebase Storage and cloud media usage counters and moderator warning threshold.",
+      "type": "object",
+      "properties": {
+        "usedBytes": { "type": "integer", "description": "Total used bytes across media uploads" },
+        "quotaBytes": { "type": "integer", "description": "Configured storage quota limit in bytes" },
+        "warningThresholdPercent": { "type": "integer", "description": "Percentage threshold triggering moderator-only warnings" },
+        "fileCount": { "type": "integer", "description": "Total active uploaded files" },
+        "photoBytes": { "type": "integer", "description": "Bytes occupied by photos" },
+        "videoBytes": { "type": "integer", "description": "Bytes occupied by videos" },
+        "audioBytes": { "type": "integer", "description": "Bytes occupied by voice notes/audio" },
+        "activeBackendLabel": { "type": "string", "description": "Current cloud storage backend label" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["usedBytes", "quotaBytes", "warningThresholdPercent", "fileCount", "photoBytes", "videoBytes", "audioBytes", "activeBackendLabel", "updatedAt"]
     }
   },
   "firestore": {
@@ -333,6 +384,22 @@
     "/app_config/{configId}": {
       "schema": { "$ref": "#/entities/AppRelease" },
       "description": "Read-only app update release configuration."
+    },
+    "/media_blobs/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaBlob" },
+      "description": "Firestore-backed cloud media metadata documents."
+    },
+    "/media_blobs/{mediaId}/chunks/{chunkIndex}": {
+      "schema": { "$ref": "#/entities/MediaBlobChunk" },
+      "description": "Chunked Base64 media payloads belonging to a MediaBlob."
+    },
+    "/moderators/{userId}": {
+      "schema": { "$ref": "#/entities/ModeratorGrant" },
+      "description": "Read-only server-managed moderator grant documents."
+    },
+    "/storage_usage/{usageDocId}": {
+      "schema": { "$ref": "#/entities/StorageUsageSummary" },
+      "description": "Global Firebase Storage usage metrics and moderator warning threshold configuration."
     }
   }
 }

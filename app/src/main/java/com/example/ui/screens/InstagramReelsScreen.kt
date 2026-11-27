@@ -500,12 +500,13 @@ private fun ReelVideoPlayerLayer(
     isPaused: Boolean,
     modifier: Modifier = Modifier
 ) {
-    androidx.compose.runtime.key(videoUrl) {
+    val playableUri = com.example.data.media.rememberPlayableMediaUri(videoUrl) ?: return
+    androidx.compose.runtime.key(playableUri) {
         val currentIsPaused by androidx.compose.runtime.rememberUpdatedState(isPaused)
         var isPrepared by remember { mutableStateOf(false) }
         var videoViewRef by remember { mutableStateOf<android.widget.VideoView?>(null) }
 
-        androidx.compose.runtime.DisposableEffect(videoUrl) {
+        androidx.compose.runtime.DisposableEffect(playableUri) {
             onDispose {
                 runCatching { videoViewRef?.stopPlayback() }
                 videoViewRef = null
@@ -513,7 +514,7 @@ private fun ReelVideoPlayerLayer(
             }
         }
 
-        if (videoUrl.isNotBlank()) {
+        if (playableUri.isNotBlank()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 factory = { ctx ->
                     android.widget.VideoView(ctx).apply {
@@ -530,7 +531,7 @@ private fun ReelVideoPlayerLayer(
                             isPrepared = false
                             true
                         }
-                        runCatching { setVideoURI(Uri.parse(videoUrl)) }
+                        runCatching { setVideoURI(Uri.parse(playableUri)) }
                     }
                 },
                 update = { videoView ->

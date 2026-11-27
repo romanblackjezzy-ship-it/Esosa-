@@ -328,7 +328,9 @@ open class FirestoreChatSyncService(
                 return Result.failure(SecurityException("You are no longer a member of this room."))
             }
 
-            val httpsImageUrl = message.imageUrl?.takeIf { it.startsWith("https://") }?.take(2000)
+            val httpsImageUrl = message.imageUrl?.takeIf {
+                FirestoreMediaBlobService.isCloudMediaUrl(it)
+            }?.take(2000)
             val safeText = message.text.trim().take(4000).ifBlank {
                 if (httpsImageUrl == null) "📷 Photo" else ""
             }

@@ -37,8 +37,31 @@ service cloud.firestore {
              (!('language' in data) || (data.language is string && data.language.size() <= 40)) &&
              (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 512)) &&
              (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 10)) &&
+             (!('role' in data) || data.role in ['member', 'moderator']) &&
              data.notificationsEnabled is bool &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isModerator() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/moderators/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'member') == 'moderator'
+        )
+      );
+    }
+
+    function isValidStorageUsage(data) {
+      return data.usedBytes is int && data.usedBytes >= 0 && data.usedBytes <= 1099511627776 &&
+             data.quotaBytes is int && data.quotaBytes >= 1048576 && data.quotaBytes <= 1099511627776 &&
+             data.warningThresholdPercent is int && data.warningThresholdPercent >= 50 && data.warningThresholdPercent <= 95 &&
+             data.fileCount is int && data.fileCount >= 0 && data.fileCount <= 10000000 &&
+             data.photoBytes is int && data.photoBytes >= 0 && data.photoBytes <= 1099511627776 &&
+             data.videoBytes is int && data.videoBytes >= 0 && data.videoBytes <= 1099511627776 &&
+             data.audioBytes is int && data.audioBytes >= 0 && data.audioBytes <= 1099511627776 &&
+             data.activeBackendLabel is string && data.activeBackendLabel.size() >= 1 && data.activeBackendLabel.size() <= 80 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
@@ -77,7 +100,7 @@ service cloud.firestore {
              data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
              (!('senderPhotoUrl' in data) || (data.senderPhotoUrl is string && data.senderPhotoUrl.size() <= 500)) &&
-             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^(https://|esosa-media://).*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
              (!('messageType' in data) || data.messageType in ['text', 'image', 'voice', 'document', 'sticker', 'gif']) &&
              (!('replyToMessageId' in data) || (data.replyToMessageId is string && data.replyToMessageId.size() <= 128)) &&
@@ -150,8 +173,8 @@ service cloud.firestore {
              data.authorDisplayName is string && data.authorDisplayName.size() >= 1 && data.authorDisplayName.size() <= 80 &&
              (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
              data.mediaType in ['photo', 'reel'] &&
-             data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*') &&
-             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^https://.*'))) &&
+             data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^(https://|esosa-media://).*') &&
+             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^(https://|esosa-media://).*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
              data.caption is string && data.caption.size() <= 2200 &&
              (!('location' in data) || (data.location is string && data.location.size() <= 120)) &&
@@ -176,8 +199,8 @@ service cloud.firestore {
       return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
              data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40 &&
              (!('authorPhotoUrl' in data) || (data.authorPhotoUrl is string && data.authorPhotoUrl.size() <= 2000)) &&
-             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^https://.*'))) &&
-             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^https://.*'))) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() >= 8 && data.imageUrl.size() <= 2000 && data.imageUrl.matches('^(https://|esosa-media://).*'))) &&
+             (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() >= 8 && data.videoUrl.size() <= 2000 && data.videoUrl.matches('^(https://|esosa-media://).*'))) &&
              (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 500)) &&
              data.caption is string && data.caption.size() <= 300 &&
              (('imageUrl' in data) || ('videoUrl' in data) || data.caption.size() >= 1) &&
@@ -219,6 +242,21 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
+    function isValidMediaBlob(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.contentType is string && data.contentType.size() >= 3 && data.contentType.size() <= 80 &&
+             data.fileExtension is string && data.fileExtension.size() >= 1 && data.fileExtension.size() <= 12 &&
+             data.totalBytes is int && data.totalBytes >= 1 && data.totalBytes <= 10485760 &&
+             data.totalChunks is int && data.totalChunks >= 1 && data.totalChunks <= 25 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidMediaBlobChunk(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.index is int && data.index >= 0 && data.index < 25 &&
+             data.data is string && data.data.size() >= 1 && data.data.size() <= 700000;
+    }
+
     // 1. Private User Profile & Settings
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
@@ -229,7 +267,8 @@ service cloud.firestore {
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'email', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'fcmToken', 'fcmTokens', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'fcmToken', 'fcmTokens', 'role', 'notificationsEnabled', 'createdAt', 'updatedAt']) &&
+                       (!('role' in incoming()) || incoming().role == 'member') &&
                        isValidUserProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -238,6 +277,7 @@ service cloud.firestore {
                        isValidUserProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
+                       (!('role' in incoming()) || incoming().role == existing().get('role', 'member')) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'username', 'bio', 'avatarKey', 'phoneNumber', 'authMethod', 'themeMode', 'language', 'fcmToken', 'fcmTokens', 'notificationsEnabled', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
@@ -725,6 +765,83 @@ service cloud.firestore {
                        isValidStoryHighlight(incoming());
 
       allow delete: if isSignedIn() && isValidId(highlightId) && existing().authorId == request.auth.uid;
+    }
+
+    // 9. Cloud Media Blobs (Firestore-backed storage for photos, videos, avatars, and voice notes)
+    match /media_blobs/{mediaId} {
+      allow get: if isSignedIn() && isValidId(mediaId);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(mediaId) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().keys().hasAll(['ownerId', 'contentType', 'fileExtension', 'totalBytes', 'totalChunks', 'createdAt']) &&
+                       incoming().keys().hasOnly(['ownerId', 'contentType', 'fileExtension', 'totalBytes', 'totalChunks', 'createdAt']) &&
+                       isValidMediaBlob(incoming());
+
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(mediaId) && existing().ownerId == request.auth.uid;
+
+      match /chunks/{chunkIndex} {
+        allow get: if isSignedIn() && isValidId(mediaId) && chunkIndex.matches('^[0-9]{1,2}$');
+        allow list: if isSignedIn() && isValidId(mediaId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(mediaId) &&
+                         chunkIndex.matches('^[0-9]{1,2}$') &&
+                         incoming().ownerId == request.auth.uid &&
+                         incoming().keys().hasAll(['ownerId', 'index', 'data']) &&
+                         incoming().keys().hasOnly(['ownerId', 'index', 'data']) &&
+                         isValidMediaBlobChunk(incoming()) &&
+                         get(/databases/$(database)/documents/media_blobs/$(mediaId)).data.ownerId == request.auth.uid;
+
+        allow update: if false;
+        allow delete: if isSignedIn() &&
+                         isValidId(mediaId) &&
+                         chunkIndex.matches('^[0-9]{1,2}$') &&
+                         (
+                           existing().ownerId == request.auth.uid ||
+                           get(/databases/$(database)/documents/media_blobs/$(mediaId)).data.ownerId == request.auth.uid
+                         );
+      }
+    }
+
+    // 10. Server-Managed Moderator Directory (read-only self check; client writes forbidden)
+    match /moderators/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
+    // 11. Firebase Storage & Cloud Media Usage Metrics (only moderators can alter threshold/quota)
+    match /storage_usage/{usageDocId} {
+      allow get: if isSignedIn() && usageDocId == 'global';
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       usageDocId == 'global' &&
+                       incoming().keys().hasAll(['usedBytes', 'quotaBytes', 'warningThresholdPercent', 'fileCount', 'photoBytes', 'videoBytes', 'audioBytes', 'activeBackendLabel', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['usedBytes', 'quotaBytes', 'warningThresholdPercent', 'fileCount', 'photoBytes', 'videoBytes', 'audioBytes', 'activeBackendLabel', 'updatedAt']) &&
+                       isValidStorageUsage(incoming()) &&
+                       (
+                         isModerator() ||
+                         (incoming().warningThresholdPercent == 80 && incoming().quotaBytes == 1073741824)
+                       );
+
+      allow update: if isSignedIn() &&
+                       usageDocId == 'global' &&
+                       incoming().keys().hasAll(['usedBytes', 'quotaBytes', 'warningThresholdPercent', 'fileCount', 'photoBytes', 'videoBytes', 'audioBytes', 'activeBackendLabel', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['usedBytes', 'quotaBytes', 'warningThresholdPercent', 'fileCount', 'photoBytes', 'videoBytes', 'audioBytes', 'activeBackendLabel', 'updatedAt']) &&
+                       isValidStorageUsage(incoming()) &&
+                       (
+                         isModerator() ||
+                         (
+                           incoming().warningThresholdPercent == existing().warningThresholdPercent &&
+                           incoming().quotaBytes == existing().quotaBytes &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['usedBytes', 'fileCount', 'photoBytes', 'videoBytes', 'audioBytes', 'activeBackendLabel', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if false;
     }
   }
 }

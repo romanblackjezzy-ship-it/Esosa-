@@ -21,9 +21,12 @@ import com.example.data.model.ChatWallpaper
 import com.example.data.model.MessageSearchHit
 import com.example.data.model.RoomMessage
 import com.example.data.model.RoomTypingStatus
+import com.example.data.model.StorageUsageSummary
 import com.example.data.model.StoryItem
 import com.example.data.model.UserProfile
+import com.example.data.model.formatStorageBytes
 import com.example.data.repository.ChatRepository
+import com.example.data.repository.StorageUsageRepository
 import com.example.notifications.EsosaNotificationManager
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
@@ -51,7 +54,8 @@ import kotlinx.coroutines.sync.withLock
 class RoomsViewModel(
     private val repository: ChatRepository,
     private val notificationManager: EsosaNotificationManager,
-    private val selectionPreferences: ThreadSelectionPreferences? = null
+    private val selectionPreferences: ThreadSelectionPreferences? = null,
+    private val storageUsageRepository: StorageUsageRepository? = null
 ) : ViewModel() {
 
     val currentUserId: String = repository.currentUserId()
@@ -125,6 +129,17 @@ class RoomsViewModel(
             started = SharingStarted.Eagerly,
             initialValue = UserProfile(id = LocalProfilePreferences.LOCAL_USER_ID)
         )
+
+    val storageUsageSummary: StateFlow<StorageUsageSummary> =
+        storageUsageRepository?.usageSummary
+            ?: MutableStateFlow(StorageUsageSummary()).asStateFlow()
+
+    val isModerator: StateFlow<Boolean> = combine(
+        userProfile.map { it.isModerator },
+        storageUsageRepository?.isModeratorGrantDocPresent ?: MutableStateFlow(false)
+    ) { roleIsMod, modDocPresent ->
+        roleIsMod || modDocPresent
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val activeSessions: StateFlow<List<ActiveSession>> = repository.observeActiveSessions()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -224,6 +239,55 @@ class RoomsViewModel(
     init {
         viewModelScope.launch {
             repository.ensureStarterChats()
+        }
+        if (storageUsageRepository != null) {
+            if (currentUserId != LocalProfilePreferences.LOCAL_USER_ID) {
+                viewModelScope.launch {
+                    storageUsageRepository.observeRemoteUsageSync()
+                        .catch { error ->
+                            val fsErr = extractFirestoreException(error)
+                            if (fsErr == null && error is CancellationException) throw error
+                            Log.w(TAG, "Storage usage sync error", fsErr ?: error)
+                        }
+                        .collect { }
+                }
+                viewModelScope.launch {
+                    storageUsageRepository.observeModeratorGrant(currentUserId)
+                        .catch { error ->
+                            val fsErr = extractFirestoreException(error)
+                            if (fsErr == null && error is CancellationException) throw error
+                            Log.w(TAG, "Moderator grant sync error", fsErr ?: error)
+                        }
+                        .collect { }
+                }
+            }
+            viewModelScope.launch {
+                combine(storageUsageSummary, isModerator, userProfile.map { it.notificationsEnabled }) { summary, mod, notifyEnabled ->
+                    Triple(summary, mod, notifyEnabled)
+                }
+                    .distinctUntilChanged()
+                    .collect { (summary, mod, notifyEnabled) ->
+                        val decision = storageUsageRepository.evaluateAndRecordModeratorAlert(
+                            uid = currentUserId,
+                            isModerator = mod,
+                            summary = summary
+                        )
+                        if (decision.shouldNotify) {
+                            if (notifyEnabled) {
+                                notificationManager.showStorageThresholdWarningNotification(
+                                    usedLabel = formatStorageBytes(summary.safeUsedBytes),
+                                    quotaLabel = formatStorageBytes(summary.safeQuotaBytes),
+                                    usagePercent = summary.usagePercent,
+                                    thresholdPercent = summary.safeThresholdPercent,
+                                    isModerator = mod
+                                )
+                            }
+                            showBanner(
+                                "Moderator Alert: Storage at ${summary.usagePercent}% (${summary.safeThresholdPercent}% threshold)"
+                            )
+                        }
+                    }
+            }
         }
         if (currentUserId != LocalProfilePreferences.LOCAL_USER_ID) {
             viewModelScope.launch {
@@ -1119,6 +1183,19 @@ class RoomsViewModel(
 
     fun sendTestNotification(): Boolean {
         return notificationManager.showTestNotification()
+    }
+
+    fun updateStorageWarningThreshold(thresholdPercent: Int) {
+        val repo = storageUsageRepository ?: return
+        viewModelScope.launch {
+            repo.updateWarningThreshold(thresholdPercent, isModerator.value)
+                .onSuccess {
+                    showBanner("Storage warning threshold updated to $thresholdPercent%")
+                }
+                .onFailure { err ->
+                    _actionError.value = err.localizedMessage ?: "Only moderators can update the threshold."
+                }
+        }
     }
 
     private companion object {

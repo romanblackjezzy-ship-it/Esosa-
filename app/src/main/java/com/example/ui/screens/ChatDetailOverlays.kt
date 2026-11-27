@@ -101,22 +101,30 @@ fun VoiceNoteBubbleContent(
             if (!audioSource.isNullOrBlank()) {
                 val player = mediaPlayerRef.value ?: withContext(Dispatchers.IO) {
                     runCatching {
-                        val isRemote = audioSource.startsWith("http://") || audioSource.startsWith("https://")
-                        val isContent = audioSource.startsWith("content://")
-                        val isFileUri = audioSource.startsWith("file://")
+                        val effectiveSource = if (com.example.data.remote.FirestoreMediaBlobService.isFirestoreMediaUri(audioSource)) {
+                            com.example.data.remote.FirestoreMediaBlobService
+                                .resolveToCachedFile(context, audioSource)
+                                ?.let { Uri.fromFile(it).toString() }
+                                ?: return@withContext null
+                        } else {
+                            audioSource
+                        }
+                        val isRemote = effectiveSource.startsWith("http://") || effectiveSource.startsWith("https://")
+                        val isContent = effectiveSource.startsWith("content://")
+                        val isFileUri = effectiveSource.startsWith("file://")
                         if (!isRemote && !isContent) {
-                            val localPath = if (isFileUri) Uri.parse(audioSource).path else audioSource
+                            val localPath = if (isFileUri) Uri.parse(effectiveSource).path else effectiveSource
                             if (localPath.isNullOrBlank() || !java.io.File(localPath).exists()) {
                                 return@withContext null
                             }
                         }
                         val mp = MediaPlayer()
                         if (isRemote) {
-                            mp.setDataSource(audioSource)
+                            mp.setDataSource(effectiveSource)
                         } else if (isFileUri || isContent) {
-                            mp.setDataSource(context, Uri.parse(audioSource))
+                            mp.setDataSource(context, Uri.parse(effectiveSource))
                         } else {
-                            mp.setDataSource(audioSource)
+                            mp.setDataSource(effectiveSource)
                         }
                         mp.setOnErrorListener { _, _, _ ->
                             isPlaying = false

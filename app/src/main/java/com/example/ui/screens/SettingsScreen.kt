@@ -91,9 +91,11 @@ import com.example.data.model.ChatKind
 import com.example.data.model.ChatRoom
 import com.example.data.model.ChatWallpaper
 import com.example.data.model.InAppInstallStage
+import com.example.data.model.StorageUsageSummary
 import com.example.data.model.UpdateErrorState
 import com.example.data.model.UserProfile
 import com.example.notifications.EsosaNotificationManager
+import com.example.ui.components.StorageUsageDashboardCard
 import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.theme.telegramColors
 
@@ -135,6 +137,9 @@ fun SettingsScreen(
     onOpenUpdateDialog: () -> Unit,
     onRestartAndInstall: () -> Unit = {},
     onUpdateProfilePhoto: (ByteArray, (String) -> Unit) -> Unit = { _, _ -> },
+    storageUsageSummary: StorageUsageSummary = StorageUsageSummary(),
+    isModerator: Boolean = userProfile.isModerator,
+    onUpdateStorageThreshold: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val telegram = MaterialTheme.telegramColors
@@ -406,6 +411,13 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            // Firebase Storage Usage & Moderator Warning Dashboard
+            StorageUsageDashboardCard(
+                summary = storageUsageSummary,
+                isModerator = isModerator,
+                onUpdateWarningThreshold = onUpdateStorageThreshold
+            )
 
             // Appearance & Chat Customization Card
             Card(

@@ -1,15 +1,25 @@
 package com.example.data.media
 
 import android.content.Context
+import android.net.Uri
 import coil.ImageLoader
 import coil.annotation.ExperimentalCoilApi
+import coil.decode.DataSource
+import coil.decode.ImageSource
 import coil.disk.DiskCache
+import coil.fetch.FetchResult
+import coil.fetch.Fetcher
+import coil.fetch.SourceResult
 import coil.imageLoader
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.request.Options
 import com.example.data.remote.FirebasePhotoStorageService
+import com.example.data.remote.FirestoreMediaBlobService
+import okio.Path.Companion.toOkioPath
 import java.io.File
+import java.io.IOException
 
 object EsosaImageCache {
 
@@ -26,6 +36,9 @@ object EsosaImageCache {
         val appContext = context.applicationContext
         val cacheDir = File(appContext.cacheDir, DISK_CACHE_DIR_NAME)
         return ImageLoader.Builder(appContext)
+            .components {
+                add(FirestoreMediaFetcherFactory())
+            }
             .memoryCache {
                 MemoryCache.Builder(appContext)
                     .maxSizePercent(MEMORY_CACHE_MAX_PERCENT)
@@ -49,7 +62,11 @@ object EsosaImageCache {
     fun stableCacheKey(imageUrl: String?, storagePath: String? = null): String? {
         val remoteStorageKey = storagePath
             ?.trim()
-            ?.takeIf { FirebasePhotoStorageService.isRemoteRoomPhotoPath(it) || it.startsWith("users/") }
+            ?.takeIf {
+                FirebasePhotoStorageService.isRemoteRoomPhotoPath(it) ||
+                    it.startsWith("users/") ||
+                    FirestoreMediaBlobService.isMediaBlobStoragePath(it)
+            }
         if (!remoteStorageKey.isNullOrBlank()) {
             return "esosa:$remoteStorageKey"
         }
@@ -70,7 +87,8 @@ object EsosaImageCache {
         val cleanPath = storagePath?.trim().orEmpty()
         if (cleanPath.isNotBlank() &&
             !FirebasePhotoStorageService.isRemoteRoomPhotoPath(cleanPath) &&
-            !cleanPath.startsWith("users/")
+            !cleanPath.startsWith("users/") &&
+            !FirestoreMediaBlobService.isMediaBlobStoragePath(cleanPath)
         ) {
             val localFile = File(cleanPath)
             if (localFile.exists() && localFile.length() > 0L && (cleanUrl.isBlank() || cleanUrl.startsWith("file://"))) {
@@ -148,5 +166,34 @@ object EsosaImageCache {
         val loader = context.applicationContext.imageLoader
         loader.memoryCache?.clear()
         loader.diskCache?.clear()
+    }
+
+    private class FirestoreMediaFetcherFactory : Fetcher.Factory<Uri> {
+        override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
+            if (!data.scheme.equals(FirestoreMediaBlobService.URI_SCHEME, ignoreCase = true)) {
+                return null
+            }
+            return FirestoreMediaFetcher(data, options)
+        }
+    }
+
+    private class FirestoreMediaFetcher(
+        private val uri: Uri,
+        private val options: Options
+    ) : Fetcher {
+        override suspend fun fetch(): FetchResult {
+            val cachedFile = FirestoreMediaBlobService.resolveToCachedFile(
+                context = options.context,
+                mediaUriOrId = uri.toString()
+            ) ?: throw IOException("Unable to load cloud media: $uri")
+            return SourceResult(
+                source = ImageSource(
+                    file = cachedFile.toOkioPath(),
+                    diskCacheKey = uri.toString()
+                ),
+                mimeType = FirestoreMediaBlobService.mimeTypeForExtension(cachedFile.extension),
+                dataSource = DataSource.DISK
+            )
+        }
     }
 }

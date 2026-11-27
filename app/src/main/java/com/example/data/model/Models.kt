@@ -61,8 +61,17 @@ data class UserProfile(
     val contactSyncEnabled: Boolean = true,
     val readReceiptsEnabled: Boolean = true,
     val lastSeenVisibility: String = "Everyone",
-    val defaultDisappearSeconds: Int = 0
-)
+    val defaultDisappearSeconds: Int = 0,
+    val role: String = ROLE_MEMBER
+) {
+    val isModerator: Boolean
+        get() = role.equals(ROLE_MODERATOR, ignoreCase = true)
+
+    companion object {
+        const val ROLE_MEMBER = "member"
+        const val ROLE_MODERATOR = "moderator"
+    }
+}
 
 data class ChatRoom(
     val id: String = "",

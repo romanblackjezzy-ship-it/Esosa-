@@ -1,11 +1,15 @@
 package com.example.data.remote
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.example.data.media.PreparedUploadFile
 import com.example.data.media.SupportedImageFormat
+import com.example.data.model.StorageMediaCategory
+import com.example.data.repository.StorageUsageTracker
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
@@ -40,7 +44,9 @@ data class UploadedPhoto(
 class FirebasePhotoStorageService(
     private val storage: FirebaseStorage,
     private val auth: FirebaseAuth? = null,
-    private val candidateStorages: List<FirebaseStorage> = listOf(storage)
+    private val candidateStorages: List<FirebaseStorage> = listOf(storage),
+    private val firestoreMediaFallback: FirestoreMediaBlobService? = null,
+    private val usageTracker: StorageUsageTracker? = null
 ) {
     suspend fun uploadRoomPhotoFile(
         roomId: String,
@@ -75,6 +81,8 @@ class FirebasePhotoStorageService(
             storagePath = storagePath,
             metadata = metadata,
             maxBytes = MAX_UPLOAD_BYTES,
+            mediaCategory = StorageMediaCategory.PHOTO,
+            fallbackBytesHint = preparedFile.sizeBytes,
             onProgress = onProgress
         )
     }
@@ -130,6 +138,8 @@ class FirebasePhotoStorageService(
             storagePath = storagePath,
             metadata = metadata,
             maxBytes = MAX_UPLOAD_BYTES,
+            mediaCategory = StorageMediaCategory.AUDIO,
+            fallbackBytesHint = audioFile.length(),
             onProgress = onProgress
         )
     }
@@ -157,6 +167,8 @@ class FirebasePhotoStorageService(
             storagePath = storagePath,
             metadata = metadata,
             maxBytes = MAX_UPLOAD_BYTES,
+            mediaCategory = StorageMediaCategory.PHOTO,
+            fallbackBytesHint = preparedFile.sizeBytes,
             onProgress = onProgress
         )
     }
@@ -219,6 +231,8 @@ class FirebasePhotoStorageService(
             storagePath = storagePath,
             metadata = metadata,
             maxBytes = MAX_UPLOAD_BYTES,
+            mediaCategory = StorageMediaCategory.PHOTO,
+            fallbackBytesHint = preparedFile.sizeBytes,
             onProgress = onProgress
         )
     }
@@ -276,6 +290,8 @@ class FirebasePhotoStorageService(
             storagePath = storagePath,
             metadata = metadata,
             maxBytes = MAX_VIDEO_UPLOAD_BYTES,
+            mediaCategory = StorageMediaCategory.VIDEO,
+            fallbackBytesHint = preparedFile.sizeBytes,
             onProgress = onProgress
         )
     }
@@ -315,6 +331,8 @@ class FirebasePhotoStorageService(
         storagePath: String,
         metadata: StorageMetadata,
         maxBytes: Long,
+        mediaCategory: StorageMediaCategory,
+        fallbackBytesHint: Long,
         onProgress: (Float) -> Unit
     ): UploadedPhoto {
         validateChildStoragePath(storagePath)
@@ -343,6 +361,7 @@ class FirebasePhotoStorageService(
         var lastStorageError: StorageException? = null
         var lastBucket = ""
         var lastTaskStatus = "NOT_STARTED"
+        var canFallbackToFirestore = false
 
         for ((index, targetStorage) in storagesToTry.withIndex()) {
             val mediaRef = targetStorage.reference.child(storagePath)
@@ -394,6 +413,20 @@ class FirebasePhotoStorageService(
                     TAG,
                     "Firebase Storage upload succeeded: bucket=${uploadedRef.bucket}, path=${uploadedRef.path}, bytes=${snapshot.bytesTransferred}"
                 )
+                val uploadedBytes = snapshot.totalByteCount
+                    .takeIf { it > 0L }
+                    ?: snapshot.bytesTransferred.takeIf { it > 0L }
+                    ?: resolveLocalFileLength(fileUri)
+                    ?: fallbackBytesHint
+                if (uploadedBytes > 0L) {
+                    runCatching {
+                        usageTracker?.recordUpload(
+                            bytes = uploadedBytes,
+                            category = mediaCategory,
+                            backendLabel = "Firebase Storage (${uploadedRef.bucket})"
+                        )
+                    }
+                }
                 return UploadedPhoto(
                     downloadUrl = downloadUrl,
                     storagePath = storagePath,
@@ -416,10 +449,19 @@ class FirebasePhotoStorageService(
                     taskStatus = taskStatus
                 )
                 val kind = classifyStorageError(e.errorCode)
+                if (kind == StorageErrorKind.BUCKET_NOT_FOUND ||
+                    kind == StorageErrorKind.OBJECT_NOT_FOUND ||
+                    kind == StorageErrorKind.PROJECT_NOT_FOUND
+                ) {
+                    canFallbackToFirestore = true
+                }
                 val shouldTryAlternateBucket = (kind == StorageErrorKind.BUCKET_NOT_FOUND ||
                     kind == StorageErrorKind.OBJECT_NOT_FOUND) &&
                     index < storagesToTry.lastIndex
                 if (!shouldTryAlternateBucket) {
+                    if (canFallbackToFirestore && firestoreMediaFallback != null) {
+                        break
+                    }
                     val primaryFailure = (kind == StorageErrorKind.BUCKET_NOT_FOUND ||
                         kind == StorageErrorKind.OBJECT_NOT_FOUND) &&
                         firstStorageError != null
@@ -438,6 +480,37 @@ class FirebasePhotoStorageService(
                     "Retrying upload with alternate Firebase Storage bucket after ${kind.name} on bucket=${mediaRef.bucket}"
                 )
             }
+        }
+
+        if (canFallbackToFirestore && firestoreMediaFallback != null) {
+            val ownerUid = auth?.currentUser?.uid
+                ?: metadata.getCustomMetadata("senderId")
+                ?: metadata.getCustomMetadata("userId")
+                ?: ""
+            val fallbackExt = storagePath.substringAfterLast('.', "")
+            val fallbackMime = metadata.contentType.orEmpty()
+            Log.w(
+                TAG,
+                "Firebase Storage unavailable on bucket=${firstBucket.ifBlank { lastBucket }}; switching to Firestore cloud media fallback for path=$storagePath"
+            )
+            val uploaded = firestoreMediaFallback.uploadFile(
+                ownerUid = ownerUid,
+                fileUri = fileUri,
+                contentType = fallbackMime,
+                fileExtension = fallbackExt,
+                onProgress = onProgress
+            )
+            val uploadedBytes = resolveLocalFileLength(fileUri) ?: fallbackBytesHint
+            if (uploadedBytes > 0L) {
+                runCatching {
+                    usageTracker?.recordUpload(
+                        bytes = uploadedBytes,
+                        category = mediaCategory,
+                        backendLabel = "Cloud Media (Firestore)"
+                    )
+                }
+            }
+            return uploaded
         }
 
         val finalErr = firstStorageError ?: lastStorageError
@@ -489,16 +562,57 @@ class FirebasePhotoStorageService(
     }
 
     suspend fun deletePhotoIfOwned(storagePath: String?) {
-        if (!isRemoteDeletablePath(storagePath)) return
-        val path = storagePath ?: return
+        val path = storagePath?.trim() ?: return
+        if (FirestoreMediaBlobService.isMediaBlobStoragePath(path) ||
+            FirestoreMediaBlobService.isFirestoreMediaUri(path)
+        ) {
+            val deleted = firestoreMediaFallback?.deleteMediaIfOwned(path)
+            if (deleted != null && deleted.totalBytes > 0L) {
+                runCatching {
+                    usageTracker?.recordDeletion(
+                        bytes = deleted.totalBytes,
+                        category = categoryForContentTypeOrPath(deleted.contentType, path)
+                    )
+                }
+            }
+            return
+        }
+        if (!isRemoteDeletablePath(path)) return
         try {
-            storage.reference.child(path).delete().await()
+            val ref = storage.reference.child(path)
+            val existingMeta = runCatching { ref.metadata.await() }.getOrNull()
+            ref.delete().await()
+            val deletedBytes = existingMeta?.sizeBytes ?: 0L
+            if (deletedBytes > 0L) {
+                runCatching {
+                    usageTracker?.recordDeletion(
+                        bytes = deletedBytes,
+                        category = categoryForContentTypeOrPath(existingMeta?.contentType.orEmpty(), path)
+                    )
+                }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: StorageException) {
             if (e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
                 throw e
             }
+        }
+    }
+
+    private fun resolveLocalFileLength(fileUri: Uri): Long? {
+        if (!fileUri.scheme.equals("file", ignoreCase = true)) return null
+        val path = fileUri.path ?: return null
+        return File(path).takeIf { it.exists() }?.length()?.takeIf { it > 0L }
+    }
+
+    private fun categoryForContentTypeOrPath(contentType: String, path: String): StorageMediaCategory {
+        val lowerMime = contentType.lowercase()
+        val lowerPath = path.lowercase()
+        return when {
+            lowerMime.startsWith("video/") || lowerPath.endsWith(".mp4") || lowerPath.endsWith(".webm") -> StorageMediaCategory.VIDEO
+            lowerMime.startsWith("audio/") || lowerPath.endsWith(".m4a") || lowerPath.contains("/voice/") -> StorageMediaCategory.AUDIO
+            else -> StorageMediaCategory.PHOTO
         }
     }
 
@@ -562,7 +676,10 @@ class FirebasePhotoStorageService(
 
         fun createConfigured(
             app: FirebaseApp = FirebaseApp.getInstance(),
-            auth: FirebaseAuth? = FirebaseAuth.getInstance()
+            auth: FirebaseAuth? = FirebaseAuth.getInstance(),
+            firestoreDb: FirebaseFirestore? = null,
+            appContext: Context? = null,
+            usageTracker: StorageUsageTracker? = null
         ): FirebasePhotoStorageService {
             val options = app.options
             val projectId = options.projectId
@@ -576,15 +693,26 @@ class FirebasePhotoStorageService(
                 listOf(FirebaseStorage.getInstance(app))
             }
             val primary = storageInstances.first()
+            val mediaFallback = if (firestoreDb != null && appContext != null) {
+                FirestoreMediaBlobService(
+                    appContext = appContext.applicationContext,
+                    db = firestoreDb,
+                    auth = auth
+                )
+            } else {
+                null
+            }
             Log.i(
                 TAG,
                 "Initialized FirebaseStorage | projectId=$projectId | appId=${options.applicationId} | " +
-                    "primaryBucket=${primary.reference.bucket} | candidates=${candidateBuckets.joinToString(",")}"
+                    "primaryBucket=${primary.reference.bucket} | candidates=${candidateBuckets.joinToString(",")} | firestoreFallback=${mediaFallback != null}"
             )
             return FirebasePhotoStorageService(
                 storage = primary,
                 auth = auth,
-                candidateStorages = storageInstances
+                candidateStorages = storageInstances,
+                firestoreMediaFallback = mediaFallback,
+                usageTracker = usageTracker
             )
         }
 
@@ -739,9 +867,10 @@ class FirebasePhotoStorageService(
             "users/$uid/video_$mediaId.mp4"
 
         fun isRemoteRoomPhotoPath(path: String?): Boolean =
-            !path.isNullOrBlank() && path.startsWith("rooms/")
+            !path.isNullOrBlank() && (path.startsWith("rooms/") || path.startsWith("media_blobs/"))
 
         fun isRemoteDeletablePath(path: String?): Boolean =
-            !path.isNullOrBlank() && (path.startsWith("rooms/") || path.startsWith("users/"))
+            !path.isNullOrBlank() &&
+                (path.startsWith("rooms/") || path.startsWith("users/") || path.startsWith("media_blobs/"))
     }
 }

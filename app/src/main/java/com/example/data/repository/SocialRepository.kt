@@ -394,10 +394,11 @@ class SocialRepository(
             photoStorageService.deletePhotoIfOwned(post.storagePath)
         }
         if (post.videoUrl.isNotBlank() && post.authorId.isNotBlank()) {
+            val videoStoragePath = com.example.data.remote.FirestoreMediaBlobService
+                .extractStoragePathFromUri(post.videoUrl)
+                ?: FirebasePhotoStorageService.socialVideoStoragePath(post.authorId, post.id)
             runCatching {
-                photoStorageService.deletePhotoIfOwned(
-                    FirebasePhotoStorageService.socialVideoStoragePath(post.authorId, post.id)
-                )
+                photoStorageService.deletePhotoIfOwned(videoStoragePath)
             }
         }
     }
@@ -408,10 +409,11 @@ class SocialRepository(
             photoStorageService.deletePhotoIfOwned(story.storagePath)
         }
         if (story.videoUrl.isNotBlank() && story.authorId.isNotBlank()) {
+            val videoStoragePath = com.example.data.remote.FirestoreMediaBlobService
+                .extractStoragePathFromUri(story.videoUrl)
+                ?: FirebasePhotoStorageService.socialVideoStoragePath(story.authorId, story.id)
             runCatching {
-                photoStorageService.deletePhotoIfOwned(
-                    FirebasePhotoStorageService.socialVideoStoragePath(story.authorId, story.id)
-                )
+                photoStorageService.deletePhotoIfOwned(videoStoragePath)
             }
         }
     }

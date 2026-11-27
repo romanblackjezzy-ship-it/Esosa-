@@ -952,14 +952,15 @@ private fun FeedInlineVideoLayer(
     isPaused: Boolean,
     modifier: Modifier = Modifier
 ) {
-    androidx.compose.runtime.key(videoUrl) {
+    val playableUri = com.example.data.media.rememberPlayableMediaUri(videoUrl) ?: return
+    androidx.compose.runtime.key(playableUri) {
         val currentIsMuted by androidx.compose.runtime.rememberUpdatedState(isMuted)
         val currentIsPaused by androidx.compose.runtime.rememberUpdatedState(isPaused)
         var isPrepared by remember { mutableStateOf(false) }
         var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
         var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
 
-        DisposableEffect(videoUrl) {
+        DisposableEffect(playableUri) {
             onDispose {
                 runCatching { videoViewRef?.stopPlayback() }
                 videoViewRef = null
@@ -968,7 +969,7 @@ private fun FeedInlineVideoLayer(
             }
         }
 
-        if (videoUrl.isNotBlank()) {
+        if (playableUri.isNotBlank()) {
             AndroidView(
                 factory = { ctx ->
                     VideoView(ctx).apply {
@@ -987,7 +988,7 @@ private fun FeedInlineVideoLayer(
                             isPrepared = false
                             true
                         }
-                        runCatching { setVideoURI(Uri.parse(videoUrl)) }
+                        runCatching { setVideoURI(Uri.parse(playableUri)) }
                     }
                 },
                 update = { videoView ->

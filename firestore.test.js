@@ -763,3 +763,200 @@ test("Instagram social posts, reels, likes, comments, stories, saved posts, and 
   await assertSucceeds(bobDb.collection("follows").doc(followId).delete());
 });
 
+test("Cloud media blobs and esosa-media:// URIs: owner create/delete, signed-in read, cross-user tamper denied", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 2000);
+
+  // Alice uploads media_blobs metadata + chunk 0
+  await assertSucceeds(
+    aliceDb.collection("media_blobs").doc("mb_test_1").set({
+      ownerId: ALICE_UID,
+      contentType: "image/jpeg",
+      fileExtension: "jpg",
+      totalBytes: 1200,
+      totalChunks: 1,
+      createdAt: now,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("media_blobs").doc("mb_test_1").collection("chunks").doc("0").set({
+      ownerId: ALICE_UID,
+      index: 0,
+      data: "AAAA",
+    })
+  );
+
+  // Unauthenticated reads fail; listing media_blobs fails; Bob can get metadata and list chunks
+  await assertFails(unauthDb.collection("media_blobs").doc("mb_test_1").get());
+  await assertFails(bobDb.collection("media_blobs").get());
+  await assertSucceeds(bobDb.collection("media_blobs").doc("mb_test_1").get());
+  await assertSucceeds(bobDb.collection("media_blobs").doc("mb_test_1").collection("chunks").get());
+
+  // Bob cannot inject chunks into Alice's blob or delete Alice's blob
+  await assertFails(
+    bobDb.collection("media_blobs").doc("mb_test_1").collection("chunks").doc("1").set({
+      ownerId: BOB_UID,
+      index: 1,
+      data: "BBBB",
+    })
+  );
+  await assertFails(bobDb.collection("media_blobs").doc("mb_test_1").delete());
+
+  // Oversized blob (>10 MB) rejected
+  await assertFails(
+    aliceDb.collection("media_blobs").doc("mb_too_big").set({
+      ownerId: ALICE_UID,
+      contentType: "video/mp4",
+      fileExtension: "mp4",
+      totalBytes: 20_000_000,
+      totalChunks: 20,
+      createdAt: now,
+    })
+  );
+
+  // Posts, stories, and room messages accept esosa-media:// URIs
+  await assertSucceeds(
+    aliceDb.collection("posts").doc("post_media_1").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      authorDisplayName: "Alice",
+      mediaType: "reel",
+      imageUrl: "esosa-media://media/mb_test_1",
+      videoUrl: "esosa-media://media/mb_test_1",
+      storagePath: "media_blobs/mb_test_1",
+      caption: "Reel stored without paid storage",
+      likedByUids: [],
+      commentCount: 0,
+      createdAt: now,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("stories").doc("story_media_1").set({
+      authorId: ALICE_UID,
+      authorUsername: "alice_studio",
+      caption: "Story clip",
+      imageUrl: "esosa-media://media/mb_test_1",
+      videoUrl: "esosa-media://media/mb_test_1",
+      storagePath: "media_blobs/mb_test_1",
+      viewedByUids: [],
+      createdAt: now,
+    })
+  );
+
+  // Alice can delete her own chunk and blob
+  await assertSucceeds(
+    aliceDb.collection("media_blobs").doc("mb_test_1").collection("chunks").doc("0").delete()
+  );
+  await assertSucceeds(aliceDb.collection("media_blobs").doc("mb_test_1").delete());
+});
+
+test("Storage usage dashboard metrics and moderator-only warning threshold controls", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 2000);
+
+  // Regular user cannot self-promote to moderator on create or update
+  await assertFails(
+    bobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      displayName: "Bob",
+      email: "bob@example.com",
+      role: "moderator",
+      notificationsEnabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      displayName: "Bob",
+      email: "bob@example.com",
+      role: "member",
+      notificationsEnabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertFails(
+    bobDb.collection("users").doc(BOB_UID).update({
+      role: "moderator",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Grant Alice moderator access via server-only /moderators/{uid} doc
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("moderators").doc(ALICE_UID).set({
+      assignedBy: "console-admin",
+    });
+  });
+
+  // Unauthenticated reads/writes on storage_usage or moderators fail; client writes to moderators fail
+  await assertFails(unauthDb.collection("storage_usage").doc("global").get());
+  await assertFails(bobDb.collection("moderators").doc(ALICE_UID).get());
+  await assertFails(bobDb.collection("moderators").doc(BOB_UID).set({ assignedBy: "self" }));
+  await assertSucceeds(aliceDb.collection("moderators").doc(ALICE_UID).get());
+
+  // Regular member Bob can initialize /storage_usage/global only with default 80% threshold & 1 GiB quota
+  await assertFails(
+    bobDb.collection("storage_usage").doc("global").set({
+      usedBytes: 5000,
+      quotaBytes: 1073741824,
+      warningThresholdPercent: 50,
+      fileCount: 1,
+      photoBytes: 5000,
+      videoBytes: 0,
+      audioBytes: 0,
+      activeBackendLabel: "Cloud Media (Firestore)",
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("storage_usage").doc("global").set({
+      usedBytes: 5000,
+      quotaBytes: 1073741824,
+      warningThresholdPercent: 80,
+      fileCount: 1,
+      photoBytes: 5000,
+      videoBytes: 0,
+      audioBytes: 0,
+      activeBackendLabel: "Cloud Media (Firestore)",
+      updatedAt: now,
+    })
+  );
+
+  // Bob (member) can increment usage counters on upload without modifying threshold
+  await assertSucceeds(
+    bobDb.collection("storage_usage").doc("global").update({
+      usedBytes: 15000,
+      fileCount: 2,
+      videoBytes: 10000,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Bob (member) cannot change warningThresholdPercent or quotaBytes
+  await assertFails(
+    bobDb.collection("storage_usage").doc("global").update({
+      warningThresholdPercent: 70,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Alice (moderator) CAN update warningThresholdPercent
+  await assertSucceeds(
+    aliceDb.collection("storage_usage").doc("global").update({
+      warningThresholdPercent: 75,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Signed-in users can read global usage doc, but cannot list collection or delete doc
+  await assertSucceeds(bobDb.collection("storage_usage").doc("global").get());
+  await assertFails(bobDb.collection("storage_usage").get());
+  await assertFails(aliceDb.collection("storage_usage").doc("global").delete());
+});

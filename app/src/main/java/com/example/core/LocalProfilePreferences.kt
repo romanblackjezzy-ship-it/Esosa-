@@ -72,6 +72,7 @@ class LocalProfilePreferences(context: Context) {
         dto.authMethod?.takeIf { it.isNotBlank() }?.let { editor.putString(KEY_AUTH_METHOD, it) }
         dto.themeMode?.takeIf { it.isNotBlank() }?.let { editor.putString(KEY_THEME_MODE, it) }
         dto.language?.takeIf { it.isNotBlank() }?.let { editor.putString(KEY_LANGUAGE, it) }
+        dto.role?.takeIf { it.isNotBlank() }?.let { editor.putString(KEY_USER_ROLE, it) }
         if (current.userId != dto.userId && current.twoStepPinEnabled) {
             editor.putBoolean(KEY_TWO_STEP_ENABLED, false).putString(KEY_TWO_STEP_PIN, "")
         }
@@ -115,7 +116,18 @@ class LocalProfilePreferences(context: Context) {
         prefs.edit()
             .putBoolean(KEY_IS_AUTHENTICATED, false)
             .remove(KEY_USER_ID)
+            .remove(KEY_USER_ROLE)
             .apply()
+        _profileFlow.value = readProfile()
+    }
+
+    fun updateRole(role: String) {
+        val normalized = if (role.equals(UserProfile.ROLE_MODERATOR, ignoreCase = true)) {
+            UserProfile.ROLE_MODERATOR
+        } else {
+            UserProfile.ROLE_MEMBER
+        }
+        prefs.edit().putString(KEY_USER_ROLE, normalized).apply()
         _profileFlow.value = readProfile()
     }
 
@@ -240,7 +252,9 @@ class LocalProfilePreferences(context: Context) {
             contactSyncEnabled = prefs.getBoolean(KEY_CONTACT_SYNC, true),
             readReceiptsEnabled = prefs.getBoolean(KEY_READ_RECEIPTS, true),
             lastSeenVisibility = prefs.getString(KEY_LAST_SEEN_VISIBILITY, "Everyone") ?: "Everyone",
-            defaultDisappearSeconds = prefs.getInt(KEY_DEFAULT_DISAPPEAR_SEC, 0)
+            defaultDisappearSeconds = prefs.getInt(KEY_DEFAULT_DISAPPEAR_SEC, 0),
+            role = prefs.getString(KEY_USER_ROLE, UserProfile.ROLE_MEMBER)
+                ?.takeIf { it.isNotBlank() } ?: UserProfile.ROLE_MEMBER
         )
     }
 
@@ -323,6 +337,7 @@ class LocalProfilePreferences(context: Context) {
         private const val KEY_READ_RECEIPTS = "read_receipts"
         private const val KEY_LAST_SEEN_VISIBILITY = "last_seen_visibility"
         private const val KEY_DEFAULT_DISAPPEAR_SEC = "default_disappear_sec"
+        private const val KEY_USER_ROLE = "user_role"
         private const val KEY_ACTIVE_SESSIONS = "active_sessions_json"
         private const val DEFAULT_NAME = ""
         private const val DEFAULT_USERNAME = ""

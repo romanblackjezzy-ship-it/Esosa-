@@ -130,6 +130,7 @@ import com.example.data.repository.AppUpdatePreferences
 import com.example.data.repository.AppUpdateRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.SocialRepository
+import com.example.data.repository.StorageUsageRepository
 import com.example.notifications.EsosaNotificationManager
 import com.example.notifications.FcmTokenRegistrar
 import com.example.ui.components.EsosaBrandLogo
@@ -324,10 +325,21 @@ fun EsosaApp(
 
                 else -> {
                     key(signedInUser.uid) {
-                        val photoStorageService = remember {
+                        val storageUsageRepository = remember(context, firestoreDb) {
+                            StorageUsageRepository(
+                                context = context.applicationContext,
+                                db = firestoreDb,
+                                auth = Firebase.auth,
+                                profilePreferences = profilePreferences
+                            )
+                        }
+                        val photoStorageService = remember(firestoreDb, context, storageUsageRepository) {
                             FirebasePhotoStorageService.createConfigured(
                                 app = FirebaseApp.getInstance(),
-                                auth = Firebase.auth
+                                auth = Firebase.auth,
+                                firestoreDb = firestoreDb,
+                                appContext = context.applicationContext,
+                                usageTracker = storageUsageRepository
                             )
                         }
                         val userRepository = remember(signedInUser.uid, firestoreDb) {
@@ -359,7 +371,8 @@ fun EsosaApp(
                                     RoomsViewModel(
                                         repository = userRepository,
                                         notificationManager = EsosaNotificationManager(app),
-                                        selectionPreferences = ThreadSelectionPreferences(app)
+                                        selectionPreferences = ThreadSelectionPreferences(app),
+                                        storageUsageRepository = storageUsageRepository
                                     )
                                 }
                             }
@@ -606,10 +619,14 @@ private fun EsosaSocialShell(
         } else if (initialTab == EsosaNotificationManager.TAB_HOME) {
             secondaryRoute = null
             selectedTab = EsosaTab.HOME
+        } else if (initialTab == EsosaNotificationManager.TAB_SETTINGS) {
+            secondaryRoute = EsosaSecondaryRoute.SETTINGS
         }
     }
 
     val userProfile by roomsViewModel.userProfile.collectAsStateWithLifecycle()
+    val storageUsageSummary by roomsViewModel.storageUsageSummary.collectAsStateWithLifecycle()
+    val isModerator by roomsViewModel.isModerator.collectAsStateWithLifecycle()
     val activeSessions by roomsViewModel.activeSessions.collectAsStateWithLifecycle()
     val roomStories by roomsViewModel.stories.collectAsStateWithLifecycle()
     val callLogs by roomsViewModel.callLogs.collectAsStateWithLifecycle()
@@ -1004,6 +1021,11 @@ private fun EsosaSocialShell(
                                     onRestartAndInstall = { appUpdateViewModel.completeFlexibleUpdate() },
                                     onUpdateProfilePhoto = { bytes, onDone ->
                                         roomsViewModel.updateProfilePhoto(bytes, onDone)
+                                    },
+                                    storageUsageSummary = storageUsageSummary,
+                                    isModerator = isModerator,
+                                    onUpdateStorageThreshold = { threshold ->
+                                        roomsViewModel.updateStorageWarningThreshold(threshold)
                                     },
                                     modifier = Modifier.weight(1f)
                                 )

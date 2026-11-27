@@ -23,6 +23,7 @@ data class FirestoreUserProfileDto(
     val themeMode: String? = null,
     val language: String? = null,
     val notificationsEnabled: Boolean = true,
+    val role: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -110,6 +111,7 @@ internal object FirestoreSnapshotMappers {
             themeMode = doc.getString("themeMode"),
             language = doc.getString("language"),
             notificationsEnabled = doc.getBoolean("notificationsEnabled") ?: true,
+            role = doc.getString("role"),
             createdAt = doc.getTimestamp("createdAt", estimate),
             updatedAt = doc.getTimestamp("updatedAt", estimate)
         )
