@@ -235,6 +235,15 @@ data class UserFollowEdge(
     val createdAtMillis: Long = 0L
 )
 
+data class StoryHighlight(
+    val id: String = "",
+    val authorId: String = "",
+    val title: String = "",
+    val coverUrl: String = "",
+    val storyIds: List<String> = emptyList(),
+    val createdAtMillis: Long = 0L
+)
+
 object SocialFormatters {
     fun formatCompactCount(count: Int): String {
         val safe = count.coerceAtLeast(0)

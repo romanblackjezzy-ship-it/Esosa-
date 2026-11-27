@@ -106,6 +106,34 @@ class FirebasePhotoStorageService(
         }
     }
 
+    suspend fun uploadVoiceNoteFile(
+        roomId: String,
+        messageId: String,
+        senderUid: String,
+        audioFile: File,
+        onProgress: (Float) -> Unit = {}
+    ): UploadedPhoto {
+        require(roomId.isNotBlank()) { "Chat room ID is required to upload a voice note." }
+        require(messageId.isNotBlank()) { "Message ID is required to upload a voice note." }
+        require(senderUid.isNotBlank()) { "Sign in to upload voice notes." }
+        require(audioFile.exists() && audioFile.length() > 0) { "Voice note file is empty or missing." }
+
+        val storagePath = roomVoiceStoragePath(roomId, messageId, "m4a")
+        val metadata = StorageMetadata.Builder()
+            .setContentType(AUDIO_M4A_CONTENT_TYPE)
+            .setCustomMetadata("senderId", senderUid)
+            .build()
+
+        return uploadFileAndGetDownloadUrl(
+            fileUri = Uri.fromFile(audioFile),
+            originalUri = Uri.fromFile(audioFile),
+            storagePath = storagePath,
+            metadata = metadata,
+            maxBytes = MAX_UPLOAD_BYTES,
+            onProgress = onProgress
+        )
+    }
+
     suspend fun uploadProfilePhotoFile(
         uid: String,
         preparedFile: PreparedUploadFile,
@@ -333,9 +361,9 @@ class FirebasePhotoStorageService(
                 }
 
                 val snapshot = uploadTask.await()
-                if (snapshot.error != null) {
+                snapshot.error?.let { uploadError ->
                     taskStatus = "PUT_FILE_SNAPSHOT_ERROR"
-                    throw snapshot.error!!
+                    throw uploadError
                 }
                 if (snapshot.totalByteCount <= 0L && snapshot.bytesTransferred <= 0L) {
                     taskStatus = "PUT_FILE_EMPTY_SNAPSHOT"
@@ -514,6 +542,7 @@ class FirebasePhotoStorageService(
         private const val IMAGE_PNG_CONTENT_TYPE = "image/png"
         private const val IMAGE_WEBP_CONTENT_TYPE = "image/webp"
         private const val VIDEO_MP4_CONTENT_TYPE = "video/mp4"
+        const val AUDIO_M4A_CONTENT_TYPE = "audio/mp4"
 
         fun createConfigured(
             app: FirebaseApp = FirebaseApp.getInstance(),
@@ -651,6 +680,15 @@ class FirebasePhotoStorageService(
         ): String {
             val cleanExt = extension.trim().lowercase().ifBlank { "jpg" }
             return "rooms/$roomId/photos/$messageId.$cleanExt"
+        }
+
+        fun roomVoiceStoragePath(
+            roomId: String,
+            messageId: String,
+            extension: String = "m4a"
+        ): String {
+            val cleanExt = extension.trim().lowercase().ifBlank { "m4a" }
+            return "rooms/$roomId/voice/$messageId.$cleanExt"
         }
 
         fun userProfilePhotoStoragePath(

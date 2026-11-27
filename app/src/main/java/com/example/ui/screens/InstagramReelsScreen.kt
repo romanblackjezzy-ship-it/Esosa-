@@ -500,38 +500,52 @@ private fun ReelVideoPlayerLayer(
     isPaused: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    androidx.compose.runtime.key(videoUrl) {
+        val currentIsPaused by androidx.compose.runtime.rememberUpdatedState(isPaused)
+        var isPrepared by remember { mutableStateOf(false) }
+        var videoViewRef by remember { mutableStateOf<android.widget.VideoView?>(null) }
 
-    androidx.compose.runtime.DisposableEffect(videoUrl) {
-        onDispose {
-            mediaPlayerRef = null
+        androidx.compose.runtime.DisposableEffect(videoUrl) {
+            onDispose {
+                runCatching { videoViewRef?.stopPlayback() }
+                videoViewRef = null
+                isPrepared = false
+            }
+        }
+
+        if (videoUrl.isNotBlank()) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    android.widget.VideoView(ctx).apply {
+                        videoViewRef = this
+                        setOnPreparedListener { mp ->
+                            isPrepared = true
+                            mp.isLooping = true
+                            runCatching { mp.setVolume(1f, 1f) }
+                            if (!currentIsPaused) {
+                                runCatching { start() }
+                            }
+                        }
+                        setOnErrorListener { _, _, _ ->
+                            isPrepared = false
+                            true
+                        }
+                        runCatching { setVideoURI(Uri.parse(videoUrl)) }
+                    }
+                },
+                update = { videoView ->
+                    if (!isPrepared) return@AndroidView
+                    val playing = runCatching { videoView.isPlaying }.getOrDefault(false)
+                    if (currentIsPaused && playing) {
+                        runCatching { videoView.pause() }
+                    } else if (!currentIsPaused && !playing) {
+                        runCatching { videoView.start() }
+                    }
+                },
+                modifier = modifier
+            )
         }
     }
-
-    androidx.compose.ui.viewinterop.AndroidView(
-        factory = { ctx ->
-            android.widget.VideoView(ctx).apply {
-                setOnPreparedListener { mp ->
-                    mediaPlayerRef = mp
-                    mp.isLooping = true
-                    mp.setVolume(1f, 1f)
-                    if (!isPaused) {
-                        start()
-                    }
-                }
-                setOnErrorListener { _, _, _ -> true }
-                setVideoURI(Uri.parse(videoUrl))
-            }
-        },
-        update = { videoView ->
-            if (isPaused && videoView.isPlaying) {
-                videoView.pause()
-            } else if (!isPaused && !videoView.isPlaying) {
-                videoView.start()
-            }
-        },
-        modifier = modifier
-    )
 }
 
 @Composable

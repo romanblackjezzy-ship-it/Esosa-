@@ -42,7 +42,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.media.MediaPlayer
+import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,7 +69,9 @@ import com.example.data.model.RoomMessage
 import com.example.ui.components.TelegramAvatarCircle
 import com.example.ui.components.formatDurationTimer
 import com.example.ui.components.formatRelativeThreadTime
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun VoiceNoteBubbleContent(
@@ -74,18 +79,90 @@ fun VoiceNoteBubbleContent(
     accentColor: Color,
     textColor: Color
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var isPlaying by remember(message.id) { mutableStateOf(false) }
     var progressSec by remember(message.id) { mutableIntStateOf(0) }
     val totalSec = message.voiceDurationSec.coerceAtLeast(3)
+    val mediaPlayerRef = remember(message.id) { mutableStateOf<MediaPlayer?>(null) }
+
+    DisposableEffect(message.id) {
+        onDispose {
+            mediaPlayerRef.value?.runCatching {
+                if (isPlaying) stop()
+                release()
+            }
+            mediaPlayerRef.value = null
+        }
+    }
 
     LaunchedEffect(isPlaying, totalSec) {
         if (isPlaying) {
-            while (progressSec < totalSec) {
+            val audioSource = message.imageUrl?.takeIf { it.isNotBlank() }
+            if (!audioSource.isNullOrBlank()) {
+                val player = mediaPlayerRef.value ?: withContext(Dispatchers.IO) {
+                    runCatching {
+                        val isRemote = audioSource.startsWith("http://") || audioSource.startsWith("https://")
+                        val isContent = audioSource.startsWith("content://")
+                        val isFileUri = audioSource.startsWith("file://")
+                        if (!isRemote && !isContent) {
+                            val localPath = if (isFileUri) Uri.parse(audioSource).path else audioSource
+                            if (localPath.isNullOrBlank() || !java.io.File(localPath).exists()) {
+                                return@withContext null
+                            }
+                        }
+                        val mp = MediaPlayer()
+                        if (isRemote) {
+                            mp.setDataSource(audioSource)
+                        } else if (isFileUri || isContent) {
+                            mp.setDataSource(context, Uri.parse(audioSource))
+                        } else {
+                            mp.setDataSource(audioSource)
+                        }
+                        mp.setOnErrorListener { _, _, _ ->
+                            isPlaying = false
+                            progressSec = 0
+                            true
+                        }
+                        mp.setOnCompletionListener { completed ->
+                            runCatching { completed.seekTo(0) }
+                            isPlaying = false
+                            progressSec = 0
+                        }
+                        mp.prepare()
+                        mp
+                    }.getOrNull()
+                }?.also { mediaPlayerRef.value = it }
+
+                if (player != null) {
+                    val started = runCatching { player.start() }.isSuccess
+                    if (started) {
+                        while (isPlaying && runCatching { player.isPlaying }.getOrDefault(false)) {
+                            progressSec = (runCatching { player.currentPosition }.getOrDefault(0) / 1000).coerceIn(0, totalSec)
+                            delay(250)
+                        }
+                        if (progressSec >= totalSec) {
+                            isPlaying = false
+                            progressSec = 0
+                        }
+                        return@LaunchedEffect
+                    } else {
+                        isPlaying = false
+                        progressSec = 0
+                        return@LaunchedEffect
+                    }
+                }
+            }
+
+            while (progressSec < totalSec && isPlaying) {
                 delay(1000)
                 progressSec++
             }
             isPlaying = false
             progressSec = 0
+        } else {
+            mediaPlayerRef.value?.runCatching {
+                if (this.isPlaying) pause()
+            }
         }
     }
 

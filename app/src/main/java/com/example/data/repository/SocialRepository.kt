@@ -11,6 +11,7 @@ import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryHighlight
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
 import com.example.data.remote.FirebasePhotoStorageService
@@ -39,6 +40,9 @@ class SocialRepository(
 
     fun observeUserStories(uid: String = currentUserId): Flow<List<SocialStory>> =
         socialService.observeUserStories(uid)
+
+    fun observeUserHighlights(uid: String = currentUserId): Flow<List<StoryHighlight>> =
+        socialService.observeUserHighlights(uid)
 
     fun observeStoryReplies(story: SocialStory): Flow<List<StoryReply>> =
         socialService.observeStoryReplies(story, currentUserId)
@@ -410,6 +414,30 @@ class SocialRepository(
                 )
             }
         }
+    }
+
+    suspend fun createHighlight(
+        title: String,
+        coverUrl: String,
+        storyIds: List<String>
+    ): StoryHighlight {
+        val user = auth.currentUser
+        val uid = user?.uid ?: profilePreferences.getProfile().userId
+        val highlightId = "hl_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+        val highlight = StoryHighlight(
+            id = highlightId,
+            authorId = uid,
+            title = title.trim().ifBlank { "Highlight" },
+            coverUrl = coverUrl.trim(),
+            storyIds = storyIds.filter { it.isNotBlank() }.distinct(),
+            createdAtMillis = System.currentTimeMillis()
+        )
+        socialService.createHighlight(highlight)
+        return highlight
+    }
+
+    suspend fun deleteHighlight(highlightId: String) {
+        socialService.deleteHighlight(highlightId)
     }
 
     private fun resolveUsername(

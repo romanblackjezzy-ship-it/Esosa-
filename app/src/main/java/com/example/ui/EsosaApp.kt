@@ -638,6 +638,7 @@ private fun EsosaSocialShell(
     val postsState by socialViewModel.postsState.collectAsStateWithLifecycle()
     val socialStories by socialViewModel.activeStories.collectAsStateWithLifecycle()
     val archivedStories by socialViewModel.archivedStories.collectAsStateWithLifecycle()
+    val userHighlights by socialViewModel.userHighlights.collectAsStateWithLifecycle()
     val repliesByStory by socialViewModel.repliesByStory.collectAsStateWithLifecycle()
     val savedPostIds by socialViewModel.savedPostIds.collectAsStateWithLifecycle()
     val followEdges by socialViewModel.followEdges.collectAsStateWithLifecycle()
@@ -877,7 +878,7 @@ private fun EsosaSocialShell(
                                     onScheduleMessage = { room, text, millis ->
                                         roomsViewModel.sendMessage(room, text, scheduledForMillis = millis)
                                     },
-                                    onSendVoiceNote = { room, sec -> roomsViewModel.sendVoiceNote(room, sec) },
+                                    onSendVoiceNote = { room, sec, file -> roomsViewModel.sendVoiceNote(room, sec, file) },
                                     onSendStickerOrGif = { room, text, isGif, lbl ->
                                         roomsViewModel.sendStickerOrGif(room, text, isGif, lbl)
                                     },
@@ -1146,6 +1147,13 @@ private fun EsosaSocialShell(
                                     followEdges = followEdges,
                                     stories = socialStories,
                                     archivedStories = archivedStories,
+                                    highlights = userHighlights,
+                                    onCreateHighlight = { title, storyIds, cover ->
+                                        socialViewModel.createHighlight(title, storyIds, cover)
+                                    },
+                                    onDeleteHighlight = { highlightId ->
+                                        socialViewModel.deleteHighlight(highlightId)
+                                    },
                                     onOpenCreate = {
                                         createFormat = CreateFormat.POST
                                         selectedTab = EsosaTab.CREATE
@@ -1202,9 +1210,12 @@ private fun EsosaSocialShell(
             val authorSequence = remember(socialStories, storyAuthorId) {
                 socialStories.filter { it.authorId == storyAuthorId }.reversed()
             }
-            if (authorSequence.isEmpty()) {
-                activeStoryAuthorId = null
-            } else {
+            androidx.compose.runtime.LaunchedEffect(storyAuthorId, authorSequence) {
+                if (authorSequence.isEmpty()) {
+                    activeStoryAuthorId = null
+                }
+            }
+            if (authorSequence.isNotEmpty()) {
                 val initialIndex = authorSequence
                     .indexOfFirst { it.id == activeStoryInitialId }
                     .let { if (it >= 0) it else 0 }
@@ -1274,9 +1285,12 @@ private fun EsosaSocialShell(
             val orderedArchive = remember(archivedStories) {
                 archivedStories.sortedBy { it.createdAtMillis }
             }
-            if (orderedArchive.isEmpty()) {
-                activeArchiveStoryId = null
-            } else {
+            androidx.compose.runtime.LaunchedEffect(archiveTargetId, orderedArchive) {
+                if (orderedArchive.isEmpty()) {
+                    activeArchiveStoryId = null
+                }
+            }
+            if (orderedArchive.isNotEmpty()) {
                 val initialArchiveIndex = orderedArchive
                     .indexOfFirst { it.id == archiveTargetId }
                     .let { if (it >= 0) it else 0 }

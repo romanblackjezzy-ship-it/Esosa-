@@ -89,6 +89,7 @@ import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.core.UiState
 import com.example.data.media.CameraPhotoHelper
+import com.example.data.media.AudioRecorderHelper
 import com.example.data.media.EsosaImageCache
 import com.example.data.model.CallType
 import com.example.data.model.ChannelComment
@@ -142,7 +143,7 @@ fun ConversationScreen(
     onStopTyping: (ChatRoom?) -> Unit = {},
     onSendMessage: (String) -> Unit,
     onScheduleMessage: (String, Long) -> Unit = { _, _ -> },
-    onSendVoiceNote: (Int) -> Unit = {},
+    onSendVoiceNote: (Int, File?) -> Unit = { _, _ -> },
     onSendStickerOrGif: (String, Boolean, String?) -> Unit = { _, _, _ -> },
     onSendDocumentAttachment: (Uri) -> Unit = {},
     onSendCapturedPhoto: (Uri, String, () -> Unit) -> Unit,
@@ -176,6 +177,7 @@ fun ConversationScreen(
     var showScheduleDialog by remember { mutableStateOf(false) }
     var isRecordingVoice by remember(room?.id) { mutableStateOf(false) }
     var recordingSeconds by remember(room?.id) { mutableIntStateOf(0) }
+    val audioRecorder = remember(room?.id) { AudioRecorderHelper() }
     var actionSheetMessage by remember { mutableStateOf<RoomMessage?>(null) }
     var forwardingMessage by remember { mutableStateOf<RoomMessage?>(null) }
     var commentsPost by remember { mutableStateOf<RoomMessage?>(null) }
@@ -228,6 +230,8 @@ fun ConversationScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             latestOnStopTyping(latestRoom)
+            audioRecorder.cancelRecording()
+            isRecordingVoice = false
         }
     }
 
@@ -315,6 +319,40 @@ fun ConversationScreen(
             launchCameraCapture()
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    val startVoiceRecordingInternal = {
+        showMediaSection = false
+        showStickerTray = false
+        val startedFile = audioRecorder.startRecording(context)
+        if (startedFile != null) {
+            isRecordingVoice = true
+        } else {
+            isRecordingVoice = false
+            onReportError("Unable to start microphone recording.")
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startVoiceRecordingInternal()
+        } else {
+            onReportError("Microphone permission is required to record voice notes.")
+        }
+    }
+
+    val requestOrStartVoiceRecording = {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            startVoiceRecordingInternal()
+        } else {
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -966,15 +1004,15 @@ fun ConversationScreen(
                             }
                             onCancelComposerMode()
                         },
-                        onStartVoiceRecording = {
-                            showMediaSection = false
-                            showStickerTray = false
-                            isRecordingVoice = true
-                        },
-                        onCancelVoiceRecording = { isRecordingVoice = false },
-                        onSendVoiceNote = { duration ->
+                        onStartVoiceRecording = requestOrStartVoiceRecording,
+                        onCancelVoiceRecording = {
+                            audioRecorder.cancelRecording()
                             isRecordingVoice = false
-                            onSendVoiceNote(duration)
+                        },
+                        onSendVoiceNote = { duration ->
+                            val recordedFile = audioRecorder.stopRecording()
+                            isRecordingVoice = false
+                            onSendVoiceNote(duration, recordedFile)
                         },
                         onSendMessage = {
                             val text = draft.trim()

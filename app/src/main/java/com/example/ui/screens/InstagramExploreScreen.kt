@@ -453,7 +453,7 @@ fun InstagramExploreScreen(
                                 modifier = Modifier.testTag("explore_suggested_accounts_row")
                             ) {
                                 items(suggestedAccounts, key = { "suggested_${it.first}" }) { (uid, username, photoUrl) ->
-                                    val pair = TelegramAvatarPairs[abs(uid.hashCode()) % TelegramAvatarPairs.size]
+                                    val pair = TelegramAvatarPairs[(uid.hashCode() and 0x7fffffff) % TelegramAvatarPairs.size]
                                     Surface(
                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                         shape = RoundedCornerShape(14.dp),
@@ -536,7 +536,7 @@ fun InstagramExploreScreen(
                             val post = rowPosts.getOrNull(index)
                             if (post != null) {
                                 // Masonry aspect ratio variation pattern based on index & post id
-                                val ratio = when ((post.id.hashCode() + index) % 4) {
+                                val ratio = when (((post.id.hashCode() + index) and 0x7fffffff) % 4) {
                                     0 -> 1f      // square
                                     1 -> 0.72f   // tall portrait
                                     2 -> 1.35f   // wide landscape

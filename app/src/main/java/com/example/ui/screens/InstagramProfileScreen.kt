@@ -25,11 +25,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.AddBox
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.BookmarkBorder
@@ -45,6 +47,9 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,7 +63,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,6 +84,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.widthIn
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.core.UiState
@@ -86,9 +94,12 @@ import com.example.data.model.SocialFormatters
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryHighlight
 import com.example.data.model.UserFollowEdge
 import com.example.data.model.UserProfile
 import com.example.ui.components.InstagramUserAvatar
+import com.example.ui.components.SocialStoryViewerDialog
+
 import com.example.ui.theme.InstagramBlue
 import com.example.ui.theme.InstagramHairline
 import com.example.ui.theme.InstagramHeartRed
@@ -125,6 +136,10 @@ fun InstagramProfileScreen(
     modifier: Modifier = Modifier,
     stories: List<SocialStory> = emptyList(),
     archivedStories: List<SocialStory> = emptyList(),
+    highlights: List<StoryHighlight> = emptyList(),
+    onCreateHighlight: (title: String, storyIds: List<String>, coverUrl: String?) -> Unit = { _, _, _ -> },
+    onDeleteHighlight: (String) -> Unit = {},
+    onOpenHighlight: (StoryHighlight) -> Unit = {},
     onOpenStory: (SocialStory) -> Unit = {},
     onOpenArchivedStory: (SocialStory) -> Unit = onOpenStory,
     onAddStoryClick: () -> Unit = {}
@@ -136,6 +151,8 @@ fun InstagramProfileScreen(
     var showSavedPostsSheet by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showAvatarChoiceSheet by remember { mutableStateOf(false) }
+    var showCreateHighlightDialog by remember { mutableStateOf(false) }
+    var activeHighlightViewer by remember { mutableStateOf<StoryHighlight?>(null) }
     var isUploadingAvatar by remember { mutableStateOf(false) }
     var cameraTempFile by remember { mutableStateOf<File?>(null) }
     var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
@@ -172,8 +189,10 @@ fun InstagramProfileScreen(
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { saved ->
-        if (saved && cameraTempUri != null) {
-            handleAvatarUri(cameraTempUri!!)
+        val capturedUri = cameraTempUri
+        if (saved && capturedUri != null) {
+            cameraTempUri = null
+            handleAvatarUri(capturedUri)
         } else {
             cameraTempFile?.delete()
         }
@@ -428,6 +447,140 @@ fun InstagramProfileScreen(
                 }
             }
 
+            // Instagram Story Highlights Section
+            item(key = "profile_highlights_section") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 4.dp)
+                ) {
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_highlights_row"),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // "New" Highlight Action
+                        item(key = "new_highlight_action") {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .clickable { showCreateHighlightDialog = true }
+                                    .testTag("create_highlight_button")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            width = 1.dp,
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
+                                            shape = CircleShape
+                                        )
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Add,
+                                        contentDescription = "New Highlight",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "New",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        // Existing Highlights
+                        items(highlights, key = { it.id }) { highlight ->
+                            var showHighlightMenu by remember { mutableStateOf(false) }
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .clickable {
+                                        activeHighlightViewer = highlight
+                                        onOpenHighlight(highlight)
+                                    }
+                                    .testTag("highlight_item_${highlight.id}")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            width = 2.dp,
+                                            brush = Brush.linearGradient(
+                                                colors = listOf(
+                                                    Color(0xFF833AB4),
+                                                    Color(0xFFFD1D1D),
+                                                    Color(0xFFFCB045)
+                                                )
+                                            ),
+                                            shape = CircleShape
+                                        )
+                                        .padding(3.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val candidateCover = highlight.coverUrl.ifBlank {
+                                        val firstStory = (stories + archivedStories).firstOrNull { it.id in highlight.storyIds }
+                                        firstStory?.imageUrl.orEmpty()
+                                    }
+                                    if (candidateCover.isNotBlank()) {
+                                        AsyncImage(
+                                            model = candidateCover,
+                                            contentDescription = highlight.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = highlight.title.take(1).uppercase(),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = highlight.title,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 68.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    DropdownMenu(
+                                        expanded = showHighlightMenu,
+                                        onDismissRequest = { showHighlightMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Delete highlight", color = MaterialTheme.colorScheme.error) },
+                                            onClick = {
+                                                showHighlightMenu = false
+                                                onDeleteHighlight(highlight.id)
+                                            },
+                                            modifier = Modifier.testTag("delete_highlight_${highlight.id}")
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 4-Tab Switcher: Posts | Reels | Tagged | Archive
             item(key = "profile_tabs") {
                 Row(
@@ -562,7 +715,7 @@ fun InstagramProfileScreen(
                                 val archivedStory = rowStories.getOrNull(index)
                                 if (archivedStory != null) {
                                     val pair = TelegramAvatarPairs[
-                                        abs(archivedStory.authorId.hashCode() + index) % TelegramAvatarPairs.size
+                                        ((archivedStory.authorId.hashCode() + index) and 0x7fffffff) % TelegramAvatarPairs.size
                                     ]
                                     Box(
                                         modifier = Modifier
@@ -1001,6 +1154,184 @@ fun InstagramProfileScreen(
                 }
             }
         )
+    }
+
+    if (showCreateHighlightDialog) {
+        val availableStories = remember(stories, archivedStories) {
+            (stories + archivedStories).distinctBy { it.id }.sortedByDescending { it.createdAtMillis }
+        }
+        var highlightTitleDraft by remember { mutableStateOf("") }
+        val selectedStoryIds = remember { mutableStateListOf<String>() }
+        var selectedCoverUrl by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showCreateHighlightDialog = false },
+            title = {
+                Text(
+                    text = "New Highlight",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = highlightTitleDraft,
+                        onValueChange = { if (it.length <= 40) highlightTitleDraft = it },
+                        label = { Text("Highlight Name") },
+                        placeholder = { Text("e.g. Travel, Memories") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("highlight_title_input")
+                    )
+
+                    Text(
+                        text = if (availableStories.isEmpty()) "No stories available. Create stories first!"
+                        else "Select Stories (${selectedStoryIds.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (availableStories.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(availableStories, key = { it.id }) { storyItem ->
+                                val isSelected = selectedStoryIds.contains(storyItem.id)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            if (isSelected) {
+                                                selectedStoryIds.remove(storyItem.id)
+                                                if (selectedCoverUrl == storyItem.imageUrl) {
+                                                    selectedCoverUrl = selectedStoryIds.firstOrNull()?.let { id ->
+                                                        availableStories.firstOrNull { it.id == id }?.imageUrl
+                                                    }.orEmpty()
+                                                }
+                                            } else {
+                                                selectedStoryIds.add(storyItem.id)
+                                                if (selectedCoverUrl.isBlank()) {
+                                                    selectedCoverUrl = storyItem.imageUrl
+                                                }
+                                            }
+                                        }
+                                        .padding(vertical = 4.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (storyItem.imageUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = storyItem.imageUrl,
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Story",
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = storyItem.caption.ifBlank { "Story" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = SocialFormatters.formatArchiveDate(storyItem.createdAtMillis),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                if (!selectedStoryIds.contains(storyItem.id)) {
+                                                    selectedStoryIds.add(storyItem.id)
+                                                    if (selectedCoverUrl.isBlank()) {
+                                                        selectedCoverUrl = storyItem.imageUrl
+                                                    }
+                                                }
+                                            } else {
+                                                selectedStoryIds.remove(storyItem.id)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("highlight_story_checkbox_${storyItem.id}")
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val effectiveCover = selectedCoverUrl.ifBlank {
+                            selectedStoryIds.firstOrNull()?.let { id ->
+                                availableStories.firstOrNull { it.id == id }?.imageUrl
+                            }.orEmpty()
+                        }
+                        onCreateHighlight(
+                            highlightTitleDraft.ifBlank { "Highlight" },
+                            selectedStoryIds.toList(),
+                            effectiveCover
+                        )
+                        showCreateHighlightDialog = false
+                    },
+                    enabled = highlightTitleDraft.isNotBlank() && selectedStoryIds.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = InstagramBlue),
+                    modifier = Modifier.testTag("save_highlight_button")
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateHighlightDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val currentHighlight = activeHighlightViewer
+    if (currentHighlight != null) {
+        val allStories = (stories + archivedStories).distinctBy { it.id }
+        val highlightStories = allStories.filter { it.id in currentHighlight.storyIds }
+        LaunchedEffect(currentHighlight.id, highlightStories) {
+            if (highlightStories.isEmpty()) {
+                activeHighlightViewer = null
+            }
+        }
+        if (highlightStories.isNotEmpty()) {
+            SocialStoryViewerDialog(
+                stories = highlightStories,
+                currentUid = currentUid,
+                onDeleteStory = { activeHighlightViewer = null },
+                onDismiss = { activeHighlightViewer = null }
+            )
+        }
     }
 }
 

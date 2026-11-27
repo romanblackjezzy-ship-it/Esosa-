@@ -59,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -216,28 +217,28 @@ fun InstagramCreateScreen(
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { saved ->
-        if (saved && cameraTempUri != null) {
-            val capturedUri = cameraTempUri!!
-            val tempFile = cameraTempFile
-            cameraTempUri = null
-            cameraTempFile = null
+        val capturedUri = cameraTempUri
+        val tempFile = cameraTempFile
+        cameraTempUri = null
+        cameraTempFile = null
+        if (saved && capturedUri != null) {
             stageIncomingUri(rawUri = capturedUri, forcedIsVideo = false, sourceTempFile = tempFile)
         } else {
-            cameraTempFile?.delete()
+            tempFile?.delete()
         }
     }
 
     val captureVideoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CaptureVideo()
     ) { saved ->
-        if (saved && cameraTempUri != null) {
-            val capturedUri = cameraTempUri!!
-            val tempFile = cameraTempFile
-            cameraTempUri = null
-            cameraTempFile = null
+        val capturedUri = cameraTempUri
+        val tempFile = cameraTempFile
+        cameraTempUri = null
+        cameraTempFile = null
+        if (saved && capturedUri != null) {
             stageIncomingUri(rawUri = capturedUri, forcedIsVideo = true, sourceTempFile = tempFile)
         } else {
-            cameraTempFile?.delete()
+            tempFile?.delete()
         }
     }
 
@@ -540,6 +541,11 @@ fun InstagramCreateScreen(
 
                 CreateStep.EDIT -> {
                     val uri = selectedUri
+                    LaunchedEffect(uri) {
+                        if (uri == null) {
+                            currentStep = CreateStep.PICKER
+                        }
+                    }
                     if (uri != null) {
                         CreateCropAndFilterStep(
                             mediaUri = uri,
@@ -550,8 +556,6 @@ fun InstagramCreateScreen(
                             onSelectFilter = { selectedFilter = it },
                             onNext = { currentStep = CreateStep.DETAILS }
                         )
-                    } else {
-                        currentStep = CreateStep.PICKER
                     }
                 }
 

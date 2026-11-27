@@ -11,6 +11,7 @@ import com.example.data.model.PostFilter
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryHighlight
 import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 class SocialViewModel(
     private val repository: SocialRepository,
@@ -48,7 +50,7 @@ class SocialViewModel(
     private val _manualStoriesFlow = MutableSharedFlow<List<SocialStory>>(extraBufferCapacity = 1)
     private val _optimisticStoryReactions = MutableStateFlow<Map<String, Map<String, List<String>>>>(emptyMap())
     private val _optimisticArchivedStates = MutableStateFlow<Map<String, Boolean>>(emptyMap())
-    private val autoSyncedArchiveIds = mutableSetOf<String>()
+    private val autoSyncedArchiveIds = ConcurrentHashMap.newKeySet<String>()
     private val _pagedOlderPosts = MutableStateFlow<List<SocialPost>>(emptyList())
     private val _deletedPostIds = MutableStateFlow<Set<String>>(emptySet())
 
@@ -226,6 +228,28 @@ class SocialViewModel(
             started = SharingStarted.WhileSubscribed(5000L),
             initialValue = emptyList()
         )
+
+    private val _manualHighlightsFlow = MutableSharedFlow<List<StoryHighlight>>(extraBufferCapacity = 1)
+    private val _optimisticHighlights = MutableStateFlow<List<StoryHighlight>>(emptyList())
+    private val _deletedHighlightIds = MutableStateFlow<Set<String>>(emptySet())
+
+    val userHighlights: StateFlow<List<StoryHighlight>> =
+        combine(
+            merge(repository.observeUserHighlights(), _manualHighlightsFlow).catch { emit(emptyList()) },
+            _optimisticHighlights,
+            _deletedHighlightIds
+        ) { remoteList, localList, deletedIds ->
+            val map = LinkedHashMap<String, StoryHighlight>(remoteList.size + localList.size)
+            localList.forEach { if (it.id !in deletedIds) map[it.id] = it }
+            remoteList.forEach { if (it.id !in deletedIds && !map.containsKey(it.id)) map[it.id] = it }
+            map.values.sortedByDescending { it.createdAtMillis }
+        }
+            .catch { emit(emptyList()) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = emptyList()
+            )
 
     private val _commentsByPost = MutableStateFlow<Map<String, List<PostComment>>>(emptyMap())
     val commentsByPost: StateFlow<Map<String, List<PostComment>>> = _commentsByPost.asStateFlow()
@@ -595,6 +619,53 @@ class SocialViewModel(
                     _optimisticArchivedStates.value = _optimisticArchivedStates.value - story.id
                     _actionError.value = err.localizedMessage ?: "Failed to restore story."
                 }
+        }
+    }
+
+    fun createHighlight(
+        title: String,
+        storyIds: List<String>,
+        coverUrl: String? = null,
+        onDone: () -> Unit = {}
+    ) {
+        if (storyIds.isEmpty()) return
+        val cleanTitle = title.trim().ifBlank { "Highlight" }
+        val resolvedCover = coverUrl?.trim().orEmpty()
+        viewModelScope.launch {
+            try {
+                val created = repository.createHighlight(
+                    title = cleanTitle,
+                    coverUrl = resolvedCover,
+                    storyIds = storyIds
+                )
+                _optimisticHighlights.value = (listOf(created) + _optimisticHighlights.value).distinctBy { it.id }
+                showStatusBanner("Created highlight '$cleanTitle'")
+                onDone()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val fallbackId = "hl_${System.currentTimeMillis()}"
+                val localHighlight = StoryHighlight(
+                    id = fallbackId,
+                    authorId = currentUserId,
+                    title = cleanTitle,
+                    coverUrl = resolvedCover,
+                    storyIds = storyIds,
+                    createdAtMillis = System.currentTimeMillis()
+                )
+                _optimisticHighlights.value = (listOf(localHighlight) + _optimisticHighlights.value).distinctBy { it.id }
+                showStatusBanner("Created highlight '$cleanTitle'")
+                onDone()
+            }
+        }
+    }
+
+    fun deleteHighlight(highlightId: String) {
+        _deletedHighlightIds.value = _deletedHighlightIds.value + highlightId
+        _optimisticHighlights.value = _optimisticHighlights.value.filterNot { it.id == highlightId }
+        viewModelScope.launch {
+            runCatching { repository.deleteHighlight(highlightId) }
+                .onSuccess { showStatusBanner("Highlight deleted") }
         }
     }
 

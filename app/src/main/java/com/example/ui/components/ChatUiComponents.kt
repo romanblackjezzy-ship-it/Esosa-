@@ -216,7 +216,7 @@ fun TelegramAvatarCircle(
                     .clip(CircleShape)
             )
         } else {
-            val colorPair = TelegramAvatarPairs[abs(seedKey.hashCode()) % TelegramAvatarPairs.size]
+            val colorPair = TelegramAvatarPairs[(seedKey.hashCode() and 0x7fffffff) % TelegramAvatarPairs.size]
             val initials = title
                 .trim()
                 .split(Regex("\\s+"))

@@ -717,25 +717,43 @@ private fun CreateVideoPreviewBox(
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-        AndroidView(
-            factory = { ctx ->
-                VideoView(ctx).apply {
-                    setOnPreparedListener { mp ->
-                        mp.isLooping = true
-                        mp.setVolume(0f, 0f)
-                        start()
+        androidx.compose.runtime.key(videoUri) {
+            var isPrepared by remember { mutableStateOf(false) }
+            var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+
+            androidx.compose.runtime.DisposableEffect(videoUri) {
+                onDispose {
+                    runCatching { videoViewRef?.stopPlayback() }
+                    videoViewRef = null
+                    isPrepared = false
+                }
+            }
+
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        videoViewRef = this
+                        setOnPreparedListener { mp ->
+                            isPrepared = true
+                            mp.isLooping = true
+                            runCatching { mp.setVolume(0f, 0f) }
+                            runCatching { start() }
+                        }
+                        setOnErrorListener { _, _, _ ->
+                            isPrepared = false
+                            true
+                        }
+                        runCatching { setVideoURI(videoUri) }
                     }
-                    setOnErrorListener { _, _, _ -> true }
-                    setVideoURI(videoUri)
-                }
-            },
-            update = { view ->
-                if (!view.isPlaying) {
-                    runCatching { view.start() }
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                },
+                update = { view ->
+                    if (isPrepared && !runCatching { view.isPlaying }.getOrDefault(false)) {
+                        runCatching { view.start() }
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         Surface(
             color = Color.Black.copy(alpha = 0.4f),
             shape = CircleShape,

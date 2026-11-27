@@ -211,6 +211,14 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
+    function isValidStoryHighlight(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 60 &&
+             (!('coverUrl' in data) || (data.coverUrl is string && data.coverUrl.size() <= 2000)) &&
+             data.storyIds is list && data.storyIds.size() >= 1 && data.storyIds.size() <= 100 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     // 1. Private User Profile & Settings
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
@@ -694,6 +702,29 @@ service cloud.firestore {
 
       allow update: if false;
       allow delete: if isSignedIn() && isValidId(followId) && existing().followerId == request.auth.uid;
+    }
+
+    // 8. Story Highlights
+    match /highlights/{highlightId} {
+      allow get: if isSignedIn() && isValidId(highlightId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(highlightId) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().keys().hasAll(['authorId', 'title', 'storyIds', 'createdAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'title', 'coverUrl', 'storyIds', 'createdAt']) &&
+                       isValidStoryHighlight(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(highlightId) &&
+                       existing().authorId == request.auth.uid &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'coverUrl', 'storyIds']) &&
+                       isValidStoryHighlight(incoming());
+
+      allow delete: if isSignedIn() && isValidId(highlightId) && existing().authorId == request.auth.uid;
     }
   }
 }

@@ -225,7 +225,7 @@ fun StoryViewerDialog(
     story: StoryItem,
     onDismiss: () -> Unit
 ) {
-    val pair = TelegramAvatarPairs[abs(story.accentSeed.hashCode()) % TelegramAvatarPairs.size]
+    val pair = TelegramAvatarPairs[(story.accentSeed.hashCode() and 0x7fffffff) % TelegramAvatarPairs.size]
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)

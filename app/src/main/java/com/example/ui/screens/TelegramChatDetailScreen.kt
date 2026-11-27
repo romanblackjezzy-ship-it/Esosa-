@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import java.io.File
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,7 +63,7 @@ fun TelegramChatDetailView(
     onStopTyping: (ChatRoom?) -> Unit = {},
     onSendMessage: (String) -> Unit,
     onScheduleMessage: (String, Long) -> Unit = { _, _ -> },
-    onSendVoiceNote: (Int) -> Unit = {},
+    onSendVoiceNote: (Int, File?) -> Unit = { _, _ -> },
     onSendStickerOrGif: (String, Boolean, String?) -> Unit = { _, _, _ -> },
     onSendDocumentAttachment: (Uri) -> Unit = {},
     onSendCapturedPhoto: (Uri, String, () -> Unit) -> Unit,

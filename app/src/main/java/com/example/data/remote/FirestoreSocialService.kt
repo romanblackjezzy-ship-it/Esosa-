@@ -4,6 +4,7 @@ import com.example.data.model.PostComment
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryHighlight
 import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
@@ -80,6 +81,58 @@ class FirestoreSocialService(
         awaitClose { reg.remove() }
     }
 
+    fun observeUserHighlights(uid: String, limitCount: Long = 100L): Flow<List<StoryHighlight>> = callbackFlow {
+        if (uid.isBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val reg = db.collection(HIGHLIGHTS_COLLECTION)
+            .whereEqualTo("authorId", uid)
+            .limit(limitCount)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    FirestoreErrorHandler.handleFirestoreError(err, OperationType.LIST, HIGHLIGHTS_COLLECTION, auth)
+                    close(err)
+                    return@addSnapshotListener
+                }
+                val list = snap?.documents.orEmpty()
+                    .mapNotNull(::parseHighlight)
+                    .sortedByDescending { it.createdAtMillis }
+                trySend(list)
+            }
+        awaitClose { reg.remove() }
+    }
+
+    suspend fun createHighlight(highlight: StoryHighlight) {
+        val payload = hashMapOf<String, Any>(
+            "authorId" to highlight.authorId,
+            "title" to highlight.title.take(60).ifBlank { "Highlight" },
+            "storyIds" to highlight.storyIds.take(100),
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        if (highlight.coverUrl.isNotBlank()) {
+            payload["coverUrl"] = highlight.coverUrl.take(2000)
+        }
+        val path = "$HIGHLIGHTS_COLLECTION/${highlight.id}"
+        try {
+            db.collection(HIGHLIGHTS_COLLECTION).document(highlight.id).set(payload).await()
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.CREATE, path, auth)
+            throw e
+        }
+    }
+
+    suspend fun deleteHighlight(highlightId: String) {
+        val path = "$HIGHLIGHTS_COLLECTION/$highlightId"
+        try {
+            db.collection(HIGHLIGHTS_COLLECTION).document(highlightId).delete().await()
+        } catch (e: Exception) {
+            FirestoreErrorHandler.handleFirestoreError(e, OperationType.DELETE, path, auth)
+            throw e
+        }
+    }
+
     suspend fun fetchLatestPosts(limitCount: Long = DEFAULT_POSTS_PAGE_SIZE): List<SocialPost> {
         return try {
             val snap = db.collection(POSTS_COLLECTION)
@@ -150,6 +203,11 @@ class FirestoreSocialService(
     }
 
     fun observeSavedPostIds(uid: String): Flow<Set<String>> = callbackFlow {
+        if (uid.isBlank()) {
+            trySend(emptySet())
+            close()
+            return@callbackFlow
+        }
         val path = "$USERS_COLLECTION/$uid/$SAVED_POSTS_SUBCOLLECTION"
         val reg = db.collection(USERS_COLLECTION)
             .document(uid)
@@ -651,6 +709,22 @@ class FirestoreSocialService(
         return result
     }
 
+    private fun parseHighlight(doc: DocumentSnapshot): StoryHighlight? {
+        if (!doc.exists()) return null
+        val authorId = doc.getString("authorId") ?: return null
+        val title = doc.getString("title").orEmpty().ifBlank { "Highlight" }
+        val coverUrl = doc.getString("coverUrl").orEmpty()
+        val storyIds = parseStringList(doc.get("storyIds"))
+        return StoryHighlight(
+            id = doc.id,
+            authorId = authorId,
+            title = title,
+            coverUrl = coverUrl,
+            storyIds = storyIds,
+            createdAtMillis = FirestoreSnapshotMappers.timestampToMillis(doc.getTimestamp("createdAt", estimate))
+        )
+    }
+
     companion object {
         const val DEFAULT_POSTS_PAGE_SIZE = 15L
         private const val POSTS_COLLECTION = "posts"
@@ -660,5 +734,6 @@ class FirestoreSocialService(
         private const val USERS_COLLECTION = "users"
         private const val SAVED_POSTS_SUBCOLLECTION = "saved_posts"
         private const val FOLLOWS_COLLECTION = "follows"
+        private const val HIGHLIGHTS_COLLECTION = "highlights"
     }
 }

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import java.io.File
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -164,7 +165,7 @@ fun MessagesScreen(
     onStopTyping: (ChatRoom?) -> Unit = {},
     onSendMessage: (ChatRoom, String) -> Unit,
     onScheduleMessage: (ChatRoom, String, Long) -> Unit = { _, _, _ -> },
-    onSendVoiceNote: (ChatRoom, Int) -> Unit = { _, _ -> },
+    onSendVoiceNote: (ChatRoom, Int, File?) -> Unit = { _, _, _ -> },
     onSendStickerOrGif: (ChatRoom, String, Boolean, String?) -> Unit = { _, _, _, _ -> },
     onSendDocumentAttachment: (ChatRoom, Uri) -> Unit = { _, _ -> },
     onSendCapturedPhoto: (ChatRoom, Uri, String, () -> Unit) -> Unit = { _, _, _, cleanup -> cleanup() },
@@ -252,7 +253,7 @@ fun MessagesScreen(
                         onStopTyping = onStopTyping,
                         onSendMessage = { text -> onSendMessage(activeRoom, text) },
                         onScheduleMessage = { text, millis -> onScheduleMessage(activeRoom, text, millis) },
-                        onSendVoiceNote = { sec -> onSendVoiceNote(activeRoom, sec) },
+                        onSendVoiceNote = { sec, file -> onSendVoiceNote(activeRoom, sec, file) },
                         onSendStickerOrGif = { text, isGif, lbl -> onSendStickerOrGif(activeRoom, text, isGif, lbl) },
                         onSendDocumentAttachment = { uri -> onSendDocumentAttachment(activeRoom, uri) },
                         onSendCapturedPhoto = { uri, caption, cleanup ->
@@ -359,7 +360,7 @@ fun MessagesScreen(
                     onScheduleMessage = { text, millis ->
                         activeRoom?.let { onScheduleMessage(it, text, millis) }
                     },
-                    onSendVoiceNote = { sec -> activeRoom?.let { onSendVoiceNote(it, sec) } },
+                    onSendVoiceNote = { sec, file -> activeRoom?.let { onSendVoiceNote(it, sec, file) } },
                     onSendStickerOrGif = { text, isGif, lbl ->
                         activeRoom?.let { onSendStickerOrGif(it, text, isGif, lbl) }
                     },

@@ -730,10 +730,10 @@ class RoomsViewModel(
         }
     }
 
-    fun sendVoiceNote(room: ChatRoom, durationSec: Int) {
+    fun sendVoiceNote(room: ChatRoom, durationSec: Int, audioFile: java.io.File? = null) {
         stopTyping(room)
         viewModelScope.launch {
-            repository.sendVoiceNote(room, durationSec).onFailure {
+            repository.sendVoiceNote(room, durationSec, audioFile).onFailure {
                 _actionError.value = it.localizedMessage ?: "Could not save voice note."
             }
         }

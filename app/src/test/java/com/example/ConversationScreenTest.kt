@@ -1,5 +1,8 @@
 package com.example
 
+import android.Manifest
+import android.app.Application
+import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -22,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -116,6 +120,9 @@ class ConversationScreenTest {
 
     @Test
     fun `media attachment section expands with all attachment options and interactive actions`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        Shadows.shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+
         val room = ChatRoom(
             id = "room_conv_media",
             title = "Maya Lin",
@@ -359,5 +366,52 @@ class ConversationScreenTest {
 
         assertEquals(listOf("m_long_1" to "🎉"), reactionsRecorded)
         composeTestRule.onNodeWithTag("reaction_picker_m_long_1").assertDoesNotExist()
+    }
+
+    @Test
+    fun `tapping voice note without microphone permission does not enter voice recording UI`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        Shadows.shadowOf(app).denyPermissions(Manifest.permission.RECORD_AUDIO)
+
+        val room = ChatRoom(
+            id = "room_no_mic",
+            title = "Maya Lin",
+            chatKind = ChatKind.DIRECT,
+            roomCode = "MIC0"
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                ConversationScreen(
+                    currentUserId = "local_me",
+                    room = room,
+                    messagesState = UiState.Success(emptyList()),
+                    typingUsers = emptyList(),
+                    highlightedMessageId = null,
+                    actionError = null,
+                    isSendingMessage = false,
+                    photoUploadProgress = null,
+                    photoUploadPreviewUri = null,
+                    onBack = {},
+                    onClearHighlight = {},
+                    onDraftChanged = { _, _ -> },
+                    onSendMessage = {},
+                    onSendCapturedPhoto = { _, _, cleanup -> cleanup() },
+                    onReportError = {},
+                    onToggleReaction = { _, _ -> },
+                    onDeleteMessage = {},
+                    onTogglePin = {},
+                    onDeleteRoom = {},
+                    onClearError = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("room_attach_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("media_attach_voice").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("voice_recording_timer").assertDoesNotExist()
     }
 }

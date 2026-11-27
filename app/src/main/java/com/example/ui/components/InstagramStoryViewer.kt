@@ -133,7 +133,7 @@ fun SocialStoryViewerDialog(
         mutableIntStateOf(initialStoryIndex.coerceIn(0, stories.lastIndex))
     }
     val story = stories.getOrElse(currentIndex) { stories.first() }
-    val pair = TelegramAvatarPairs[abs(story.authorId.hashCode()) % TelegramAvatarPairs.size]
+    val pair = TelegramAvatarPairs[(story.authorId.hashCode() and 0x7fffffff) % TelegramAvatarPairs.size]
 
     var segmentProgress by remember(story.id) { mutableFloatStateOf(0f) }
     var isHoldingPause by remember { mutableStateOf(false) }
@@ -1074,43 +1074,61 @@ private fun StoryVideoPlayerLayer(
     isPaused: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    androidx.compose.runtime.key(videoUrl) {
+        val currentIsMuted by androidx.compose.runtime.rememberUpdatedState(isMuted)
+        val currentIsPaused by androidx.compose.runtime.rememberUpdatedState(isPaused)
+        var isPrepared by remember { mutableStateOf(false) }
+        var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+        var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
 
-    DisposableEffect(videoUrl) {
-        onDispose {
-            mediaPlayerRef = null
+        DisposableEffect(videoUrl) {
+            onDispose {
+                runCatching { videoViewRef?.stopPlayback() }
+                videoViewRef = null
+                mediaPlayerRef = null
+                isPrepared = false
+            }
+        }
+
+        if (videoUrl.isNotBlank()) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        videoViewRef = this
+                        setOnPreparedListener { mp ->
+                            mediaPlayerRef = mp
+                            isPrepared = true
+                            mp.isLooping = true
+                            val vol = if (currentIsMuted) 0f else 1f
+                            runCatching { mp.setVolume(vol, vol) }
+                            if (!currentIsPaused) {
+                                runCatching { start() }
+                            }
+                        }
+                        setOnErrorListener { _, _, _ ->
+                            isPrepared = false
+                            true
+                        }
+                        runCatching { setVideoURI(Uri.parse(videoUrl)) }
+                    }
+                },
+                update = { videoView ->
+                    if (!isPrepared) return@AndroidView
+                    mediaPlayerRef?.let { mp ->
+                        runCatching {
+                            val vol = if (currentIsMuted) 0f else 1f
+                            mp.setVolume(vol, vol)
+                        }
+                    }
+                    val playing = runCatching { videoView.isPlaying }.getOrDefault(false)
+                    if (currentIsPaused && playing) {
+                        runCatching { videoView.pause() }
+                    } else if (!currentIsPaused && !playing) {
+                        runCatching { videoView.start() }
+                    }
+                },
+                modifier = modifier
+            )
         }
     }
-
-    AndroidView(
-        factory = { ctx ->
-            VideoView(ctx).apply {
-                setOnPreparedListener { mp ->
-                    mediaPlayerRef = mp
-                    mp.isLooping = true
-                    val vol = if (isMuted) 0f else 1f
-                    mp.setVolume(vol, vol)
-                    if (!isPaused) {
-                        start()
-                    }
-                }
-                setOnErrorListener { _, _, _ -> true }
-                setVideoURI(Uri.parse(videoUrl))
-            }
-        },
-        update = { videoView ->
-            mediaPlayerRef?.let { mp ->
-                runCatching {
-                    val vol = if (isMuted) 0f else 1f
-                    mp.setVolume(vol, vol)
-                }
-            }
-            if (isPaused && videoView.isPlaying) {
-                videoView.pause()
-            } else if (!isPaused && !videoView.isPlaying) {
-                videoView.start()
-            }
-        },
-        modifier = modifier
-    )
 }

@@ -776,18 +776,18 @@ class ChatRepository(
                 updatedAt = now
             )
 
-            if (shouldCloudSync) {
-                runCatching {
-                    runFirestoreWrite {
-                        syncService!!.sendMessage(
-                            uid = uid,
-                            room = room,
-                            message = entity.toDomain(),
-                            senderPhotoUrl = profile.photoUrl,
-                            lastMessagePreview = preview
-                        )
-                    }
-                }.onSuccess {
+            val remoteSync = syncService
+            if (shouldCloudSync && remoteSync != null) {
+                val syncResult = runFirestoreWrite {
+                    remoteSync.sendMessage(
+                        uid = uid,
+                        room = room,
+                        message = entity.toDomain(),
+                        senderPhotoUrl = profile.photoUrl,
+                        lastMessagePreview = preview
+                    )
+                }
+                if (syncResult.isSuccess) {
                     dao.markMessageSynced(entity.id)
                 }
             }
@@ -799,7 +799,11 @@ class ChatRepository(
         }
     }
 
-    suspend fun sendVoiceNote(room: ChatRoom, durationSec: Int): Result<Unit> {
+    suspend fun sendVoiceNote(
+        room: ChatRoom,
+        durationSec: Int,
+        audioFile: java.io.File? = null
+    ): Result<Unit> {
         return try {
             val profile = profilePreferences.getProfile()
             val uid = currentUserId()
@@ -807,19 +811,44 @@ class ChatRepository(
             val senderDisplayName = profile.displayName.ifBlank { "You" }
             val cleanDuration = durationSec.coerceIn(1, 600)
             val messageId = "voice_${now}_${UUID.randomUUID().toString().take(8)}"
+
+            var audioDownloadUrl: String? = null
+            var audioStoragePath: String? = null
+
+            val storage = photoStorageService
+            if (audioFile != null && audioFile.exists() && audioFile.length() > 0) {
+                if (uid != LocalProfilePreferences.LOCAL_USER_ID && storage != null) {
+                    runCatching {
+                        val uploaded = storage.uploadVoiceNoteFile(
+                            roomId = room.id,
+                            messageId = messageId,
+                            senderUid = uid,
+                            audioFile = audioFile
+                        )
+                        audioDownloadUrl = uploaded.downloadUrl
+                        audioStoragePath = uploaded.storagePath
+                    }.onFailure {
+                        audioDownloadUrl = Uri.fromFile(audioFile).toString()
+                    }
+                } else {
+                    audioDownloadUrl = Uri.fromFile(audioFile).toString()
+                }
+            }
+
             val entity = RoomMessageEntity(
                 id = messageId,
                 roomId = room.id,
                 senderId = uid,
                 senderName = senderDisplayName,
                 text = "Voice note",
-                imageUrl = null,
-                storagePath = null,
+                imageUrl = audioDownloadUrl,
+                storagePath = audioStoragePath,
                 messageType = "voice",
                 reactionsJson = "{}",
                 isRead = true,
                 createdAtMillis = now,
-                voiceDurationSec = cleanDuration
+                voiceDurationSec = cleanDuration,
+                isSynced = audioStoragePath != null || uid == LocalProfilePreferences.LOCAL_USER_ID
             )
             dao.upsertRoomMessage(entity)
             val mins = cleanDuration / 60
@@ -834,15 +863,19 @@ class ChatRepository(
                 lastAt = now,
                 updatedAt = now
             )
-            if (uid != LocalProfilePreferences.LOCAL_USER_ID && syncService != null && room.ownerId.isNotBlank()) {
-                return runFirestoreWrite {
-                    syncService.sendMessage(
+            val remoteSync = syncService
+            if (uid != LocalProfilePreferences.LOCAL_USER_ID && remoteSync != null && room.ownerId.isNotBlank()) {
+                val syncResult = runCatching {
+                    remoteSync.sendMessage(
                         uid = uid,
                         room = room,
                         message = entity.toDomain(),
                         senderPhotoUrl = profile.photoUrl,
                         lastMessagePreview = preview
                     )
+                }
+                if (syncResult.isSuccess) {
+                    dao.markMessageSynced(entity.id)
                 }
             }
             Result.success(Unit)
@@ -1397,21 +1430,22 @@ class ChatRepository(
                     entity.messageType == "voice" -> "🎤 Voice message"
                     else -> entity.text
                 }
-                runCatching {
-                    runFirestoreWrite {
-                        remoteSync.sendMessage(
-                            uid = uid,
-                            room = chatRoom,
-                            message = entity.toDomain(),
-                            senderPhotoUrl = profile.photoUrl,
-                            lastMessagePreview = preview
-                        )
-                    }
-                }.onSuccess {
+                val syncResult = runFirestoreWrite {
+                    remoteSync.sendMessage(
+                        uid = uid,
+                        room = chatRoom,
+                        message = entity.toDomain(),
+                        senderPhotoUrl = profile.photoUrl,
+                        lastMessagePreview = preview
+                    )
+                }
+                if (syncResult.isSuccess) {
                     dao.markMessageSynced(entity.id)
                 }
             }
             Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -398,8 +398,8 @@ fun AuthOnboardingScreen(
     var statusBanner by remember { mutableStateOf<AuthStatusBanner?>(null) }
 
     LaunchedEffect(signInError) {
-        if (signInError != null) {
-            statusBanner = AuthStatusBanner(signInError!!, AuthBannerTone.ERROR)
+        signInError?.let { error ->
+            statusBanner = AuthStatusBanner(error, AuthBannerTone.ERROR)
             signInViewModel.clearError()
         }
     }

@@ -13,6 +13,7 @@ import com.example.core.UiState
 import com.example.data.model.SocialMediaType
 import com.example.data.model.SocialPost
 import com.example.data.model.SocialStory
+import com.example.data.model.StoryHighlight
 import com.example.data.model.StoryReactions
 import com.example.data.model.StoryReply
 import com.example.data.model.UserFollowEdge
@@ -20,6 +21,7 @@ import com.example.data.model.UserProfile
 import com.example.notifications.FcmPushParser
 import com.example.ui.components.SocialStoryViewerDialog
 import com.example.ui.screens.InstagramProfileScreen
+import com.example.ui.screens.InstagramReelsScreen
 import com.example.ui.theme.EsosaTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -540,5 +542,102 @@ class StoriesAndProfileAndFcmTest {
         composeTestRule.onNodeWithTag("unarchive_social_story_button").performClick()
         composeTestRule.waitForIdle()
         assertEquals(listOf("s_active_mine"), unarchivedCalls)
+    }
+
+    @Test
+    fun `profile handles Int_MIN_VALUE author hashCode and orphan highlights safely without crashing`() {
+        val minHashSeed = "polygenelubricants"
+        assertEquals(Int.MIN_VALUE, minHashSeed.hashCode())
+        val profile = UserProfile(
+            id = minHashSeed,
+            displayName = "Alex Mercer",
+            username = "alex_mercer"
+        )
+        val orphanHighlight = StoryHighlight(
+            id = "hl_orphan",
+            authorId = minHashSeed,
+            title = "Empty Trip",
+            storyIds = listOf("missing_story_1"),
+            createdAtMillis = System.currentTimeMillis()
+        )
+        val archivedMinHashStory = SocialStory(
+            id = "s_min_hash",
+            authorId = minHashSeed,
+            authorUsername = "alex_mercer",
+            imageUrl = "",
+            caption = "Min hash story",
+            archived = true,
+            createdAtMillis = System.currentTimeMillis() - 10_000L
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                InstagramProfileScreen(
+                    currentUid = minHashSeed,
+                    userProfile = profile,
+                    postsState = UiState.Success(emptyList()),
+                    savedPostIds = emptySet(),
+                    followEdges = emptyList(),
+                    stories = emptyList(),
+                    archivedStories = listOf(archivedMinHashStory),
+                    highlights = listOf(orphanHighlight),
+                    onOpenCreate = {},
+                    onSelectPost = {},
+                    onOpenMessages = {},
+                    onOpenCalls = {},
+                    onOpenSettings = {},
+                    onUpdateLocalProfile = { _, _, _ -> },
+                    onUpdateProfilePhoto = { _, _ -> },
+                    onSignOut = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("highlight_item_hl_orphan").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("story_viewer_dialog").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("profile_tab_archive").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("profile_archive_tile_s_min_hash").assertIsDisplayed()
+    }
+
+    @Test
+    fun `reels screen renders video reel and handles pause toggle without unprepared VideoView crash`() {
+        val reel = SocialPost(
+            id = "reel_video_1",
+            authorId = "u_creator",
+            authorUsername = "creator_one",
+            imageUrl = "https://example.com/poster.jpg",
+            videoUrl = "https://example.com/reel.mp4",
+            mediaType = SocialMediaType.REEL,
+            caption = "Sunset drone glide",
+            createdAtMillis = System.currentTimeMillis()
+        )
+
+        composeTestRule.setContent {
+            EsosaTheme {
+                InstagramReelsScreen(
+                    currentUid = "u_viewer",
+                    postsState = UiState.Success(listOf(reel)),
+                    savedPostIds = emptySet(),
+                    followEdges = emptyList(),
+                    onCreateReel = {},
+                    onToggleLike = {},
+                    onDoubleTapLike = {},
+                    onOpenComments = {},
+                    onToggleSave = {},
+                    onToggleFollow = { _, _ -> },
+                    onShareToDm = {},
+                    onDeleteReel = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("instagram_reels_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("reel_video_player_reel_video_1").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
     }
 }
