@@ -425,11 +425,19 @@ fun InstagramPostCard(
                 .crossfade(true)
                 .build()
         }
+        val feedAspectRatio = if (post.hasVideo) {
+            if (post.aspectRatio > 0f && post.aspectRatio != 1f) post.aspectRatio.coerceIn(0.75f, 1.25f)
+            else 0.8f
+        } else {
+            post.aspectRatio.coerceIn(0.75f, 1.35f)
+        }
+        val containerBg = if (post.hasVideo) Color.Black else MaterialTheme.colorScheme.surfaceVariant
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(post.aspectRatio.coerceIn(0.75f, 1.35f))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .aspectRatio(feedAspectRatio)
+                .background(containerBg)
                 .pointerInput(post.id, post.hasVideo) {
                     detectTapGestures(
                         onTap = {
