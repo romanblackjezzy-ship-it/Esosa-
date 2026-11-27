@@ -932,20 +932,45 @@ class ChatRepository(
                 remoteSync != null &&
                 room.ownerId.isNotBlank()
 
-            val imageUrl: String
-            val storagePath: String
+            var imageUrl: String
+            var storagePath: String
+            var uploadedRemotely = false
             try {
                 if (isCloudSyncedRoom && storageService != null) {
-                    val uploaded = storageService.uploadRoomPhotoFile(
-                        roomId = room.id,
-                        messageId = messageId,
-                        senderUid = uid,
-                        preparedFile = preparedFile,
-                        onProgress = onProgress
-                    )
-                    imageUrl = uploaded.downloadUrl
-                    storagePath = uploaded.storagePath
-                    EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
+                    val cloudUpload = try {
+                        storageService.uploadRoomPhotoFile(
+                            roomId = room.id,
+                            messageId = messageId,
+                            senderUid = uid,
+                            preparedFile = preparedFile,
+                            onProgress = onProgress
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (cloudUpload != null) {
+                        imageUrl = cloudUpload.downloadUrl
+                        storagePath = cloudUpload.storagePath
+                        uploadedRemotely = true
+                        EsosaImageCache.prefetchChatImages(appContext, listOf(imageUrl to storagePath))
+                    } else {
+                        val savedFile = withContext(Dispatchers.IO) {
+                            val dir = java.io.File(appContext.filesDir, "chat_photos").apply {
+                                if (!exists()) mkdirs()
+                            }
+                            val dest = java.io.File(
+                                dir,
+                                "photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.${preparedFile.fileExtension}"
+                            )
+                            preparedFile.file.copyTo(dest, overwrite = true)
+                            dest
+                        }
+                        imageUrl = Uri.fromFile(savedFile).toString()
+                        storagePath = savedFile.absolutePath
+                        onProgress(0.85f)
+                    }
                 } else {
                     val savedFile = withContext(Dispatchers.IO) {
                         val dir = java.io.File(appContext.filesDir, "chat_photos").apply {
@@ -977,7 +1002,8 @@ class ChatRepository(
                 messageType = "image",
                 reactionsJson = "{}",
                 isRead = true,
-                createdAtMillis = now
+                createdAtMillis = now,
+                isSynced = !isCloudSyncedRoom || uploadedRemotely
             )
             dao.upsertRoomMessage(entity)
             val previewText = if (caption.isNotBlank()) "📷 $caption" else "📷 Photo"
@@ -989,7 +1015,7 @@ class ChatRepository(
                 lastAt = now,
                 updatedAt = now
             )
-            val syncResult = if (isCloudSyncedRoom && remoteSync != null) {
+            val syncResult = if (isCloudSyncedRoom && remoteSync != null && uploadedRemotely) {
                 runFirestoreWrite {
                     remoteSync.sendMessage(
                         uid = uid,
@@ -1417,30 +1443,76 @@ class ChatRepository(
         if (uid == LocalProfilePreferences.LOCAL_USER_ID) return Result.success(Unit)
         return try {
             val unsynced = dao.getUnsyncedMessages()
+            val storage = photoStorageService
             for (entity in unsynced) {
                 val room = dao.getRoomById(entity.roomId) ?: continue
                 if (room.ownerId.isBlank()) continue
+                var readyEntity = entity
+                val localUrl = readyEntity.imageUrl
+                if (!localUrl.isNullOrBlank() && localUrl.startsWith("file://")) {
+                    if (storage == null) continue
+                    val localPath = Uri.parse(localUrl).path
+                    val localFile = if (!localPath.isNullOrBlank()) java.io.File(localPath) else null
+                    if (localFile == null || !localFile.exists() || localFile.length() <= 0L) {
+                        continue
+                    }
+                    val uploaded = runCatching {
+                        if (readyEntity.messageType == "voice") {
+                            storage.uploadVoiceNoteFile(
+                                roomId = readyEntity.roomId,
+                                messageId = readyEntity.id,
+                                senderUid = uid,
+                                audioFile = localFile
+                            )
+                        } else {
+                            val prepared = withContext(Dispatchers.IO) {
+                                CameraPhotoHelper.prepareUploadImageFile(
+                                    context = appContext,
+                                    uri = Uri.fromFile(localFile),
+                                    preset = ImageCompressionPreset.CHAT_PHOTO
+                                )
+                            }
+                            try {
+                                storage.uploadRoomPhotoFile(
+                                    roomId = readyEntity.roomId,
+                                    messageId = readyEntity.id,
+                                    senderUid = uid,
+                                    preparedFile = prepared
+                                )
+                            } finally {
+                                prepared.file.delete()
+                            }
+                        }
+                    }.getOrNull() ?: continue
+
+                    readyEntity = readyEntity.copy(
+                        imageUrl = uploaded.downloadUrl,
+                        storagePath = uploaded.storagePath
+                    )
+                    dao.upsertRoomMessage(readyEntity)
+                }
+
                 val chatRoom = room.toDomain()
                 val profile = profilePreferences.getProfile()
                 val preview = when {
-                    entity.messageType == "sticker" -> entity.text
-                    entity.messageType == "gif" -> "GIF • ${entity.attachmentName ?: entity.text}"
-                    !entity.attachmentName.isNullOrBlank() -> "📎 ${entity.attachmentName}"
-                    !entity.imageUrl.isNullOrBlank() -> "📷 Photo"
-                    entity.messageType == "voice" -> "🎤 Voice message"
-                    else -> entity.text
+                    readyEntity.messageType == "sticker" -> readyEntity.text
+                    readyEntity.messageType == "gif" -> "GIF • ${readyEntity.attachmentName ?: readyEntity.text}"
+                    !readyEntity.attachmentName.isNullOrBlank() -> "📎 ${readyEntity.attachmentName}"
+                    readyEntity.messageType == "voice" -> "🎤 Voice message"
+                    !readyEntity.imageUrl.isNullOrBlank() -> "📷 Photo"
+                    else -> readyEntity.text
                 }
                 val syncResult = runFirestoreWrite {
                     remoteSync.sendMessage(
                         uid = uid,
                         room = chatRoom,
-                        message = entity.toDomain(),
+                        message = readyEntity.toDomain(),
                         senderPhotoUrl = profile.photoUrl,
                         lastMessagePreview = preview
                     )
                 }
                 if (syncResult.isSuccess) {
-                    dao.markMessageSynced(entity.id)
+                    dao.markMessageSynced(readyEntity.id)
                 }
             }
             Result.success(Unit)

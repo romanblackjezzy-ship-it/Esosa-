@@ -337,6 +337,9 @@ class FirebasePhotoStorageService(
         }
 
         val storagesToTry = candidateStorages.ifEmpty { listOf(storage) }
+        var firstStorageError: StorageException? = null
+        var firstBucket = ""
+        var firstTaskStatus = ""
         var lastStorageError: StorageException? = null
         var lastBucket = ""
         var lastTaskStatus = "NOT_STARTED"
@@ -344,6 +347,9 @@ class FirebasePhotoStorageService(
         for ((index, targetStorage) in storagesToTry.withIndex()) {
             val mediaRef = targetStorage.reference.child(storagePath)
             lastBucket = mediaRef.bucket
+            if (firstBucket.isBlank()) {
+                firstBucket = mediaRef.bucket
+            }
             var taskStatus = "STARTING_PUT_FILE"
             try {
                 Log.d(
@@ -396,6 +402,11 @@ class FirebasePhotoStorageService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: StorageException) {
+                if (firstStorageError == null) {
+                    firstStorageError = e
+                    firstBucket = mediaRef.bucket
+                    firstTaskStatus = taskStatus
+                }
                 lastStorageError = e
                 lastTaskStatus = taskStatus
                 logStorageException(
@@ -409,14 +420,17 @@ class FirebasePhotoStorageService(
                     kind == StorageErrorKind.OBJECT_NOT_FOUND) &&
                     index < storagesToTry.lastIndex
                 if (!shouldTryAlternateBucket) {
+                    val primaryFailure = (kind == StorageErrorKind.BUCKET_NOT_FOUND ||
+                        kind == StorageErrorKind.OBJECT_NOT_FOUND) &&
+                        firstStorageError != null
                     throw IOException(
                         mapStorageErrorMessage(
-                            error = e,
-                            bucket = mediaRef.bucket,
+                            error = if (primaryFailure) firstStorageError else e,
+                            bucket = if (primaryFailure) firstBucket else mediaRef.bucket,
                             path = mediaRef.path,
-                            taskStatus = taskStatus
+                            taskStatus = if (primaryFailure) firstTaskStatus else taskStatus
                         ),
-                        e
+                        if (primaryFailure) firstStorageError else e
                     )
                 }
                 Log.w(
@@ -426,14 +440,16 @@ class FirebasePhotoStorageService(
             }
         }
 
-        val finalErr = lastStorageError
+        val finalErr = firstStorageError ?: lastStorageError
+        val reportedBucket = firstBucket.ifBlank { lastBucket }
+        val reportedStatus = firstTaskStatus.ifBlank { lastTaskStatus }
         if (finalErr != null) {
             throw IOException(
                 mapStorageErrorMessage(
                     error = finalErr,
-                    bucket = lastBucket,
+                    bucket = reportedBucket,
                     path = storagePath,
-                    taskStatus = lastTaskStatus
+                    taskStatus = reportedStatus
                 ),
                 finalErr
             )
@@ -446,7 +462,7 @@ class FirebasePhotoStorageService(
         selectedUri: Uri,
         snapshot: UploadTask.TaskSnapshot
     ): String {
-        val retryDelaysMs = listOf(300L, 700L)
+        val retryDelaysMs = listOf(350L, 800L, 1500L)
         var lastError: StorageException? = null
         for (attempt in 0..retryDelaysMs.size) {
             try {
@@ -649,11 +665,16 @@ class FirebasePhotoStorageService(
             }
             return when (classifyStorageError(error.errorCode)) {
                 StorageErrorKind.OBJECT_NOT_FOUND ->
-                    "Storage object not found (OBJECT_NOT_FOUND, code=${error.errorCode}, http=${error.httpResultCode})$locationSuffix. " +
-                        "Verify the Firebase Storage bucket is active and try uploading again."
+                    if (taskStatus.startsWith("STARTING_PUT_FILE") || taskStatus.startsWith("IN_PROGRESS")) {
+                        "Firebase Storage bucket is not active yet (OBJECT_NOT_FOUND, code=${error.errorCode}, http=${error.httpResultCode})$locationSuffix. " +
+                            "Open Firebase Console -> Build -> Storage -> Get started for project $DEFAULT_PROJECT_ID and publish storage.rules, then try uploading again."
+                    } else {
+                        "Storage object not found (OBJECT_NOT_FOUND, code=${error.errorCode}, http=${error.httpResultCode})$locationSuffix. " +
+                            "Verify the Firebase Storage bucket is active and try uploading again."
+                    }
                 StorageErrorKind.BUCKET_NOT_FOUND ->
                     "Firebase Storage bucket not found (BUCKET_NOT_FOUND, code=${error.errorCode}, http=${error.httpResultCode})$locationSuffix. " +
-                        "Enable Storage in the Firebase Console."
+                        "Open Firebase Console -> Build -> Storage -> Get started for project $DEFAULT_PROJECT_ID."
                 StorageErrorKind.PROJECT_NOT_FOUND ->
                     "Firebase Storage project not found (PROJECT_NOT_FOUND, code=${error.errorCode}). Check google-services.json."
                 StorageErrorKind.NOT_AUTHENTICATED ->

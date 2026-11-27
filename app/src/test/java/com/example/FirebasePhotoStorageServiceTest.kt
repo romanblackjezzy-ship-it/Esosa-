@@ -118,6 +118,15 @@ class FirebasePhotoStorageServiceTest {
         assertTrue(objMessage.contains("OBJECT_NOT_FOUND"))
         assertTrue(objMessage.contains("users/u1/post_1.jpg"))
 
+        val putFile404Message = FirebasePhotoStorageService.mapStorageErrorMessage(
+            error = objNotFoundEx,
+            bucket = "gen-lang-client-0323222168.firebasestorage.app",
+            path = "users/u1/post_1.jpg",
+            taskStatus = "STARTING_PUT_FILE"
+        )
+        assertTrue(putFile404Message.contains("Firebase Storage bucket is not active yet"))
+        assertTrue(putFile404Message.contains("gen-lang-client-0323222168.firebasestorage.app"))
+
         val notAuthorizedEx = StorageException.fromExceptionAndHttpCode(Exception("Forbidden"), 403)!!
         val authzMessage = FirebasePhotoStorageService.mapStorageErrorMessage(
             error = notAuthorizedEx,
