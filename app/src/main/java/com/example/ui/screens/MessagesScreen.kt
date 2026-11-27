@@ -656,6 +656,40 @@ private fun TelegramChatsListView(
                         )
                     }
 
+                    if (trimmedQuery.isEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Messages",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Icon(
+                                    imageVector = Icons.Filled.NotificationsOff,
+                                    contentDescription = "Muted",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = "Requests",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = Color(0xFF0095F6),
+                                modifier = Modifier
+                                    .clickable { /* Handle requests */ }
+                                    .testTag("requests_link")
+                            )
+                        }
+                    }
+
                     if (trimmedQuery.isEmpty() && rooms.isNotEmpty()) {
                         val visibleFolders = remember(archivedCount) {
                             if (archivedCount > 0) ChatFolderFilter.entries
@@ -932,16 +966,35 @@ private fun TelegramChatRow(
                     Spacer(Modifier.width(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = formatRelativeThreadTime(
-                                if (room.lastMessageAtMillis > 0L) room.lastMessageAtMillis else room.createdAtMillis
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (room.unreadCount > 0) Color(0xFF0095F6)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (room.unreadCount > 0) {
+                            Surface(
+                                color = Color(0xFF0095F6),
+                                shape = CircleShape,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = room.unreadCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        } else {
+                            IconButton(
+                                onClick = onClick,
+                                modifier = Modifier.size(36.dp).testTag("chat_camera_shortcut_${room.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CameraAlt,
+                                    contentDescription = "Quick camera",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
